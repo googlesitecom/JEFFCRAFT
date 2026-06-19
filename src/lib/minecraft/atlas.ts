@@ -25,6 +25,36 @@ export const TEXTURE_NAMES = [
   "pumpkin_top",
   "pumpkin_side",
   "gravel",
+  "crafting_table_top",
+  "crafting_table_side",
+  "bookshelf",
+  "apple",
+  "raw_porkchop",
+  "cooked_porkchop",
+  "raw_beef",
+  "cooked_beef",
+  "raw_chicken",
+  "cooked_chicken",
+  "stick",
+  "coal",
+  "iron_ingot",
+  "gold_ingot",
+  "diamond",
+  "wood_pickaxe",
+  "wood_axe",
+  "wood_sword",
+  "stone_pickaxe",
+  "stone_axe",
+  "stone_sword",
+  "iron_pickaxe",
+  "iron_axe",
+  "iron_sword",
+  "diamond_pickaxe",
+  "diamond_axe",
+  "diamond_sword",
+  "pig",
+  "cow",
+  "chicken",
 ] as const;
 
 export type TextureName = (typeof TEXTURE_NAMES)[number];
@@ -33,9 +63,9 @@ const ATLAS_TILE = 16; // source tile size
 const ATLAS_PADDING = 4; // padding pixels around each tile to prevent bleeding
 const TILE_TOTAL = ATLAS_TILE + ATLAS_PADDING * 2; // 24px per tile slot
 const ATLAS_COLS = 8;
-const ATLAS_ROWS = 4;
+const ATLAS_ROWS = 8; // increased to fit 53 textures
 const ATLAS_W = TILE_TOTAL * ATLAS_COLS; // 192
-const ATLAS_H = TILE_TOTAL * ATLAS_ROWS; // 96
+const ATLAS_H = TILE_TOTAL * ATLAS_ROWS; // 192
 
 export interface AtlasTile {
   u0: number;

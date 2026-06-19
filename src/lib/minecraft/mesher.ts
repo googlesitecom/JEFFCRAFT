@@ -69,18 +69,27 @@ function getTextureName(block: BlockType, faceIndex: number): string {
   return def.textures.side;
 }
 
+// Strict face visibility rule:
+// - Never draw faces of air
+// - Draw a face if the neighbor is air
+// - Draw a face if the neighbor is transparent AND of a different type
+// - For water specifically: don't draw water-water faces
+// - For glass: don't draw glass-glass faces
+// - For leaves: draw leaves-leaves faces (so trees look solid)
 function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   if (isAir(block)) return false;
+  // Air neighbor: always draw
   if (isAir(neighbor)) return true;
-  // Opaque neighbor hides the face
+  // Opaque neighbor: never draw (the neighbor's face will be there)
   if (!isTransparent(neighbor)) return false;
-  // Transparent neighbor:
+  // Transparent neighbor of SAME type:
   if (neighbor === block) {
     if (block === BlockType.Water) return false;
     if (block === BlockType.Glass) return false;
     if (block === BlockType.Leaves) return true;
     return false;
   }
+  // Transparent neighbor of DIFFERENT type: draw (e.g. water next to leaves, glass next to air)
   return true;
 }
 
@@ -112,7 +121,7 @@ export function buildChunkGeometry(
   const chunk = world.getChunk(cx, cz);
   if (!chunk) return { opaque: null, transparent: null };
 
-  // Ensure neighbors are generated for correct culling
+  // Ensure neighbors are generated for correct culling at chunk borders
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     world.getOrCreateChunk(cx + dx, cz + dz);
   }
@@ -143,12 +152,16 @@ export function buildChunkGeometry(
 
           if (!shouldDrawFace(block, neighbor)) continue;
 
+          // Water-specific face culling:
           if (isWaterBlock) {
             if (fi === 2) {
+              // Top face: only draw if air above
               if (neighbor !== BlockType.Air) continue;
             } else if (fi === 3) {
+              // Bottom face: only draw if solid below
               if (isAir(neighbor) || neighbor === BlockType.Water) continue;
             } else {
+              // Side face: skip if water-water, draw if air or solid
               if (neighbor === BlockType.Water) continue;
             }
           }
@@ -157,13 +170,14 @@ export function buildChunkGeometry(
           const tile = atlas.tiles[texName];
           if (!tile) continue;
 
+          // Face shading (top brightest, bottom darkest)
           let shade = 1.0;
           if (fi === 2) shade = 1.0;
           else if (fi === 3) shade = 0.5;
           else if (fi === 0 || fi === 1) shade = 0.72;
           else shade = 0.86;
 
-          // Water top face slightly lower (like Minecraft)
+          // Water surface slightly lower for visual depth
           const yOffset = isWaterBlock && fi === 2 ? -0.12 : 0;
 
           const startIndex = target.positions.length / 3;
