@@ -7,6 +7,12 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
+  // Allow preview domain to fetch _next resources without CORS warnings
+  allowedDevOrigins: [
+    "*.space-z.ai",
+    "preview-*.space-z.ai",
+    "preview-chat-*.space-z.ai",
+  ],
 };
 
 export default nextConfig;
