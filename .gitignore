@@ -52,3 +52,25 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Sandbox/dev scripts
+/.zscripts/
+/dev.log
+/dev.out.log
+/custom.db
+/custom.db-journal
+
+# Download directory (screenshots, test images)
+/download/
+
+# Upload directory
+/upload/
+
+# Mini services
+/mini-services/
+
+# Caddy config
+Caddyfile
+
+# Agent browser
+/.agent-browser/
