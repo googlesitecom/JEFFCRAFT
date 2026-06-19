@@ -265,25 +265,8 @@ export default function MinecraftGame() {
     // Enable tracking of player modifications (for save system)
     world.enablePlayerModificationTracking(true);
 
-    // === Animal Manager ===
-    // Pre-build animal textures from iconUrls (with lazy loading fallback)
-    const animalTextures: Record<string, THREE.Texture> = {};
-    function ensureAnimalTexture(name: string): THREE.Texture | null {
-      if (animalTextures[name]) return animalTextures[name];
-      // Use the ref which is always up-to-date
-      const url = iconUrlsRef.current[name] || iconUrls[name];
-      if (!url) return null;
-      const img = new Image();
-      img.src = url;
-      const tex = new THREE.Texture(img);
-      img.onload = () => { tex.needsUpdate = true; };
-      tex.magFilter = THREE.NearestFilter;
-      tex.minFilter = THREE.NearestFilter;
-      animalTextures[name] = tex;
-      return tex;
-    }
-
-    const animalManager = new AnimalManager(world, scene, (name: string) => ensureAnimalTexture(name));
+    // === Animal Manager (3D models) ===
+    const animalManager = new AnimalManager(world, scene);
 
     // === Day/Night cycle ===
     let dayTime = dayTimeRef.current; // restore from ref (in case of load)
@@ -665,6 +648,56 @@ export default function MinecraftGame() {
     highlight.visible = false;
     scene.add(highlight);
 
+    // === Mining crack overlay (like Minecraft) ===
+    // Generate 10 crack textures (stages 0-9) procedurally
+    const crackTextures: THREE.Texture[] = [];
+    for (let stage = 0; stage < 10; stage++) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 16;
+      canvas.height = 16;
+      const ctx = canvas.getContext("2d")!;
+      ctx.clearRect(0, 0, 16, 16);
+      // Draw cracks based on stage (more cracks as stage increases)
+      const rng = (s: number) => { let x = s; return () => { x = (x * 1664525 + 1013904223) >>> 0; return x / 4294967296; }; };
+      const r = rng(stage * 1000 + 42);
+      const numCracks = Math.floor((stage + 1) * 1.5);
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < numCracks; i++) {
+        const startX = Math.floor(r() * 16);
+        const startY = Math.floor(r() * 16);
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        // Draw a jagged line
+        let x = startX, y = startY;
+        const segments = 2 + Math.floor(r() * 3);
+        for (let j = 0; j < segments; j++) {
+          x += (r() - 0.5) * 6;
+          y += (r() - 0.5) * 6;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestFilter;
+      crackTextures.push(tex);
+    }
+    // Crack overlay mesh (slightly larger than block, rendered on top)
+    const crackGeo = new THREE.BoxGeometry(1.01, 1.01, 1.01);
+    const crackMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      depthWrite: false,
+    });
+    const crackOverlay = new THREE.Mesh(crackGeo, crackMat);
+    crackOverlay.visible = false;
+    crackOverlay.renderOrder = 999;
+    scene.add(crackOverlay);
+
     // Underwater overlay (blue tint when head in water)
     const waterOverlay = document.createElement("div");
     waterOverlay.style.position = "absolute";
@@ -701,7 +734,25 @@ export default function MinecraftGame() {
       }
 
       if (e.code === "KeyF") player.toggleFly();
-      if (e.code === "KeyM") placeBlock();
+      if (e.code === "KeyM") {
+        // M: interact with block (open crafting table / furnace) or place block
+        const hit = player.raycast(6);
+        if (hit.hit && hit.block) {
+          const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+          if (block === BlockType.CraftingTable) {
+            document.exitPointerLock();
+            setShowCraftingTable(true);
+            return;
+          }
+          if (block === BlockType.Furnace) {
+            document.exitPointerLock();
+            setShowFurnace(true);
+            return;
+          }
+        }
+        // Otherwise, place block
+        placeBlock();
+      }
       if (e.code === "Escape") document.exitPointerLock();
       if (e.code === "Space" || e.code === "ArrowUp" || e.code === "ArrowDown") {
         e.preventDefault();
@@ -851,7 +902,7 @@ export default function MinecraftGame() {
               damage = 3;
             }
           }
-          const died = animal.takeDamage(damage);
+          const died = animal.takeDamage(damage, player.position);
           if (died) {
             // Drop loot
             const drops = animal.getDrops();
@@ -861,6 +912,9 @@ export default function MinecraftGame() {
             setInventoryVersion((v) => v + 1);
             animalManager.removeAnimal(animal);
           }
+          // Reset mining when attacking
+          miningProgress = 0;
+          miningBlock = null;
           // Don't process mining while attacking
         } else {
           // Mine block
@@ -885,14 +939,23 @@ export default function MinecraftGame() {
       if (hit.hit && hit.block) {
         highlight.visible = true;
         highlight.position.set(hit.block.x + 0.5, hit.block.y + 0.5, hit.block.z + 0.5);
-        // Highlight color changes with mining progress
-        if (miningProgress > 0) {
-          (highlight.material as THREE.LineBasicMaterial).color.setRGB(1, 1 - miningProgress * 0.5, 0);
+        // Highlight color stays black now (cracks show progress instead)
+        (highlight.material as THREE.LineBasicMaterial).color.setRGB(0, 0, 0);
+
+        // Update crack overlay based on mining progress
+        if (miningProgress > 0 && miningBlock) {
+          const stage = Math.min(9, Math.floor(miningProgress * 10));
+          crackOverlay.visible = true;
+          crackOverlay.position.set(hit.block.x + 0.5, hit.block.y + 0.5, hit.block.z + 0.5);
+          (crackOverlay.material as THREE.MeshBasicMaterial).map = crackTextures[stage];
+          (crackOverlay.material as THREE.MeshBasicMaterial).opacity = 0.7;
+          (crackOverlay.material as THREE.MeshBasicMaterial).needsUpdate = true;
         } else {
-          (highlight.material as THREE.LineBasicMaterial).color.setRGB(0, 0, 0);
+          crackOverlay.visible = false;
         }
       } else {
         highlight.visible = false;
+        crackOverlay.visible = false;
       }
 
       // Water overlay
@@ -962,10 +1025,12 @@ export default function MinecraftGame() {
       // Dispose skybox
       skyGeo.dispose();
       skyMat.dispose();
-      // Dispose animal textures
-      for (const tex of Object.values(animalTextures)) {
+      // Dispose crack textures and overlay
+      for (const tex of crackTextures) {
         tex.dispose();
       }
+      crackGeo.dispose();
+      crackMat.dispose();
       atlas.texture.dispose();
       opaqueMaterial.dispose();
       cutoutMaterial.dispose();
@@ -1208,7 +1273,7 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
               <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque / Atacar animal" : "Romper bloque"}</div>
-              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque</div>
+              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque / Abrir mesa-horno</div>
               <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
@@ -1266,15 +1331,7 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* Mining progress bar */}
-      {stats.breakProgress > 0 && stats.breakProgress < 1 && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-8 z-15 w-24 h-3 bg-black/60 border border-white/50 rounded">
-          <div
-            className="h-full bg-white/80 transition-all"
-            style={{ width: `${stats.breakProgress * 100}%` }}
-          />
-        </div>
-      )}
+      {/* Mining cracks are now shown as 3D overlay on the block (like Minecraft) */}
 
       {/* Inventory UI */}
       {showInventory && (
