@@ -95,7 +95,7 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
   [BlockType.Glass]: {
     id: BlockType.Glass, name: "Glass",
     textures: { top: "glass", bottom: "glass", side: "glass" },
-    layer: "cutout", solid: true,
+    layer: "translucent", solid: true,
   },
   [BlockType.Brick]: {
     id: BlockType.Brick, name: "Bricks",

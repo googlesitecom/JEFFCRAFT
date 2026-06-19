@@ -319,35 +319,43 @@ function texPlanks(): ImageData {
 }
 
 function texGlass(): ImageData {
-  // Glass: mostly transparent with a visible border and a few highlights
+  // Glass: visible frame + semi-transparent interior (like real Minecraft glass)
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
-  // Start fully transparent
+  const border = [200, 220, 235] as [number, number, number];
+  const interior = [180, 210, 230] as [number, number, number];
+  const highlight = [255, 255, 255] as [number, number, number];
+
+  // Fill interior with semi-transparent light blue (alpha ~40 so you can see through but tinted)
   for (let y = 0; y < TEX_SIZE; y++) {
     for (let x = 0; x < TEX_SIZE; x++) {
-      setPixel(img, x, y, [255, 255, 255], 0);
+      setPixel(img, x, y, interior, 35);
     }
   }
-  // Border (frame)
-  const border = [220, 235, 240] as [number, number, number];
+  // Solid border (frame) - opaque so the glass block edges are visible
   for (let i = 0; i < TEX_SIZE; i++) {
-    setPixel(img, i, 0, border, 220);
-    setPixel(img, i, TEX_SIZE - 1, border, 220);
-    setPixel(img, 0, i, border, 220);
-    setPixel(img, TEX_SIZE - 1, i, border, 220);
+    setPixel(img, i, 0, border, 255);
+    setPixel(img, i, TEX_SIZE - 1, border, 255);
+    setPixel(img, 0, i, border, 255);
+    setPixel(img, TEX_SIZE - 1, i, border, 255);
   }
-  // Inner border (1px inside)
-  for (let i = 2; i < TEX_SIZE - 2; i++) {
-    setPixel(img, i, 2, [200, 220, 230], 100);
-    setPixel(img, i, TEX_SIZE - 3, [200, 220, 230], 100);
-    setPixel(img, 2, i, [200, 220, 230], 100);
-    setPixel(img, TEX_SIZE - 3, i, [200, 220, 230], 100);
+  // Inner frame line (1 pixel inside) for definition
+  for (let i = 1; i < TEX_SIZE - 1; i++) {
+    setPixel(img, i, 1, border, 200);
+    setPixel(img, i, TEX_SIZE - 2, border, 200);
+    setPixel(img, 1, i, border, 200);
+    setPixel(img, TEX_SIZE - 2, i, border, 200);
   }
-  // Highlight stripe (top-left diagonal)
-  for (let i = 3; i < 7; i++) {
-    setPixel(img, i, i, [255, 255, 255], 180);
+  // Diagonal highlight (reflection) in top-left
+  for (let i = 3; i < 8; i++) {
+    setPixel(img, i, i, highlight, 120);
   }
-  setPixel(img, 4, 3, [255, 255, 255], 200);
-  setPixel(img, 3, 4, [255, 255, 255], 200);
+  setPixel(img, 4, 3, highlight, 180);
+  setPixel(img, 3, 4, highlight, 180);
+  setPixel(img, 5, 4, highlight, 150);
+  setPixel(img, 4, 5, highlight, 150);
+  // Small highlight in bottom-right
+  setPixel(img, 11, 11, highlight, 100);
+  setPixel(img, 12, 10, highlight, 80);
   return img;
 }
 

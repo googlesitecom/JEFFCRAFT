@@ -22,24 +22,28 @@ export enum ItemType {
   StonePickaxe = 301,
   IronPickaxe = 302,
   DiamondPickaxe = 303,
+  GoldPickaxe = 304,
   // Tools - Axes
   WoodAxe = 310,
   StoneAxe = 311,
   IronAxe = 312,
   DiamondAxe = 313,
+  GoldAxe = 314,
   // Tools - Swords
   WoodSword = 320,
   StoneSword = 321,
   IronSword = 322,
   DiamondSword = 323,
+  GoldSword = 324,
   // Tools - Shovels
   WoodShovel = 330,
   StoneShovel = 331,
   IronShovel = 332,
   DiamondShovel = 333,
+  GoldShovel = 334,
 }
 
-export type ToolTier = "wood" | "stone" | "iron" | "diamond";
+export type ToolTier = "wood" | "stone" | "iron" | "diamond" | "gold";
 export type ToolType = "pickaxe" | "axe" | "sword" | "shovel";
 
 export interface ItemDef {
@@ -78,21 +82,25 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   [ItemType.StonePickaxe]: { id: ItemType.StonePickaxe, name: "Stone Pickaxe", icon: "stone_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "stone", miningSpeed: 4.0, canMineHard: true },
   [ItemType.IronPickaxe]: { id: ItemType.IronPickaxe, name: "Iron Pickaxe", icon: "iron_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "iron", miningSpeed: 6.0, canMineHard: true },
   [ItemType.DiamondPickaxe]: { id: ItemType.DiamondPickaxe, name: "Diamond Pickaxe", icon: "diamond_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "diamond", miningSpeed: 8.0, canMineHard: true },
+  [ItemType.GoldPickaxe]: { id: ItemType.GoldPickaxe, name: "Golden Pickaxe", icon: "gold_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "gold", miningSpeed: 12.0, canMineHard: true },
   // Axes
   [ItemType.WoodAxe]: { id: ItemType.WoodAxe, name: "Wooden Axe", icon: "wood_axe", maxStack: 1, toolType: "axe", toolTier: "wood", miningSpeed: 2.0, canMineHard: false },
   [ItemType.StoneAxe]: { id: ItemType.StoneAxe, name: "Stone Axe", icon: "stone_axe", maxStack: 1, toolType: "axe", toolTier: "stone", miningSpeed: 4.0, canMineHard: false },
   [ItemType.IronAxe]: { id: ItemType.IronAxe, name: "Iron Axe", icon: "iron_axe", maxStack: 1, toolType: "axe", toolTier: "iron", miningSpeed: 6.0, canMineHard: false },
   [ItemType.DiamondAxe]: { id: ItemType.DiamondAxe, name: "Diamond Axe", icon: "diamond_axe", maxStack: 1, toolType: "axe", toolTier: "diamond", miningSpeed: 8.0, canMineHard: false },
+  [ItemType.GoldAxe]: { id: ItemType.GoldAxe, name: "Golden Axe", icon: "gold_axe", maxStack: 1, toolType: "axe", toolTier: "gold", miningSpeed: 12.0, canMineHard: false },
   // Swords
   [ItemType.WoodSword]: { id: ItemType.WoodSword, name: "Wooden Sword", icon: "wood_sword", maxStack: 1, toolType: "sword", toolTier: "wood", miningSpeed: 1.5, canMineHard: false },
   [ItemType.StoneSword]: { id: ItemType.StoneSword, name: "Stone Sword", icon: "stone_sword", maxStack: 1, toolType: "sword", toolTier: "stone", miningSpeed: 1.5, canMineHard: false },
   [ItemType.IronSword]: { id: ItemType.IronSword, name: "Iron Sword", icon: "iron_sword", maxStack: 1, toolType: "sword", toolTier: "iron", miningSpeed: 1.5, canMineHard: false },
   [ItemType.DiamondSword]: { id: ItemType.DiamondSword, name: "Diamond Sword", icon: "diamond_sword", maxStack: 1, toolType: "sword", toolTier: "diamond", miningSpeed: 1.5, canMineHard: false },
+  [ItemType.GoldSword]: { id: ItemType.GoldSword, name: "Golden Sword", icon: "gold_sword", maxStack: 1, toolType: "sword", toolTier: "gold", miningSpeed: 1.5, canMineHard: false },
   // Shovels
   [ItemType.WoodShovel]: { id: ItemType.WoodShovel, name: "Wooden Shovel", icon: "wood_shovel", maxStack: 1, toolType: "shovel", toolTier: "wood", miningSpeed: 2.0, canMineHard: false },
   [ItemType.StoneShovel]: { id: ItemType.StoneShovel, name: "Stone Shovel", icon: "stone_shovel", maxStack: 1, toolType: "shovel", toolTier: "stone", miningSpeed: 4.0, canMineHard: false },
   [ItemType.IronShovel]: { id: ItemType.IronShovel, name: "Iron Shovel", icon: "iron_shovel", maxStack: 1, toolType: "shovel", toolTier: "iron", miningSpeed: 6.0, canMineHard: false },
   [ItemType.DiamondShovel]: { id: ItemType.DiamondShovel, name: "Diamond Shovel", icon: "diamond_shovel", maxStack: 1, toolType: "shovel", toolTier: "diamond", miningSpeed: 8.0, canMineHard: false },
+  [ItemType.GoldShovel]: { id: ItemType.GoldShovel, name: "Golden Shovel", icon: "gold_shovel", maxStack: 1, toolType: "shovel", toolTier: "gold", miningSpeed: 12.0, canMineHard: false },
 };
 
 // Check if an ID is an item (not a block)

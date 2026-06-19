@@ -105,7 +105,8 @@ function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   // Neighbor is see-through (cutout or translucent)
   if (neighbor === block) {
     if (block === BlockType.Water) return false;
-    if (block === BlockType.Glass) return false;
+    // Glass and Leaves: draw faces between same-type blocks so they look solid
+    if (block === BlockType.Glass) return true;
     if (block === BlockType.Leaves) return true;
     return false;
   }
@@ -127,7 +128,8 @@ function newFaceData(): FaceData {
 export interface ChunkMeshes {
   opaque: THREE.Mesh | null;
   cutout: THREE.Mesh | null;
-  transparent: THREE.Mesh | null;
+  transparent: THREE.Mesh | null; // water (alpha-blended, depthWrite off)
+  glass: THREE.Mesh | null; // glass (alpha-blended, depthWrite ON)
 }
 
 export function buildChunkGeometry(
@@ -137,10 +139,11 @@ export function buildChunkGeometry(
   atlas: TextureAtlas,
   opaqueMaterial: THREE.Material,
   cutoutMaterial: THREE.Material,
-  transparentMaterial: THREE.Material
+  transparentMaterial: THREE.Material,
+  glassMaterial: THREE.Material
 ): ChunkMeshes {
   const chunk = world.getChunk(cx, cz);
-  if (!chunk) return { opaque: null, cutout: null, transparent: null };
+  if (!chunk) return { opaque: null, cutout: null, transparent: null, glass: null };
 
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     world.getOrCreateChunk(cx + dx, cz + dz);
@@ -149,6 +152,7 @@ export function buildChunkGeometry(
   const opaque = newFaceData();
   const cutout = newFaceData();
   const transparent = newFaceData();
+  const glass = newFaceData();
 
   const x0 = cx * CHUNK_SIZE;
   const z0 = cz * CHUNK_SIZE;
@@ -161,10 +165,11 @@ export function buildChunkGeometry(
         const block = chunk.getLocal(lx, y, lz);
         if (isAir(block)) continue;
 
-        const layer = getRenderLayer(block);
+        // Choose target buffer
         let target: FaceData;
-        if (layer === "translucent") target = transparent;
-        else if (layer === "cutout") target = cutout;
+        if (block === BlockType.Water) target = transparent;
+        else if (block === BlockType.Glass) target = glass;
+        else if (getRenderLayer(block) === "cutout") target = cutout;
         else target = opaque;
 
         const isWaterBlock = block === BlockType.Water;
@@ -224,6 +229,7 @@ export function buildChunkGeometry(
     opaque: buildMesh(opaque, opaqueMaterial),
     cutout: buildMesh(cutout, cutoutMaterial),
     transparent: buildMesh(transparent, transparentMaterial),
+    glass: buildMesh(glass, glassMaterial),
   };
 }
 

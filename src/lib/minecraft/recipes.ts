@@ -175,6 +175,32 @@ export const RECIPES: Recipe[] = [
     requiresTable: true,
   },
 
+  // === TOOLS - GOLD ===
+  {
+    type: "shaped",
+    pattern: pat(["GGG", ".S.", ".S."], { G: ItemType.GoldIngot, S: ItemType.Stick }),
+    result: { id: ItemType.GoldPickaxe, count: 1 },
+    requiresTable: true,
+  },
+  {
+    type: "shaped",
+    pattern: pat(["GG.", "GS.", ".S."], { G: ItemType.GoldIngot, S: ItemType.Stick }),
+    result: { id: ItemType.GoldAxe, count: 1 },
+    requiresTable: true,
+  },
+  {
+    type: "shaped",
+    pattern: pat(["G..", "G..", "S.."], { G: ItemType.GoldIngot, S: ItemType.Stick }),
+    result: { id: ItemType.GoldSword, count: 1 },
+    requiresTable: true,
+  },
+  {
+    type: "shaped",
+    pattern: pat(["G..", "S..", "S.."], { G: ItemType.GoldIngot, S: ItemType.Stick }),
+    result: { id: ItemType.GoldShovel, count: 1 },
+    requiresTable: true,
+  },
+
   // === BUILDING BLOCKS ===
   // Crafting Table from 4 planks (2x2)
   {

@@ -1,6 +1,6 @@
 // Animals: pig, cow, chicken with simple AI
 import * as THREE from "three";
-import { World, CHUNK_SIZE } from "./world";
+import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
 import { ItemType } from "./items";
 
@@ -176,7 +176,8 @@ export class AnimalManager {
   scene: THREE.Scene;
   textureLoader: (name: string) => THREE.Texture | null;
   spawnTimer: number = 0;
-  maxAnimals: number = 12;
+  maxAnimals: number = 30; // increased from 12 to 30
+  initialSpawnDone: boolean = false;
 
   constructor(
     world: World,
@@ -188,54 +189,97 @@ export class AnimalManager {
     this.textureLoader = textureLoader;
   }
 
-  spawnRandom(centerX: number, centerZ: number) {
+  // Spawn multiple animals at start so player sees them immediately
+  initialSpawn(centerX: number, centerZ: number) {
+    if (this.initialSpawnDone) return;
+    this.initialSpawnDone = true;
+    // Spawn 8 animals around the player
+    for (let i = 0; i < 8; i++) {
+      this.spawnRandom(centerX, centerZ, 3 + Math.random() * 8);
+    }
+  }
+
+  spawnRandom(centerX: number, centerZ: number, maxDist: number = 20) {
     if (this.animals.length >= this.maxAnimals) return;
 
-    // Pick random offset within 20 blocks
+    // Pick random offset within maxDist blocks
     const angle = Math.random() * Math.PI * 2;
-    const dist = 5 + Math.random() * 15;
+    const dist = 3 + Math.random() * maxDist;
     const x = Math.floor(centerX + Math.cos(angle) * dist);
     const z = Math.floor(centerZ + Math.sin(angle) * dist);
 
-    // Find surface
-    for (let y = 50; y > 0; y--) {
+    // Find surface - search from top down
+    // First, ensure the chunk is loaded
+    let surfaceY = -1;
+    for (let y = WORLD_HEIGHT - 1; y >= 1; y--) {
       const block = this.world.getBlock(x, y, z);
       if (isSolid(block) && block !== BlockType.Water && block !== BlockType.Bedrock) {
         const topBlock = this.world.getBlock(x, y + 1, z);
         if (topBlock === BlockType.Air) {
-          // Spawn here
-          const types: AnimalType[] = ["pig", "cow", "chicken"];
-          const type = types[Math.floor(Math.random() * types.length)];
-          const animal = new Animal(
-            type,
-            this.world,
-            new THREE.Vector3(x + 0.5, y + 1, z + 0.5)
-          );
-          // Create sprite
-          const tex = this.textureLoader(animal.def.texture);
-          if (tex) {
-            const mat = new THREE.SpriteMaterial({
-              map: tex,
-              transparent: true,
-              alphaTest: 0.5,
-            });
-            const sprite = new THREE.Sprite(mat);
-            sprite.scale.set(animal.def.width * 1.5, animal.def.height * 1.5, 1);
-            this.scene.add(sprite);
-            animal.mesh = sprite;
-          }
-          this.animals.push(animal);
-          return;
+          surfaceY = y;
+          break;
         }
       }
     }
+    if (surfaceY < 0) return; // no valid surface found
+
+    // Spawn here
+    const types: AnimalType[] = ["pig", "cow", "chicken"];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const animal = new Animal(
+      type,
+      this.world,
+      new THREE.Vector3(x + 0.5, surfaceY + 1, z + 0.5)
+    );
+    // Create sprite - always create it, even if texture isn't loaded yet
+    const tex = this.textureLoader(animal.def.texture);
+    // Use a fallback canvas texture if the real one isn't available
+    let spriteTex = tex;
+    if (!spriteTex) {
+      // Create a simple colored canvas as fallback
+      const canvas = document.createElement("canvas");
+      canvas.width = 16;
+      canvas.height = 16;
+      const ctx = canvas.getContext("2d")!;
+      const colors: Record<string, string> = {
+        pig: "#e89b9b",
+        cow: "#6b4226",
+        chicken: "#fafafa",
+      };
+      ctx.fillStyle = colors[animal.type] || "#ff00ff";
+      ctx.fillRect(2, 2, 12, 12);
+      ctx.fillStyle = "#000000";
+      ctx.fillRect(6, 6, 2, 2); // eye
+      spriteTex = new THREE.CanvasTexture(canvas);
+      spriteTex.magFilter = THREE.NearestFilter;
+      spriteTex.minFilter = THREE.NearestFilter;
+    }
+    const mat = new THREE.SpriteMaterial({
+      map: spriteTex,
+      transparent: true,
+    });
+    const sprite = new THREE.Sprite(mat);
+    // Make sprites bigger so they're clearly visible
+    sprite.scale.set(animal.def.width * 2.5, animal.def.height * 2.5, 1);
+    this.scene.add(sprite);
+    animal.mesh = sprite;
+    this.animals.push(animal);
   }
 
   update(dt: number, playerX: number, playerZ: number) {
+    // Initial spawn burst
+    if (!this.initialSpawnDone) {
+      this.initialSpawn(playerX, playerZ);
+    }
+
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = 3; // try spawn every 3 seconds
-      this.spawnRandom(playerX, playerZ);
+      this.spawnTimer = 1; // try spawn every 1 second (more frequent)
+      // Try to spawn up to 2 animals per tick to populate faster
+      this.spawnRandom(playerX, playerZ, 15);
+      if (this.animals.length < this.maxAnimals * 0.7) {
+        this.spawnRandom(playerX, playerZ, 12);
+      }
     }
 
     // Update all animals

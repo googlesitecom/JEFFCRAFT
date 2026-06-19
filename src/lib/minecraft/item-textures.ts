@@ -492,6 +492,12 @@ function texDiamondAxe(): ImageData { return makeTool(hexToRgb("#5edcdc"), hexTo
 function texDiamondSword(): ImageData { return makeTool(hexToRgb("#5edcdc"), hexToRgb("#a0f0f0"), hexToRgb("#2a9a9a"), "sword"); }
 function texDiamondShovel(): ImageData { return makeTool(hexToRgb("#5edcdc"), hexToRgb("#a0f0f0"), hexToRgb("#2a9a9a"), "shovel"); }
 
+// Gold tools (golden head)
+function texGoldPickaxe(): ImageData { return makeTool(hexToRgb("#f7d046"), hexToRgb("#ffe87a"), hexToRgb("#c9a020"), "pickaxe"); }
+function texGoldAxe(): ImageData { return makeTool(hexToRgb("#f7d046"), hexToRgb("#ffe87a"), hexToRgb("#c9a020"), "axe"); }
+function texGoldSword(): ImageData { return makeTool(hexToRgb("#f7d046"), hexToRgb("#ffe87a"), hexToRgb("#c9a020"), "sword"); }
+function texGoldShovel(): ImageData { return makeTool(hexToRgb("#f7d046"), hexToRgb("#ffe87a"), hexToRgb("#c9a020"), "shovel"); }
+
 // ============================================================
 // EXPORT
 // ============================================================
@@ -527,5 +533,9 @@ export function buildItemCanvases(): Record<string, HTMLCanvasElement> {
     diamond_axe: imageDataToCanvas(texDiamondAxe()),
     diamond_sword: imageDataToCanvas(texDiamondSword()),
     diamond_shovel: imageDataToCanvas(texDiamondShovel()),
+    gold_pickaxe: imageDataToCanvas(texGoldPickaxe()),
+    gold_axe: imageDataToCanvas(texGoldAxe()),
+    gold_sword: imageDataToCanvas(texGoldSword()),
+    gold_shovel: imageDataToCanvas(texGoldShovel()),
   };
 }

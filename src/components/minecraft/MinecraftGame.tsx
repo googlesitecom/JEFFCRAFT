@@ -97,6 +97,7 @@ export default function MinecraftGame() {
     health: 20, hunger: 20, air: 10, inWater: false, headInWater: false, breakProgress: 0,
   });
   const [iconUrls, setIconUrls] = useState<Record<string, string>>({});
+  const iconUrlsRef = useRef<Record<string, string>>({});
   const [isDead, setIsDead] = useState(false);
   const [showInventory, setShowInventory] = useState(false);
   const [showCraftingTable, setShowCraftingTable] = useState(false);
@@ -112,7 +113,9 @@ export default function MinecraftGame() {
   }, [selectedSlot]);
 
   useEffect(() => {
-    setIconUrls(buildIconDataURLs(buildTextureCanvases()));
+    const urls = buildIconDataURLs(buildTextureCanvases());
+    iconUrlsRef.current = urls;
+    setIconUrls(urls);
   }, []);
 
   // === Main game effect ===
@@ -135,9 +138,47 @@ export default function MinecraftGame() {
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // Enable tone mapping for nicer colors
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
     container.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.cursor = "none";
+
+    // === Skybox gradient (procedural sphere) ===
+    const skyGeo = new THREE.SphereGeometry(500, 32, 16);
+    const skyMat = new THREE.ShaderMaterial({
+      uniforms: {
+        topColor: { value: new THREE.Color("#2a6cd6") },
+        bottomColor: { value: new THREE.Color("#87ceeb") },
+        offset: { value: 33 },
+        exponent: { value: 0.6 },
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+          vWorldPosition = worldPosition.xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 bottomColor;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorldPosition;
+        void main() {
+          float h = normalize(vWorldPosition + offset).y;
+          gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+        }
+      `,
+      side: THREE.BackSide,
+      fog: false,
+    });
+    const sky = new THREE.Mesh(skyGeo, skyMat);
+    sky.frustumCulled = false;
+    scene.add(sky);
 
     // === Lighting ===
     const ambient = new THREE.AmbientLight(0xffffff, 0.7);
@@ -160,7 +201,7 @@ export default function MinecraftGame() {
       transparent: false,
       depthWrite: true,
     });
-    // Cutout material: leaves, glass - uses alphaTest (no blending, but discards transparent pixels)
+    // Cutout material: leaves - uses alphaTest (no blending, but discards transparent pixels)
     const cutoutMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
@@ -169,7 +210,7 @@ export default function MinecraftGame() {
       alphaTest: 0.5,
       depthWrite: true,
     });
-    // Translucent material: water only - alpha blended, depthWrite off
+    // Translucent material: water - alpha blended, depthWrite off
     const transparentMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
@@ -178,30 +219,39 @@ export default function MinecraftGame() {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
+    // Glass material: alpha blended but depthWrite ON so glass occludes things behind correctly
+    const glassMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      map: atlas.texture,
+      transparent: true,
+      opacity: 1.0, // texture has its own alpha
+      side: THREE.DoubleSide,
+      depthWrite: true,
+    });
 
     // === World & Player ===
     const world = new World(config.seed);
     const player = new Player(world, camera, config.mode);
 
     // === Animal Manager ===
-    // We'll access iconUrls via a ref since the effect doesn't re-run on iconUrls change
-    const iconUrlsGlobal = iconUrls;
-    // Pre-build animal textures from iconUrls
+    // Pre-build animal textures from iconUrls (with lazy loading fallback)
     const animalTextures: Record<string, THREE.Texture> = {};
-    for (const name of ["pig", "cow", "chicken"]) {
-      const url = iconUrlsGlobal[name];
-      if (url) {
-        const img = new Image();
-        img.src = url;
-        const tex = new THREE.Texture(img);
-        img.onload = () => { tex.needsUpdate = true; };
-        tex.magFilter = THREE.NearestFilter;
-        tex.minFilter = THREE.NearestFilter;
-        animalTextures[name] = tex;
-      }
+    function ensureAnimalTexture(name: string): THREE.Texture | null {
+      if (animalTextures[name]) return animalTextures[name];
+      // Use the ref which is always up-to-date
+      const url = iconUrlsRef.current[name] || iconUrls[name];
+      if (!url) return null;
+      const img = new Image();
+      img.src = url;
+      const tex = new THREE.Texture(img);
+      img.onload = () => { tex.needsUpdate = true; };
+      tex.magFilter = THREE.NearestFilter;
+      tex.minFilter = THREE.NearestFilter;
+      animalTextures[name] = tex;
+      return tex;
     }
 
-    const animalManager = new AnimalManager(world, scene, (name: string) => animalTextures[name] || null);
+    const animalManager = new AnimalManager(world, scene, (name: string) => ensureAnimalTexture(name));
 
     // === Day/Night cycle ===
     let dayTime = 0.3; // 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
@@ -280,6 +330,9 @@ export default function MinecraftGame() {
       }
       scene.background = skyColor;
       (scene.fog as THREE.Fog).color = skyColor;
+      // Update skybox shader colors
+      (skyMat.uniforms.topColor.value as THREE.Color).copy(nightColor).lerp(new THREE.Color("#2a6cd6"), dayFactor);
+      (skyMat.uniforms.bottomColor.value as THREE.Color).copy(skyColor);
 
       // Sun/moon visibility
       sunMesh.visible = sunHeight > -0.1;
@@ -301,7 +354,7 @@ export default function MinecraftGame() {
       const key = chunkKey(cx, cz);
       if (chunkMeshes.has(key)) return;
       world.getOrCreateChunk(cx, cz);
-      chunkMeshes.set(key, { opaque: null, cutout: null, transparent: null });
+      chunkMeshes.set(key, { opaque: null, cutout: null, transparent: null, glass: null });
       chunksToBuild.push({ cx, cz });
     }
 
@@ -312,14 +365,23 @@ export default function MinecraftGame() {
         chunkGroup.remove(old.opaque);
         old.opaque.geometry.dispose();
       }
+      if (old?.cutout) {
+        chunkGroup.remove(old.cutout);
+        old.cutout.geometry.dispose();
+      }
       if (old?.transparent) {
         chunkGroup.remove(old.transparent);
         old.transparent.geometry.dispose();
       }
-      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, cutoutMaterial, transparentMaterial);
+      if (old?.glass) {
+        chunkGroup.remove(old.glass);
+        old.glass.geometry.dispose();
+      }
+      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, cutoutMaterial, transparentMaterial, glassMaterial);
       if (meshes.opaque) chunkGroup.add(meshes.opaque);
       if (meshes.cutout) chunkGroup.add(meshes.cutout);
       if (meshes.transparent) chunkGroup.add(meshes.transparent);
+      if (meshes.glass) chunkGroup.add(meshes.glass);
       chunkMeshes.set(key, meshes);
     }
 
@@ -338,6 +400,10 @@ export default function MinecraftGame() {
       if (m.transparent) {
         chunkGroup.remove(m.transparent);
         m.transparent.geometry.dispose();
+      }
+      if (m.glass) {
+        chunkGroup.remove(m.glass);
+        m.glass.geometry.dispose();
       }
       chunkMeshes.delete(key);
     }
@@ -401,7 +467,7 @@ export default function MinecraftGame() {
           const cx = pcx + dx;
           const cz = pcz + dz;
           const key = chunkKey(cx, cz);
-          chunkMeshes.set(key, { opaque: null, cutout: null, transparent: null });
+          chunkMeshes.set(key, { opaque: null, cutout: null, transparent: null, glass: null });
           buildChunk(cx, cz);
         }
       }
@@ -799,8 +865,8 @@ export default function MinecraftGame() {
       // Water overlay
       waterOverlay.style.display = player.headInWater ? "block" : "none";
 
-      // Slightly tint water material with time for animated feel
-      // (kept simple - just keep opacity stable)
+      // Keep skybox centered on player so it never clips
+      sky.position.copy(player.position);
 
       renderer.render(scene, camera);
 
@@ -849,6 +915,7 @@ export default function MinecraftGame() {
         c.opaque?.geometry.dispose();
         c.cutout?.geometry.dispose();
         c.transparent?.geometry.dispose();
+        c.glass?.geometry.dispose();
       });
       // Dispose animals
       animalManager.dispose();
@@ -859,6 +926,9 @@ export default function MinecraftGame() {
       (moonMesh.material as THREE.Material).dispose();
       starGeo.dispose();
       starMat.dispose();
+      // Dispose skybox
+      skyGeo.dispose();
+      skyMat.dispose();
       // Dispose animal textures
       for (const tex of Object.values(animalTextures)) {
         tex.dispose();
@@ -867,6 +937,7 @@ export default function MinecraftGame() {
       opaqueMaterial.dispose();
       cutoutMaterial.dispose();
       transparentMaterial.dispose();
+      glassMaterial.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
@@ -1044,9 +1115,9 @@ export default function MinecraftGame() {
         })}
       </div>
 
-      {/* Start overlay */}
+      {/* Pause overlay */}
       {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer bg-black/60 backdrop-blur-sm" onClick={handleStartClick}>
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-stone-800/95 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
             <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-wide" style={{ fontFamily: "monospace" }}>
               {currentWorld?.name || "MINICRAFT"}
@@ -1054,7 +1125,7 @@ export default function MinecraftGame() {
             <p className="mb-3 text-stone-300 text-sm">
               Modo: <span className="text-yellow-400 font-bold">{mode === "creative" ? "Creativo" : "Survival"}</span>
             </p>
-            <div className="text-left text-xs sm:text-sm space-y-1 bg-stone-900/60 p-4 rounded">
+            <div className="text-left text-xs sm:text-sm space-y-1 bg-stone-900/60 p-4 rounded mb-4">
               <div><span className="text-yellow-400 font-bold">WASD</span> — Moverse</div>
               <div><span className="text-yellow-400 font-bold">Mouse</span> — Mirar alrededor</div>
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
@@ -1068,7 +1139,22 @@ export default function MinecraftGame() {
               {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
-            <p className="mt-3 text-xs text-stone-400">Click para jugar</p>
+            {/* Action buttons */}
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleStartClick}
+                className="w-full py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 rounded text-lg font-bold transition-colors font-mono"
+              >
+                ▶ Continuar jugando
+              </button>
+              <button
+                onClick={handleExitToMenu}
+                className="w-full py-3 bg-red-800 hover:bg-red-700 border-2 border-red-500 rounded text-lg font-bold transition-colors font-mono"
+              >
+                ✕ Abandonar mundo
+              </button>
+            </div>
+            <p className="mt-3 text-xs text-stone-400">El mundo no se guardará al abandonar</p>
           </div>
         </div>
       )}
