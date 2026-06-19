@@ -11,6 +11,8 @@ import { BlockType, BLOCKS, HOTBAR_BLOCKS } from "@/lib/minecraft/blocks";
 import { ItemType, ITEMS, isItem, getDisplayName } from "@/lib/minecraft/items";
 import { Inventory } from "@/lib/minecraft/inventory";
 import { InventoryUI } from "./InventoryUI";
+import { FurnaceUI } from "./FurnaceUI";
+import { AnimalManager, Animal } from "@/lib/minecraft/animals";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -98,6 +100,7 @@ export default function MinecraftGame() {
   const [isDead, setIsDead] = useState(false);
   const [showInventory, setShowInventory] = useState(false);
   const [showCraftingTable, setShowCraftingTable] = useState(false);
+  const [showFurnace, setShowFurnace] = useState(false);
   const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
@@ -179,6 +182,110 @@ export default function MinecraftGame() {
     // === World & Player ===
     const world = new World(config.seed);
     const player = new Player(world, camera, config.mode);
+
+    // === Animal Manager ===
+    // We'll access iconUrls via a ref since the effect doesn't re-run on iconUrls change
+    const iconUrlsGlobal = iconUrls;
+    // Pre-build animal textures from iconUrls
+    const animalTextures: Record<string, THREE.Texture> = {};
+    for (const name of ["pig", "cow", "chicken"]) {
+      const url = iconUrlsGlobal[name];
+      if (url) {
+        const img = new Image();
+        img.src = url;
+        const tex = new THREE.Texture(img);
+        img.onload = () => { tex.needsUpdate = true; };
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
+        animalTextures[name] = tex;
+      }
+    }
+
+    const animalManager = new AnimalManager(world, scene, (name: string) => animalTextures[name] || null);
+
+    // === Day/Night cycle ===
+    let dayTime = 0.3; // 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
+    const DAY_LENGTH = 240; // seconds for full cycle
+    // Sun and moon meshes
+    const sunMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffff88, fog: false })
+    );
+    sunMesh.frustumCulled = false;
+    scene.add(sunMesh);
+    const moonMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(6, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0xeeeeff, fog: false })
+    );
+    moonMesh.frustumCulled = false;
+    scene.add(moonMesh);
+    // Stars (simple points)
+    const starGeo = new THREE.BufferGeometry();
+    const starPositions: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 2 - 1);
+      const r = 200;
+      starPositions.push(r * Math.sin(phi) * Math.cos(theta), Math.abs(r * Math.cos(phi)), r * Math.sin(phi) * Math.sin(theta));
+    }
+    starGeo.setAttribute("position", new THREE.Float32BufferAttribute(starPositions, 3));
+    const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.5, sizeAttenuation: false, fog: false, transparent: true });
+    const stars = new THREE.Points(starGeo, starMat);
+    stars.frustumCulled = false;
+    scene.add(stars);
+
+    function updateDayNight(dt: number) {
+      dayTime = (dayTime + dt / DAY_LENGTH) % 1;
+      // Sun position: angle based on dayTime (0.25 = sunrise at east, 0.5 = noon, 0.75 = sunset at west)
+      const sunAngle = (dayTime - 0.25) * Math.PI * 2;
+      const sunDist = 150;
+      sunMesh.position.set(
+        player.position.x + Math.cos(sunAngle) * sunDist,
+        player.position.y + Math.sin(sunAngle) * sunDist,
+        player.position.z
+      );
+      // Moon is opposite the sun
+      moonMesh.position.set(
+        player.position.x - Math.cos(sunAngle) * sunDist,
+        player.position.y - Math.sin(sunAngle) * sunDist,
+        player.position.z
+      );
+      // Stars follow player
+      stars.position.copy(player.position);
+
+      // Calculate light intensity based on sun height
+      const sunHeight = Math.sin(sunAngle); // -1 to 1
+      // Day: sunHeight > 0, Night: sunHeight < 0
+      const dayFactor = Math.max(0, Math.min(1, (sunHeight + 0.2) / 0.4)); // smooth transition
+      const nightFactor = 1 - dayFactor;
+
+      // Sun light intensity
+      sun.intensity = 0.6 * dayFactor;
+      ambient.intensity = 0.7 * dayFactor + 0.15 * nightFactor;
+      hemi.intensity = 0.35 * dayFactor + 0.1 * nightFactor;
+
+      // Sky color: day = light blue, night = dark blue
+      const dayColor = new THREE.Color("#87ceeb");
+      const nightColor = new THREE.Color("#0a0a2a");
+      const sunsetColor = new THREE.Color("#ff8844");
+      // During sunrise/sunset, blend with orange
+      const isTwilight = Math.abs(sunHeight) < 0.3;
+      let skyColor: THREE.Color;
+      if (isTwilight && dayFactor > 0.3 && dayFactor < 0.7) {
+        // Blend day color with sunset
+        const t = Math.abs(sunHeight) / 0.3;
+        skyColor = nightColor.clone().lerp(sunsetColor, 1 - t).lerp(dayColor, t);
+      } else {
+        skyColor = nightColor.clone().lerp(dayColor, dayFactor);
+      }
+      scene.background = skyColor;
+      (scene.fog as THREE.Fog).color = skyColor;
+
+      // Sun/moon visibility
+      sunMesh.visible = sunHeight > -0.1;
+      moonMesh.visible = sunHeight < 0.1;
+      (starMat as THREE.PointsMaterial).opacity = nightFactor;
+    }
 
     // === Chunk manager ===
     const chunkMeshes: Map<string, ChunkMeshes> = new Map();
@@ -530,7 +637,7 @@ export default function MinecraftGame() {
         }
       } else if (e.button === 2) {
         rightMouseDown = true;
-        // Check if we're right-clicking a crafting table
+        // Check if we're right-clicking a crafting table or furnace
         const hit = player.raycast(6);
         if (hit.hit && hit.block) {
           const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
@@ -540,7 +647,14 @@ export default function MinecraftGame() {
             setShowCraftingTable(true);
             return;
           }
+          if (block === BlockType.Furnace) {
+            // Open furnace UI
+            document.exitPointerLock();
+            setShowFurnace(true);
+            return;
+          }
         }
+        // Also check for attacking animals on right-click? No, left-click attacks
         placeBlock();
       }
     };
@@ -604,29 +718,64 @@ export default function MinecraftGame() {
       lastTime = now;
       waterAnimTime += dt;
 
+      // Day/night cycle (always runs)
+      updateDayNight(dt);
+
       if (document.pointerLockElement === renderer.domElement && !player.isDead()) {
         player.update(dt);
       }
+
+      // Update animals (always, even when paused)
+      animalManager.update(dt, player.position.x, player.position.z);
 
       if (player.isDead()) {
         setIsDead(true);
       }
 
       // Continuous mining in survival mode when left mouse is held
+      // But first check if we're aiming at an animal to attack it
       if (leftMouseDown && document.pointerLockElement === renderer.domElement && !player.isDead()) {
-        // Check if we're still looking at the same block
-        const hit = player.raycast(6);
-        if (hit.hit && hit.block) {
-          if (!miningBlock || miningBlock.x !== hit.block.x || miningBlock.y !== hit.block.y || miningBlock.z !== hit.block.z) {
-            // Changed block, reset progress
-            miningProgress = 0;
-            miningBlock = { ...hit.block };
+        // Try to find an animal in front of the player (within 4 blocks)
+        const eyeX = player.position.x;
+        const eyeY = player.position.y + 1.5;
+        const eyeZ = player.position.z;
+        const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
+        if (animal) {
+          // Attack the animal - damage based on selected item
+          let damage = 1; // bare hands
+          const selected = inventoryRef.current.getSelected();
+          if (selected && selected.id >= 100) {
+            const itemDef = ITEMS[selected.id as ItemType];
+            if (itemDef?.toolType === "sword") {
+              damage = 4 + (itemDef.toolTier === "diamond" ? 3 : itemDef.toolTier === "iron" ? 2 : itemDef.toolTier === "stone" ? 1 : 0);
+            } else if (itemDef?.toolType === "axe") {
+              damage = 3;
+            }
           }
-          // Continue mining (uses dt-based progress now)
-          mineBlockContinuous(dt);
+          const died = animal.takeDamage(damage);
+          if (died) {
+            // Drop loot
+            const drops = animal.getDrops();
+            for (const drop of drops) {
+              inventoryRef.current.addItem(drop.id, drop.count);
+            }
+            setInventoryVersion((v) => v + 1);
+            animalManager.removeAnimal(animal);
+          }
+          // Don't process mining while attacking
         } else {
-          miningProgress = 0;
-          miningBlock = null;
+          // Mine block
+          const hit = player.raycast(6);
+          if (hit.hit && hit.block) {
+            if (!miningBlock || miningBlock.x !== hit.block.x || miningBlock.y !== hit.block.y || miningBlock.z !== hit.block.z) {
+              miningProgress = 0;
+              miningBlock = { ...hit.block };
+            }
+            mineBlockContinuous(dt);
+          } else {
+            miningProgress = 0;
+            miningBlock = null;
+          }
         }
       }
 
@@ -701,6 +850,19 @@ export default function MinecraftGame() {
         c.cutout?.geometry.dispose();
         c.transparent?.geometry.dispose();
       });
+      // Dispose animals
+      animalManager.dispose();
+      // Dispose day/night objects
+      sunMesh.geometry.dispose();
+      (sunMesh.material as THREE.Material).dispose();
+      moonMesh.geometry.dispose();
+      (moonMesh.material as THREE.Material).dispose();
+      starGeo.dispose();
+      starMat.dispose();
+      // Dispose animal textures
+      for (const tex of Object.values(animalTextures)) {
+        tex.dispose();
+      }
       atlas.texture.dispose();
       opaqueMaterial.dispose();
       cutoutMaterial.dispose();
@@ -883,7 +1045,7 @@ export default function MinecraftGame() {
       </div>
 
       {/* Start overlay */}
-      {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && (
+      {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && (
         <div className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer bg-black/60 backdrop-blur-sm" onClick={handleStartClick}>
           <div className="bg-stone-800/95 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
             <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-wide" style={{ fontFamily: "monospace" }}>
@@ -897,11 +1059,12 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">Mouse</span> — Mirar alrededor</div>
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
-              <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque (mantén presionado)" : "Romper bloque"}</div>
+              <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque / Atacar animal" : "Romper bloque"}</div>
               <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque</div>
               <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
+              {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en horno</span> — Cocer comida</div>}
               {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
@@ -964,6 +1127,18 @@ export default function MinecraftGame() {
           isCraftingTable={true}
           onClose={() => {
             setShowCraftingTable(false);
+          }}
+          onInventoryChange={() => setInventoryVersion((v) => v + 1)}
+        />
+      )}
+
+      {/* Furnace UI */}
+      {showFurnace && (
+        <FurnaceUI
+          inventory={inventoryRef.current}
+          iconUrls={iconUrls}
+          onClose={() => {
+            setShowFurnace(false);
           }}
           onInventoryChange={() => setInventoryVersion((v) => v + 1)}
         />

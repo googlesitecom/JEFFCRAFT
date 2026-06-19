@@ -176,14 +176,20 @@ export const RECIPES: Recipe[] = [
   },
 
   // === BUILDING BLOCKS ===
-  // Cobblestone -> Stone (smelting, but we'll allow crafting for simplicity)
-  // 4 cobblestone -> 4 stone (just a conversion)
-  // Actually, let's skip smelting for now
-
-  // Glass from sand (smelting - skip)
-  // Brick block from 4 bricks - we don't have brick items, skip
-
-  // Pumpkin -> nothing useful for now
+  // Crafting Table from 4 planks (2x2)
+  {
+    type: "shaped",
+    pattern: pat(["PP.", "PP.", "..."], { P: "any_planks" }),
+    result: { id: BlockType.CraftingTable, count: 1 },
+    requiresTable: false,
+  },
+  // Furnace from 8 cobblestone (ring shape)
+  {
+    type: "shaped",
+    pattern: pat(["CCC", "C.C", "CCC"], { C: BlockType.Cobblestone }),
+    result: { id: BlockType.Furnace, count: 1 },
+    requiresTable: true,
+  },
 ];
 
 // Check if an ingredient matches an item id

@@ -61,6 +61,20 @@ function noiseFill(img: ImageData, base: [number, number, number], v: number, se
   }
 }
 
+function clearTransparent(img: ImageData) {
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i + 3] = 0;
+  }
+}
+
+function fillRect(img: ImageData, x: number, y: number, w: number, h: number, rgb: [number, number, number], alpha = 255) {
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      setPixel(img, x + dx, y + dy, rgb, alpha);
+    }
+  }
+}
+
 function imageDataToCanvas(img: ImageData): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = img.width;
@@ -494,23 +508,19 @@ function texBookshelf(): ImageData {
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
   const base = texPlanks();
   img.data.set(base.data);
-  // Top and bottom planks stay
-  // Middle: book area (rows 4-11)
   const rng = makeRng(31);
   const bookColors = [
-    hexToRgb("#aa2222"), // red
-    hexToRgb("#2244aa"), // blue
-    hexToRgb("#22aa44"), // green
-    hexToRgb("#aa8822"), // gold
-    hexToRgb("#882288"), // purple
-    hexToRgb("#222222"), // black
+    hexToRgb("#aa2222"),
+    hexToRgb("#2244aa"),
+    hexToRgb("#22aa44"),
+    hexToRgb("#aa8822"),
+    hexToRgb("#882288"),
+    hexToRgb("#222222"),
   ];
-  // Top shelf border
   for (let x = 0; x < TEX_SIZE; x++) {
     setPixel(img, x, 4, hexToRgb("#4a3318"));
     setPixel(img, x, 11, hexToRgb("#4a3318"));
   }
-  // Books standing
   let x = 1;
   while (x < 15) {
     const color = bookColors[Math.floor(rng() * bookColors.length)];
@@ -521,9 +531,136 @@ function texBookshelf(): ImageData {
       }
     }
     x += bookW;
-    // Sometimes a gap
     if (rng() > 0.7) x += 1;
   }
+  return img;
+}
+
+function texFurnaceTop(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  // Stone-like base
+  noiseFill(img, hexToRgb("#6b6b6b"), 8, 41);
+  // Center hole (dark)
+  fillRect(img, 4, 4, 8, 8, hexToRgb("#2a2a2a"));
+  fillRect(img, 5, 5, 6, 6, hexToRgb("#1a1a1a"));
+  // Border ring
+  for (let i = 3; i <= 12; i++) {
+    setPixel(img, i, 3, hexToRgb("#4a4a4a"));
+    setPixel(img, i, 12, hexToRgb("#4a4a4a"));
+    setPixel(img, 3, i, hexToRgb("#4a4a4a"));
+    setPixel(img, 12, i, hexToRgb("#4a4a4a"));
+  }
+  return img;
+}
+
+function texFurnaceSide(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  noiseFill(img, hexToRgb("#6b6b6b"), 8, 42);
+  // Furnace opening (dark hole with fire glow)
+  fillRect(img, 4, 6, 8, 6, hexToRgb("#1a1a1a"));
+  // Fire glow at bottom of opening
+  fillRect(img, 5, 10, 6, 2, hexToRgb("#cc4400"));
+  fillRect(img, 6, 11, 4, 1, hexToRgb("#ff8800"));
+  setPixel(img, 7, 10, hexToRgb("#ffaa00"));
+  setPixel(img, 8, 10, hexToRgb("#ffaa00"));
+  // Top edge of opening
+  for (let i = 4; i <= 11; i++) {
+    setPixel(img, i, 6, hexToRgb("#4a4a4a"));
+  }
+  return img;
+}
+
+function texFurnaceFront(): ImageData {
+  // Same as side for now (front shows the opening)
+  return texFurnaceSide();
+}
+
+// === ANIMAL TEXTURES (top-down view for sprites) ===
+function texPig(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  clearTransparent(img);
+  const pink = hexToRgb("#e89b9b");
+  const lightPink = hexToRgb("#f5b8b8");
+  const darkPink = hexToRgb("#c47878");
+  const black = hexToRgb("#1a1a1a");
+  // Body (oval, horizontal)
+  fillRect(img, 3, 6, 10, 5, pink);
+  fillRect(img, 4, 5, 8, 1, pink);
+  fillRect(img, 4, 11, 8, 1, pink);
+  // Highlight
+  fillRect(img, 4, 6, 4, 1, lightPink);
+  // Shadow
+  fillRect(img, 9, 10, 3, 1, darkPink);
+  // Head (snout) on right
+  fillRect(img, 12, 7, 2, 3, pink);
+  fillRect(img, 13, 8, 1, 2, darkPink); // snout
+  // Eye
+  setPixel(img, 12, 7, black);
+  // Legs
+  fillRect(img, 4, 11, 1, 2, darkPink);
+  fillRect(img, 7, 11, 1, 2, darkPink);
+  fillRect(img, 10, 11, 1, 2, darkPink);
+  fillRect(img, 12, 11, 1, 2, darkPink);
+  return img;
+}
+
+function texCow(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  clearTransparent(img);
+  const brown = hexToRgb("#6b4226");
+  const darkBrown = hexToRgb("#4a2e1a");
+  const white = hexToRgb("#e8d8c0");
+  const black = hexToRgb("#1a1a1a");
+  // Body
+  fillRect(img, 3, 6, 10, 5, brown);
+  fillRect(img, 4, 5, 8, 1, brown);
+  fillRect(img, 4, 11, 8, 1, brown);
+  // White patches
+  fillRect(img, 5, 7, 3, 2, white);
+  fillRect(img, 9, 8, 2, 2, white);
+  setPixel(img, 4, 9, white);
+  // Shadow
+  fillRect(img, 9, 10, 3, 1, darkBrown);
+  // Head on right
+  fillRect(img, 12, 7, 2, 3, brown);
+  // Eye
+  setPixel(img, 12, 7, black);
+  // Horns
+  setPixel(img, 12, 6, white);
+  setPixel(img, 13, 6, white);
+  // Legs
+  fillRect(img, 4, 11, 1, 2, darkBrown);
+  fillRect(img, 7, 11, 1, 2, darkBrown);
+  fillRect(img, 10, 11, 1, 2, darkBrown);
+  fillRect(img, 12, 11, 1, 2, darkBrown);
+  return img;
+}
+
+function texChicken(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  clearTransparent(img);
+  const white = hexToRgb("#fafafa");
+  const red = hexToRgb("#cc2222");
+  const orange = hexToRgb("#dd8800");
+  const black = hexToRgb("#1a1a1a");
+  // Body (smaller)
+  fillRect(img, 5, 7, 6, 4, white);
+  fillRect(img, 6, 6, 4, 1, white);
+  fillRect(img, 6, 11, 4, 1, white);
+  // Head
+  fillRect(img, 10, 5, 3, 3, white);
+  // Beak (orange)
+  setPixel(img, 13, 6, orange);
+  setPixel(img, 13, 7, orange);
+  // Comb (red)
+  setPixel(img, 11, 4, red);
+  setPixel(img, 12, 4, red);
+  setPixel(img, 11, 5, red);
+  // Eye
+  setPixel(img, 11, 6, black);
+  // Legs
+  setPixel(img, 7, 12, orange);
+  setPixel(img, 9, 12, orange);
   return img;
 }
 
@@ -560,6 +697,12 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
     crafting_table_top: imageDataToCanvas(texCraftingTableTop()),
     crafting_table_side: imageDataToCanvas(texCraftingTableSide()),
     bookshelf: imageDataToCanvas(texBookshelf()),
+    furnace_top: imageDataToCanvas(texFurnaceTop()),
+    furnace_side: imageDataToCanvas(texFurnaceSide()),
+    furnace_front: imageDataToCanvas(texFurnaceFront()),
+    pig: imageDataToCanvas(texPig()),
+    cow: imageDataToCanvas(texCow()),
+    chicken: imageDataToCanvas(texChicken()),
   };
   // Merge in item textures
   const items = buildItemCanvases();

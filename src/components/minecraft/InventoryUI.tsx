@@ -1,15 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Inventory, ItemStack, HOTBAR_SIZE } from "@/lib/minecraft/inventory";
 import { BlockType, BLOCKS } from "@/lib/minecraft/blocks";
-import { ItemType, ITEMS, isItem, getDisplayName } from "@/lib/minecraft/items";
+import { ItemType, ITEMS, isItem } from "@/lib/minecraft/items";
 import { matchRecipe, getAvailableRecipes, Recipe } from "@/lib/minecraft/recipes";
 
 interface InventoryUIProps {
   inventory: Inventory;
   iconUrls: Record<string, string>;
-  // For crafting table: 3x3 grid. For inventory crafting: 2x2 grid (we'll still use 3x3 but limit)
   isCraftingTable: boolean;
   onClose: () => void;
   onInventoryChange: () => void;
@@ -22,38 +21,34 @@ export function InventoryUI({
   onClose,
   onInventoryChange,
 }: InventoryUIProps) {
-  // Crafting grid: 3x3 (always 3x3 internally, but 2x2 craft only uses top-left when not table)
-  const [craftGrid, setCraftGrid] = useState<(number | null)[][]>(
+  // Craft grid: 3x3, each cell holds an ItemStack (id + count)
+  const [craftGrid, setCraftGrid] = useState<(ItemStack | null)[][]>(
     Array.from({ length: 3 }, () => Array(3).fill(null))
   );
-  const [craftResult, setCraftResult] = useState<{ id: number; count: number } | null>(null);
   const [showRecipeBook, setShowRecipeBook] = useState(false);
-  // Drag state: which slot is being dragged
-  const [draggedFrom, setDraggedFrom] = useState<{ type: "inv" | "craft"; slot: number } | null>(null);
-  const [draggedStack, setDraggedStack] = useState<ItemStack | null>(null);
+  // Cursor-held item (for pick-up / place)
+  const [heldItem, setHeldItem] = useState<ItemStack | null>(null);
+  // Force re-render counter
+  const [, forceUpdate] = useState(0);
+  const refresh = () => forceUpdate((v) => v + 1);
 
-  // Update craft result whenever grid changes
-  const updateCraftResult = useCallback((grid: (number | null)[][]) => {
-    const result = matchRecipe(grid, isCraftingTable);
-    setCraftResult(result);
-  }, [isCraftingTable]);
-
-  const handleGridChange = (newGrid: (number | null)[][]) => {
-    setCraftGrid(newGrid);
-    updateCraftResult(newGrid);
+  // Recompute craft result whenever grid or inventory changes
+  const computeResult = (grid: (ItemStack | null)[][]): { id: number; count: number } | null => {
+    // Convert grid to ids for matchRecipe
+    const idGrid: (number | null)[][] = grid.map((row) => row.map((s) => (s ? s.id : null)));
+    return matchRecipe(idGrid, isCraftingTable);
   };
+
+  const result = computeResult(craftGrid);
 
   // Get icon URL for any id
   const getIcon = (id: number): string => {
     if (id < 100) {
-      // Block
       const def = BLOCKS[id as BlockType];
       if (!def) return "";
-      // Use side texture, or top if it's grass
       if (id === BlockType.Grass) return iconUrls["grass_side"] ?? "";
       return iconUrls[def.textures.side] ?? iconUrls[def.textures.top] ?? "";
     }
-    // Item
     const def = ITEMS[id as ItemType];
     return def ? iconUrls[def.icon] ?? "" : "";
   };
@@ -63,209 +58,296 @@ export function InventoryUI({
     return ITEMS[id as ItemType]?.name ?? "Unknown";
   };
 
-  // Handle click on an inventory slot
-  const handleSlotClick = (slot: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    const currentStack = inventory.slots[slot];
+  // === Click on an inventory slot ===
+  // Left click: pick up entire stack, or place held stack
+  // Right click: pick up half, or place 1
+  const handleSlotClick = (slot: number, isRight: boolean) => {
+    const current = inventory.slots[slot];
 
-    if (draggedStack === null) {
-      // Pick up stack
-      if (currentStack) {
-        if (e.button === 2) {
-          // Right click: pick up half
-          const half = Math.ceil(currentStack.count / 2);
-          const remaining = currentStack.count - half;
-          setDraggedStack({ id: currentStack.id, count: half });
+    if (heldItem === null) {
+      // Pick up
+      if (current) {
+        if (isRight) {
+          // Pick up half
+          const half = Math.ceil(current.count / 2);
+          const remaining = current.count - half;
+          setHeldItem({ id: current.id, count: half });
           if (remaining > 0) {
-            inventory.setSlot(slot, { id: currentStack.id, count: remaining });
+            inventory.setSlot(slot, { id: current.id, count: remaining });
           } else {
             inventory.setSlot(slot, null);
           }
         } else {
-          setDraggedStack({ id: currentStack.id, count: currentStack.count });
+          // Pick up all
+          setHeldItem({ id: current.id, count: current.count });
           inventory.setSlot(slot, null);
         }
-        setDraggedFrom({ type: "inv", slot });
         onInventoryChange();
+        refresh();
       }
     } else {
-      // Place stack - work with a local copy of draggedStack
-      let newDraggedCount = draggedStack.count;
-      const draggedId = draggedStack.id;
-
-      if (currentStack && currentStack.id === draggedId) {
+      // Place
+      if (current && current.id === heldItem.id) {
         // Merge
-        const max = isItem(currentStack.id) ? (ITEMS[currentStack.id as ItemType]?.maxStack ?? 64) : 64;
-        const space = max - currentStack.count;
-        const add = Math.min(space, newDraggedCount);
-        inventory.setSlot(slot, { id: currentStack.id, count: currentStack.count + add });
-        newDraggedCount -= add;
-      } else if (!currentStack) {
-        // Place
-        if (e.button === 2) {
-          // Right click: place 1
-          inventory.setSlot(slot, { id: draggedId, count: 1 });
-          newDraggedCount -= 1;
-        } else {
-          inventory.setSlot(slot, { id: draggedId, count: newDraggedCount });
-          newDraggedCount = 0;
+        const max = isItem(current.id) ? (ITEMS[current.id as ItemType]?.maxStack ?? 64) : 64;
+        const space = max - current.count;
+        const add = Math.min(space, heldItem.count);
+        if (add > 0) {
+          inventory.setSlot(slot, { id: current.id, count: current.count + add });
+          const remaining = heldItem.count - add;
+          setHeldItem(remaining > 0 ? { id: heldItem.id, count: remaining } : null);
+          onInventoryChange();
+          refresh();
         }
-      } else {
-        // Swap
-        inventory.setSlot(slot, { id: draggedId, count: newDraggedCount });
-        setDraggedStack({ id: currentStack.id, count: currentStack.count });
+      } else if (!current) {
+        // Place all (or 1 if right click)
+        if (isRight) {
+          inventory.setSlot(slot, { id: heldItem.id, count: 1 });
+          const remaining = heldItem.count - 1;
+          setHeldItem(remaining > 0 ? { id: heldItem.id, count: remaining } : null);
+        } else {
+          inventory.setSlot(slot, { id: heldItem.id, count: heldItem.count });
+          setHeldItem(null);
+        }
         onInventoryChange();
-        return;
-      }
-
-      if (newDraggedCount <= 0) {
-        setDraggedStack(null);
+        refresh();
       } else {
-        setDraggedStack({ id: draggedId, count: newDraggedCount });
+        // Swap (only on left click)
+        if (!isRight) {
+          const oldCurrent = { id: current.id, count: current.count };
+          inventory.setSlot(slot, { id: heldItem.id, count: heldItem.count });
+          setHeldItem(oldCurrent);
+          onInventoryChange();
+          refresh();
+        }
       }
-      onInventoryChange();
     }
   };
 
-  // Handle click on a craft grid slot
-  const handleCraftSlotClick = (x: number, y: number, e: React.MouseEvent) => {
-    e.preventDefault();
-    const slotIdx = y * 3 + x;
+  // === Click on a craft grid slot ===
+  const handleCraftSlotClick = (x: number, y: number, isRight: boolean) => {
     // For 2x2 crafting (inventory), only allow top-left 2x2
     if (!isCraftingTable && (x >= 2 || y >= 2)) return;
 
-    const currentId = craftGrid[y][x];
+    const newGrid = craftGrid.map((row) => [...row]);
+    const current = newGrid[y][x];
 
-    if (draggedStack === null) {
-      // Pick up
-      if (currentId !== null && currentId !== undefined) {
-        // Find this item in inventory and remove 1
-        // Actually, craft grid items should be tracked separately
-        // For simplicity, we'll just place items from inventory
-        // Remove from inventory and put in craft grid
-        const selected = inventory.getSelected();
-        if (selected && selected.count > 0) {
-          const newGrid = craftGrid.map((row) => [...row]);
-          newGrid[y][x] = selected.id;
-          handleGridChange(newGrid);
-          inventory.removeSelected(1);
-          onInventoryChange();
+    if (heldItem === null) {
+      // Pick up from grid
+      if (current) {
+        if (isRight) {
+          // Pick up half
+          const half = Math.ceil(current.count / 2);
+          const remaining = current.count - half;
+          setHeldItem({ id: current.id, count: half });
+          newGrid[y][x] = remaining > 0 ? { id: current.id, count: remaining } : null;
+        } else {
+          setHeldItem({ id: current.id, count: current.count });
+          newGrid[y][x] = null;
         }
-      } else {
-        // Empty slot: place selected item from hotbar
-        const selected = inventory.getSelected();
-        if (selected && selected.count > 0) {
-          const newGrid = craftGrid.map((row) => [...row]);
-          newGrid[y][x] = selected.id;
-          handleGridChange(newGrid);
-          inventory.removeSelected(1);
-          onInventoryChange();
+        setCraftGrid(newGrid);
+        refresh();
+      }
+    } else {
+      // Place into grid
+      if (current && current.id === heldItem.id) {
+        // Merge
+        const max = 64;
+        const space = max - current.count;
+        const add = Math.min(space, heldItem.count);
+        if (add > 0) {
+          newGrid[y][x] = { id: current.id, count: current.count + add };
+          const remaining = heldItem.count - add;
+          setHeldItem(remaining > 0 ? { id: heldItem.id, count: remaining } : null);
+          setCraftGrid(newGrid);
+          refresh();
         }
+      } else if (!current) {
+        if (isRight) {
+          newGrid[y][x] = { id: heldItem.id, count: 1 };
+          const remaining = heldItem.count - 1;
+          setHeldItem(remaining > 0 ? { id: heldItem.id, count: remaining } : null);
+        } else {
+          newGrid[y][x] = { id: heldItem.id, count: heldItem.count };
+          setHeldItem(null);
+        }
+        setCraftGrid(newGrid);
+        refresh();
+      } else if (!isRight) {
+        // Swap
+        const oldCurrent = { id: current.id, count: current.count };
+        newGrid[y][x] = { id: heldItem.id, count: heldItem.count };
+        setHeldItem(oldCurrent);
+        setCraftGrid(newGrid);
+        refresh();
       }
     }
   };
 
-  // Take the crafted result
-  const handleTakeResult = () => {
-    if (!craftResult) return;
-    inventory.addItem(craftResult.id, craftResult.count);
-    // Clear the craft grid
-    handleGridChange(Array.from({ length: 3 }, () => Array(3).fill(null)));
-    onInventoryChange();
+  // === Click on result: take the crafted item ===
+  const handleTakeResult = (isRight: boolean) => {
+    if (!result) return;
+    if (heldItem === null) {
+      // Take the result
+      inventory.addItem(result.id, result.count);
+      // Clear grid
+      setCraftGrid(Array.from({ length: 3 }, () => Array(3).fill(null)));
+      onInventoryChange();
+      refresh();
+    } else if (heldItem.id === result.id && heldItem.count + result.count <= 64) {
+      // Stack onto held item
+      inventory.addItem(result.id, result.count);
+      setHeldItem({ id: heldItem.id, count: heldItem.count + result.count });
+      setCraftGrid(Array.from({ length: 3 }, () => Array(3).fill(null)));
+      onInventoryChange();
+      refresh();
+    }
   };
 
-  // Recipe book: click a recipe to auto-fill the grid
+  // === Recipe book: auto-craft by filling grid from inventory ===
   const handleRecipeClick = (recipe: Recipe) => {
-    if (recipe.type === "shaped") {
-      // Try to fill the grid with the pattern, taking items from inventory
-      const newGrid: (number | null)[][] = Array.from({ length: 3 }, () => Array(3).fill(null));
-      // Find bounding box of pattern
-      let pMinX = 3, pMaxX = -1, pMinY = 3, pMaxY = -1;
-      for (let y = 0; y < 3; y++) {
-        for (let x = 0; x < 3; x++) {
-          if (recipe.pattern[y][x] !== null) {
-            pMinX = Math.min(pMinX, x);
-            pMaxX = Math.max(pMaxX, x);
-            pMinY = Math.min(pMinY, y);
-            pMaxY = Math.max(pMaxY, y);
+    // For shaped recipes, build the pattern in the grid and consume ingredients
+    if (recipe.type !== "shaped") {
+      // Shapeless: just consume ingredients and give result
+      const needed: Array<{ id: number; count: number }> = [];
+      for (const ing of recipe.ingredients) {
+        if (ing === null) continue;
+        if (ing === "any_planks") needed.push({ id: BlockType.Planks, count: 1 });
+        else if (ing === "any_log") needed.push({ id: BlockType.Wood, count: 1 });
+        else needed.push({ id: ing, count: 1 });
+      }
+      // Check we have all
+      for (const n of needed) {
+        if (inventory.countItem(n.id) < n.count) return;
+      }
+      // Consume
+      for (const n of needed) {
+        for (let i = 0; i < inventory.slots.length; i++) {
+          const s = inventory.slots[i];
+          if (s && s.id === n.id) {
+            inventory.subtractFromSlot(i, n.count);
+            break;
           }
         }
       }
-      // Place at top-left of grid (or top-left of 2x2 for inventory craft)
-      const offsetX = isCraftingTable ? 0 : 0;
-      const offsetY = 0;
-      // Try to consume items from inventory
-      const toRemove: Array<{ id: number; count: number }> = [];
-      for (let y = pMinY; y <= pMaxY; y++) {
-        for (let x = pMinX; x <= pMaxX; x++) {
-          const ing = recipe.pattern[y][x];
-          if (ing === null) continue;
-          // Resolve ingredient to concrete id
-          let itemId: number | null = null;
-          if (ing === "any_planks") itemId = BlockType.Planks;
-          else if (ing === "any_log") itemId = BlockType.Wood;
-          else itemId = ing;
-          if (itemId !== null && inventory.countItem(itemId) > 0) {
-            newGrid[y - pMinY + offsetY][x - pMinX + offsetX] = itemId;
-            toRemove.push({ id: itemId, count: 1 });
-          }
+      // Give result
+      inventory.addItem(recipe.result.id, recipe.result.count);
+      onInventoryChange();
+      refresh();
+      return;
+    }
+
+    // Shaped recipe: try to fill the grid
+    const pattern = recipe.pattern;
+    // Find bounding box of pattern
+    let pMinX = 3, pMaxX = -1, pMinY = 3, pMaxY = -1;
+    for (let y = 0; y < 3; y++) {
+      for (let x = 0; x < 3; x++) {
+        if (pattern[y][x] !== null) {
+          pMinX = Math.min(pMinX, x);
+          pMaxX = Math.max(pMaxX, x);
+          pMinY = Math.min(pMinY, y);
+          pMaxY = Math.max(pMaxY, y);
         }
       }
-      // Check if we have all items
-      const needed: Map<number, number> = new Map();
-      for (const r of toRemove) {
-        needed.set(r.id, (needed.get(r.id) ?? 0) + 1);
+    }
+    if (pMaxX < 0) return;
+
+    // Build the grid (place at top-left)
+    const newGrid: (ItemStack | null)[][] = Array.from({ length: 3 }, () => Array(3).fill(null));
+    const toConsume: Array<{ id: number; count: number }> = [];
+    for (let y = pMinY; y <= pMaxY; y++) {
+      for (let x = pMinX; x <= pMaxX; x++) {
+        const ing = pattern[y][x];
+        if (ing === null) continue;
+        let itemId: number | null = null;
+        if (ing === "any_planks") itemId = BlockType.Planks;
+        else if (ing === "any_log") itemId = BlockType.Wood;
+        else itemId = ing;
+        if (itemId !== null) {
+          const gridX = x - pMinX;
+          const gridY = y - pMinY;
+          // Check bounds (2x2 for inventory crafting)
+          if (!isCraftingTable && (gridX >= 2 || gridY >= 2)) return;
+          newGrid[gridY][gridX] = { id: itemId, count: 1 };
+          toConsume.push({ id: itemId, count: 1 });
+        }
       }
-      let canCraft = true;
-      for (const [id, count] of needed) {
-        if (inventory.countItem(id) < count) {
-          canCraft = false;
+    }
+
+    // Check we have all ingredients
+    const neededMap = new Map<number, number>();
+    for (const c of toConsume) {
+      neededMap.set(c.id, (neededMap.get(c.id) ?? 0) + 1);
+    }
+    for (const [id, count] of neededMap) {
+      if (inventory.countItem(id) < count) return;
+    }
+
+    // Consume ingredients from inventory
+    for (const c of toConsume) {
+      for (let i = 0; i < inventory.slots.length; i++) {
+        const s = inventory.slots[i];
+        if (s && s.id === c.id && s.count >= c.count) {
+          inventory.subtractFromSlot(i, c.count);
           break;
         }
       }
-      if (canCraft) {
-        // Remove items using subtractFromSlot
-        for (const r of toRemove) {
-          for (let i = 0; i < inventory.slots.length; i++) {
-            const s = inventory.slots[i];
-            if (s && s.id === r.id && s.count >= r.count) {
-              inventory.subtractFromSlot(i, r.count);
-              break;
-            }
-          }
-        }
-        handleGridChange(newGrid);
-        onInventoryChange();
-      }
     }
+
+    // Set the grid and give the result immediately
+    setCraftGrid(newGrid);
+    // Give result directly (since we consumed ingredients)
+    inventory.addItem(recipe.result.id, recipe.result.count);
+    // Clear the grid after a brief moment (so user sees the pattern)
+    setTimeout(() => {
+      setCraftGrid(Array.from({ length: 3 }, () => Array(3).fill(null)));
+      refresh();
+    }, 200);
+    onInventoryChange();
+    refresh();
   };
 
   const availableRecipes = getAvailableRecipes(inventory, isCraftingTable);
 
-  // Render a single slot
-  const renderSlot = (id: number | null, count: number, onClick: (e: React.MouseEvent) => void, key: string, highlight?: boolean) => {
+  // Track mouse position for held item cursor
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  useEffect(() => {
+    const handler = (e: MouseEvent) => setMousePos({ x: e.clientX, y: e.clientY });
+    window.addEventListener("mousemove", handler);
+    return () => window.removeEventListener("mousemove", handler);
+  }, []);
+
+  // Render a slot
+  const renderSlot = (
+    stack: ItemStack | null,
+    onClick: (isRight: boolean) => void,
+    key: string,
+    highlight?: boolean,
+    disabled?: boolean
+  ) => {
     return (
       <div
         key={key}
-        onClick={onClick}
-        onContextMenu={onClick}
+        onClick={(e) => { e.preventDefault(); if (!disabled) onClick(false); }}
+        onContextMenu={(e) => { e.preventDefault(); if (!disabled) onClick(true); }}
         className={`w-12 h-12 border-2 flex items-center justify-center relative cursor-pointer hover:bg-white/10 ${
-          highlight ? "border-yellow-400" : "border-stone-600"
+          highlight ? "border-yellow-400" : disabled ? "border-stone-700 bg-stone-900/50" : "border-stone-600"
         } bg-stone-800/80`}
         style={{ imageRendering: "pixelated" }}
       >
-        {id !== null && id !== undefined && id >= 0 && (
+        {stack && (
           <>
             <img
-              src={getIcon(id)}
-              alt={getName(id)}
+              src={getIcon(stack.id)}
+              alt={getName(stack.id)}
               className="w-10 h-10"
               style={{ imageRendering: "pixelated" }}
               draggable={false}
             />
-            {count > 1 && (
+            {stack.count > 1 && (
               <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
-                {count}
+                {stack.count}
               </span>
             )}
           </>
@@ -275,7 +357,10 @@ export function InventoryUI({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
       <div
         className="bg-stone-900/95 border-4 border-stone-700 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
@@ -287,7 +372,9 @@ export function InventoryUI({
           <div className="flex gap-2">
             <button
               onClick={() => setShowRecipeBook(!showRecipeBook)}
-              className="px-3 py-1 bg-green-700 hover:bg-green-600 border-2 border-green-500 text-white text-sm font-mono rounded"
+              className={`px-3 py-1 border-2 text-white text-sm font-mono rounded ${
+                showRecipeBook ? "bg-green-600 border-green-400" : "bg-green-700 hover:bg-green-600 border-green-500"
+              }`}
             >
               📖 Libro de Recetas
             </button>
@@ -301,46 +388,38 @@ export function InventoryUI({
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
-          {/* Left: Crafting area */}
+          {/* Crafting area */}
           <div className="flex-shrink-0">
-            <h3 className="text-white text-sm font-mono mb-2">Crafteo</h3>
+            <h3 className="text-white text-sm font-mono mb-2">Crafteo {isCraftingTable ? "(3×3)" : "(2×2)"}</h3>
             <div className="flex items-center gap-4">
-              {/* Craft grid */}
               <div className="grid grid-cols-3 gap-1 p-2 bg-stone-800/60 rounded">
                 {craftGrid.map((row, y) =>
-                  row.map((id, x) => (
+                  row.map((stack, x) => (
                     <div key={`${x}-${y}`}>
                       {renderSlot(
-                        id,
-                        id !== null ? 1 : 0,
-                        (e) => handleCraftSlotClick(x, y, e),
+                        stack,
+                        (isRight) => handleCraftSlotClick(x, y, isRight),
                         `craft-${x}-${y}`,
+                        false,
                         !isCraftingTable && (x >= 2 || y >= 2)
                       )}
                     </div>
                   ))
                 )}
               </div>
-              {/* Arrow */}
               <div className="text-white text-2xl">→</div>
-              {/* Result */}
               <div className="p-2 bg-stone-800/60 rounded">
-                {craftResult ? (
+                {result ? (
                   <div
-                    onClick={handleTakeResult}
-                    className="w-12 h-12 border-2 border-yellow-400 bg-stone-800 flex items-center justify-center cursor-pointer hover:bg-yellow-400/20"
+                    onClick={(e) => { e.preventDefault(); handleTakeResult(e.button === 2); }}
+                    onContextMenu={(e) => { e.preventDefault(); handleTakeResult(true); }}
+                    className="w-12 h-12 border-2 border-yellow-400 bg-stone-800 flex items-center justify-center cursor-pointer hover:bg-yellow-400/20 relative"
                     style={{ imageRendering: "pixelated" }}
                   >
-                    <img
-                      src={getIcon(craftResult.id)}
-                      alt={getName(craftResult.id)}
-                      className="w-10 h-10"
-                      style={{ imageRendering: "pixelated" }}
-                      draggable={false}
-                    />
-                    {craftResult.count > 1 && (
+                    <img src={getIcon(result.id)} alt={getName(result.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+                    {result.count > 1 && (
                       <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
-                        {craftResult.count}
+                        {result.count}
                       </span>
                     )}
                   </div>
@@ -349,9 +428,14 @@ export function InventoryUI({
                 )}
               </div>
             </div>
+            {result && (
+              <p className="text-green-400 text-xs font-mono mt-2">
+                Resultado: {getName(result.id)} ×{result.count}
+              </p>
+            )}
           </div>
 
-          {/* Right: Recipe book (collapsible) */}
+          {/* Recipe book */}
           {showRecipeBook && (
             <div className="flex-1">
               <h3 className="text-white text-sm font-mono mb-2">Recetas disponibles ({availableRecipes.length})</h3>
@@ -360,7 +444,7 @@ export function InventoryUI({
                   <div className="col-span-full text-stone-400 text-xs font-mono p-4 text-center">
                     No tienes materiales para ninguna receta.
                     <br />
-                    Recoge madera y materiales primero.
+                    Recoge madera (troncos) y materiales primero.
                   </div>
                 )}
                 {availableRecipes.map((recipe, i) => (
@@ -371,13 +455,7 @@ export function InventoryUI({
                     title={getName(recipe.result.id)}
                     style={{ imageRendering: "pixelated" }}
                   >
-                    <img
-                      src={getIcon(recipe.result.id)}
-                      alt={getName(recipe.result.id)}
-                      className="w-10 h-10"
-                      style={{ imageRendering: "pixelated" }}
-                      draggable={false}
-                    />
+                    <img src={getIcon(recipe.result.id)} alt={getName(recipe.result.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
                   </button>
                 ))}
               </div>
@@ -388,16 +466,15 @@ export function InventoryUI({
           )}
         </div>
 
-        {/* Inventory grid */}
+        {/* Main inventory (27 slots) */}
         <div className="mt-6">
           <h3 className="text-white text-sm font-mono mb-2">Inventario</h3>
           <div className="grid grid-cols-9 gap-1 p-2 bg-stone-800/60 rounded">
             {inventory.slots.slice(HOTBAR_SIZE).map((stack, i) => (
               <div key={i}>
                 {renderSlot(
-                  stack?.id ?? null,
-                  stack?.count ?? 0,
-                  (e) => handleSlotClick(i + HOTBAR_SIZE, e),
+                  stack,
+                  (isRight) => handleSlotClick(i + HOTBAR_SIZE, isRight),
                   `inv-${i}`
                 )}
               </div>
@@ -405,16 +482,15 @@ export function InventoryUI({
           </div>
         </div>
 
-        {/* Hotbar */}
+        {/* Hotbar (9 slots) */}
         <div className="mt-2">
           <h3 className="text-white text-sm font-mono mb-2">Hotbar</h3>
           <div className="grid grid-cols-9 gap-1 p-2 bg-stone-800/60 rounded">
             {inventory.slots.slice(0, HOTBAR_SIZE).map((stack, i) => (
               <div key={i}>
                 {renderSlot(
-                  stack?.id ?? null,
-                  stack?.count ?? 0,
-                  (e) => handleSlotClick(i, e),
+                  stack,
+                  (isRight) => handleSlotClick(i, isRight),
                   `hot-${i}`,
                   i === inventory.selectedHotbar
                 )}
@@ -423,17 +499,17 @@ export function InventoryUI({
           </div>
         </div>
 
-        {/* Dragged item follows cursor */}
-        {draggedStack && (
+        {/* Held item following cursor */}
+        {heldItem && (
           <div
             className="fixed pointer-events-none z-50"
-            style={{ left: 0, top: 0, transform: "translate(-50%, -50%)" }}
+            style={{ left: mousePos.x, top: mousePos.y, transform: "translate(-50%, -50%)" }}
           >
-            <div className="w-12 h-12 border-2 border-yellow-400 bg-stone-800/80 flex items-center justify-center relative" style={{ imageRendering: "pixelated" }}>
-              <img src={getIcon(draggedStack.id)} alt="" className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
-              {draggedStack.count > 1 && (
+            <div className="w-12 h-12 border-2 border-yellow-400 bg-stone-800/90 flex items-center justify-center relative" style={{ imageRendering: "pixelated" }}>
+              <img src={getIcon(heldItem.id)} alt="" className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+              {heldItem.count > 1 && (
                 <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
-                  {draggedStack.count}
+                  {heldItem.count}
                 </span>
               )}
             </div>
@@ -441,8 +517,9 @@ export function InventoryUI({
         )}
 
         <p className="text-stone-400 text-xs font-mono mt-4 text-center">
-          Selecciona un item del hotbar (1-9) y click en el grid de crafteo para colocarlo.
-          Click en el resultado para craftear.
+          <span className="text-yellow-400">Click izq</span>: recoger/colocar todo · 
+          <span className="text-yellow-400"> Click der</span>: recoger mitad/colocar 1 · 
+          <span className="text-yellow-400"> Click en resultado</span>: craftear
         </p>
       </div>
     </div>

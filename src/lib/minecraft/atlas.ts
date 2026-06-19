@@ -30,6 +30,13 @@ export const TEXTURE_NAMES = [
   "crafting_table_top",
   "crafting_table_side",
   "bookshelf",
+  "furnace_top",
+  "furnace_side",
+  "furnace_front",
+  // Animals (skins - pig, cow, chicken - front view)
+  "pig",
+  "cow",
+  "chicken",
   // Materials (6)
   "stick",
   "coal",
