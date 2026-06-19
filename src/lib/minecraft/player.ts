@@ -1,6 +1,6 @@
 // Player controller: physics, collision, pointer-lock mouse look, WASD movement
 import * as THREE from "three";
-import { World, WORLD_SIZE, WORLD_HEIGHT } from "./world";
+import { World, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
 
 const PLAYER_HEIGHT = 1.7;
@@ -242,9 +242,7 @@ export class Player {
 
     while (dist < maxDist) {
       if (
-        x >= 0 && x < WORLD_SIZE &&
-        y >= 0 && y < WORLD_HEIGHT &&
-        z >= 0 && z < WORLD_SIZE
+        y >= 0 && y < WORLD_HEIGHT
       ) {
         const b = this.world.getBlock(x, y, z);
         if (b !== BlockType.Air && b !== BlockType.Water) {

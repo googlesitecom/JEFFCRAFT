@@ -2,11 +2,17 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as THREE from "three";
-import { World, WORLD_SIZE, WORLD_HEIGHT } from "@/lib/minecraft/world";
+import { World, CHUNK_SIZE, WORLD_HEIGHT } from "@/lib/minecraft/world";
 import { Player } from "@/lib/minecraft/player";
-import { buildChunkGeometry, CHUNK_SIZE, CHUNKS_X, CHUNKS_Z } from "@/lib/minecraft/mesher";
-import { buildTextures, buildIconDataURLs } from "@/lib/minecraft/textures";
+import { buildChunkGeometry, ChunkMeshes } from "@/lib/minecraft/mesher";
+import { buildTextureCanvases, buildIconDataURLs } from "@/lib/minecraft/textures";
+import { getSharedAtlas } from "@/lib/minecraft/atlas";
 import { BlockType, BLOCKS, HOTBAR_BLOCKS } from "@/lib/minecraft/blocks";
+
+// Render distance in chunks (radius around player)
+const RENDER_RADIUS = 5;
+// Maximum chunk loads per frame (to avoid hitches)
+const MAX_CHUNK_BUILDS_PER_FRAME = 2;
 
 export default function MinecraftGame() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -15,6 +21,7 @@ export default function MinecraftGame() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [fps, setFps] = useState(0);
   const [posInfo, setPosInfo] = useState({ x: 0, y: 0, z: 0 });
+  const [loadedChunks, setLoadedChunks] = useState(0);
   const [iconUrls, setIconUrls] = useState<Record<string, string>>({});
   const selectedSlotRef = useRef(0);
 
@@ -23,23 +30,22 @@ export default function MinecraftGame() {
   }, [selectedSlot]);
 
   useEffect(() => {
-    // Defer icon generation until client side
-    setIconUrls(buildIconDataURLs());
+    setIconUrls(buildIconDataURLs(buildTextureCanvases()));
   }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // === Three.js setup ===
     const container = containerRef.current;
     const width = container.clientWidth;
     const height = container.clientHeight;
 
+    // === Three.js setup ===
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#87ceeb");
-    scene.fog = new THREE.Fog("#87ceeb", 40, 110);
+    scene.fog = new THREE.Fog("#87ceeb", (RENDER_RADIUS - 1) * CHUNK_SIZE, RENDER_RADIUS * CHUNK_SIZE);
 
-    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 500);
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
 
     const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
     renderer.setSize(width, height);
@@ -50,67 +56,177 @@ export default function MinecraftGame() {
     renderer.domElement.style.cursor = "none";
 
     // === Lighting ===
-    const ambient = new THREE.AmbientLight(0xffffff, 0.65);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambient);
-
-    const sun = new THREE.DirectionalLight(0xffffff, 0.7);
-    sun.position.set(50, 80, 30);
-    sun.target.position.set(WORLD_SIZE / 2, 0, WORLD_SIZE / 2);
+    const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+    sun.position.set(50, 100, 30);
     scene.add(sun);
-    scene.add(sun.target);
-
     const hemi = new THREE.HemisphereLight(0xbfdfff, 0x6b5a3a, 0.35);
     scene.add(hemi);
 
-    // === World ===
-    const textures = buildTextures();
+    // === Build atlas and shared materials ===
+    const canvases = buildTextureCanvases();
+    const atlas = getSharedAtlas(canvases);
+    const opaqueMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      map: atlas.texture,
+      side: THREE.FrontSide,
+    });
+    const transparentMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      map: atlas.texture,
+      transparent: true,
+      opacity: 0.85,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+
+    // === World & Player ===
     const world = new World(2024);
     const player = new Player(world, camera);
 
-    // === Build all chunk meshes ===
-    const chunkMeshes: Array<{ opaque: THREE.Mesh | null; transparent: THREE.Mesh | null }> = [];
+    // === Chunk manager state ===
+    const chunkMeshes: Map<string, ChunkMeshes> = new Map();
     const chunkGroup = new THREE.Group();
     scene.add(chunkGroup);
+    const chunksToBuild: Array<{ cx: number; cz: number }> = [];
+    let lastPlayerChunkCX = Infinity;
+    let lastPlayerChunkCZ = Infinity;
 
-    for (let cx = 0; cx < CHUNKS_X; cx++) {
-      for (let cz = 0; cz < CHUNKS_Z; cz++) {
-        const { opaque, transparent } = buildChunkGeometry(world, cx, cz, textures);
-        if (opaque) chunkGroup.add(opaque);
-        if (transparent) chunkGroup.add(transparent);
-        chunkMeshes.push({ opaque, transparent });
+    function chunkKey(cx: number, cz: number) {
+      return `${cx},${cz}`;
+    }
+
+    function enqueueChunk(cx: number, cz: number) {
+      const key = chunkKey(cx, cz);
+      if (chunkMeshes.has(key)) return;
+      // Ensure world chunk is generated (so peek/getBlock is consistent)
+      world.getOrCreateChunk(cx, cz);
+      // Mark as "in progress" with a placeholder so it doesn't get re-enqueued
+      chunkMeshes.set(key, { opaque: null, transparent: null });
+      chunksToBuild.push({ cx, cz });
+    }
+
+    function buildChunk(cx: number, cz: number) {
+      const key = chunkKey(cx, cz);
+      const old = chunkMeshes.get(key);
+      if (old?.opaque) {
+        chunkGroup.remove(old.opaque);
+        old.opaque.geometry.dispose();
+      }
+      if (old?.transparent) {
+        chunkGroup.remove(old.transparent);
+        old.transparent.geometry.dispose();
+      }
+      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, transparentMaterial);
+      if (meshes.opaque) chunkGroup.add(meshes.opaque);
+      if (meshes.transparent) chunkGroup.add(meshes.transparent);
+      chunkMeshes.set(key, meshes);
+    }
+
+    function unloadChunk(cx: number, cz: number) {
+      const key = chunkKey(cx, cz);
+      const m = chunkMeshes.get(key);
+      if (!m) return;
+      if (m.opaque) {
+        chunkGroup.remove(m.opaque);
+        m.opaque.geometry.dispose();
+      }
+      if (m.transparent) {
+        chunkGroup.remove(m.transparent);
+        m.transparent.geometry.dispose();
+      }
+      chunkMeshes.delete(key);
+    }
+
+    function updateChunkLoading() {
+      const pcx = Math.floor(player.position.x / CHUNK_SIZE);
+      const pcz = Math.floor(player.position.z / CHUNK_SIZE);
+
+      // Enqueue chunks in radius (sorted by distance)
+      const candidates: Array<{ cx: number; cz: number; d: number }> = [];
+      for (let dx = -RENDER_RADIUS; dx <= RENDER_RADIUS; dx++) {
+        for (let dz = -RENDER_RADIUS; dz <= RENDER_RADIUS; dz++) {
+          const d = dx * dx + dz * dz;
+          if (d > RENDER_RADIUS * RENDER_RADIUS) continue;
+          const cx = pcx + dx;
+          const cz = pcz + dz;
+          const key = chunkKey(cx, cz);
+          if (chunkMeshes.has(key)) continue;
+          candidates.push({ cx, cz, d });
+        }
+      }
+      candidates.sort((a, b) => a.d - b.d);
+      for (const c of candidates) {
+        enqueueChunk(c.cx, c.cz);
+      }
+
+      // Unload chunks outside radius + 2
+      const unloadR = RENDER_RADIUS + 2;
+      const toUnload: Array<[number, number]> = [];
+      for (const [key, _] of chunkMeshes) {
+        const [cxStr, czStr] = key.split(",");
+        const cx = parseInt(cxStr);
+        const cz = parseInt(czStr);
+        const dx = cx - pcx;
+        const dz = cz - pcz;
+        if (Math.abs(dx) > unloadR || Math.abs(dz) > unloadR) {
+          toUnload.push([cx, cz]);
+        }
+      }
+      for (const [cx, cz] of toUnload) {
+        unloadChunk(cx, cz);
+      }
+      // Also unload from world data
+      world.unloadDistantChunks(pcx, pcz, unloadR);
+
+      // Build a few chunks per frame
+      let built = 0;
+      while (built < MAX_CHUNK_BUILDS_PER_FRAME && chunksToBuild.length > 0) {
+        const { cx, cz } = chunksToBuild.shift()!;
+        buildChunk(cx, cz);
+        built++;
       }
     }
 
-    setIsLoaded(true);
-
-    function getChunkIndex(cx: number, cz: number): number {
-      return cx * CHUNKS_Z + cz;
+    // Initial chunk load around spawn (synchronous so player has ground)
+    function initialLoad() {
+      const pcx = Math.floor(player.position.x / CHUNK_SIZE);
+      const pcz = Math.floor(player.position.z / CHUNK_SIZE);
+      // Generate all chunks in radius first (without trees spilling across uninitialized chunks)
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dz = -2; dz <= 2; dz++) {
+          world.getOrCreateChunk(pcx + dx, pcz + dz);
+        }
+      }
+      // Build a small initial ring synchronously so player doesn't fall through
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dz = -1; dz <= 1; dz++) {
+          const cx = pcx + dx;
+          const cz = pcz + dz;
+          const key = chunkKey(cx, cz);
+          chunkMeshes.set(key, { opaque: null, transparent: null });
+          buildChunk(cx, cz);
+        }
+      }
+      lastPlayerChunkCX = pcx;
+      lastPlayerChunkCZ = pcz;
     }
+    initialLoad();
+    setIsLoaded(true);
 
     function rebuildChunkAt(wx: number, wz: number) {
       const cx = Math.floor(wx / CHUNK_SIZE);
       const cz = Math.floor(wz / CHUNK_SIZE);
-      if (cx < 0 || cx >= CHUNKS_X || cz < 0 || cz >= CHUNKS_Z) return;
-      const idx = getChunkIndex(cx, cz);
-      const old = chunkMeshes[idx];
-      if (old.opaque) {
-        chunkGroup.remove(old.opaque);
-        old.opaque.geometry.dispose();
-      }
-      if (old.transparent) {
-        chunkGroup.remove(old.transparent);
-        old.transparent.geometry.dispose();
-      }
-      const { opaque, transparent } = buildChunkGeometry(world, cx, cz, textures);
-      if (opaque) chunkGroup.add(opaque);
-      if (transparent) chunkGroup.add(transparent);
-      chunkMeshes[idx] = { opaque, transparent };
+      const key = chunkKey(cx, cz);
+      if (!chunkMeshes.has(key)) return;
+      buildChunk(cx, cz);
     }
 
     // === Block highlight wireframe ===
     const highlightGeo = new THREE.BoxGeometry(1.002, 1.002, 1.002);
     const highlightEdges = new THREE.EdgesGeometry(highlightGeo);
-    const highlightMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+    const highlightMat = new THREE.LineBasicMaterial({ color: 0x000000 });
     const highlight = new THREE.LineSegments(highlightEdges, highlightMat);
     highlight.visible = false;
     scene.add(highlight);
@@ -120,7 +236,6 @@ export default function MinecraftGame() {
       if (!document.pointerLockElement) return;
       player.setKey(e.code, true);
 
-      // Number keys 1-9 for hotbar
       if (e.code.startsWith("Digit")) {
         const num = parseInt(e.code.replace("Digit", ""));
         if (num >= 1 && num <= 9) {
@@ -136,7 +251,6 @@ export default function MinecraftGame() {
       if (e.code === "Escape") {
         document.exitPointerLock();
       }
-      // Prevent space scrolling
       if (e.code === "Space" || e.code === "ArrowUp" || e.code === "ArrowDown") {
         e.preventDefault();
       }
@@ -159,27 +273,21 @@ export default function MinecraftGame() {
       if (!result.hit || !result.block || !result.normal) return;
 
       if (e.button === 0) {
-        // Break block
         const { x, y, z } = result.block;
-        // Don't break bedrock
         if (world.getBlock(x, y, z) === BlockType.Bedrock) return;
         world.setBlock(x, y, z, BlockType.Air);
         rebuildChunkAt(x, z);
-        // Also rebuild neighbor chunks if on border
         if (x % CHUNK_SIZE === 0) rebuildChunkAt(x - 1, z);
         if (x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x + 1, z);
         if (z % CHUNK_SIZE === 0) rebuildChunkAt(x, z - 1);
         if (z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x, z + 1);
       } else if (e.button === 2) {
-        // Place block
         const px = result.block.x + result.normal.x;
         const py = result.block.y + result.normal.y;
         const pz = result.block.z + result.normal.z;
-        if (px < 0 || px >= WORLD_SIZE || py < 0 || py >= WORLD_HEIGHT || pz < 0 || pz >= WORLD_SIZE) return;
-        // Don't overwrite solid blocks
+        if (py < 0 || py >= WORLD_HEIGHT) return;
         const existing = world.getBlock(px, py, pz);
         if (existing !== BlockType.Air && existing !== BlockType.Water) return;
-        // Don't place inside the player
         const blockType = HOTBAR_BLOCKS[selectedSlotRef.current];
         const playerMinX = player.position.x - 0.3;
         const playerMaxX = player.position.x + 0.3;
@@ -217,7 +325,6 @@ export default function MinecraftGame() {
     };
     renderer.domElement.addEventListener("click", handleCanvasClick);
 
-    // Mouse wheel to change hotbar slot
     const handleWheel = (e: WheelEvent) => {
       if (document.pointerLockElement !== renderer.domElement) return;
       e.preventDefault();
@@ -229,7 +336,6 @@ export default function MinecraftGame() {
     };
     renderer.domElement.addEventListener("wheel", handleWheel, { passive: false });
 
-    // === Resize ===
     const handleResize = () => {
       const w = container.clientWidth;
       const h = container.clientHeight;
@@ -256,6 +362,9 @@ export default function MinecraftGame() {
         player.update(dt);
       }
 
+      // Update chunk loading every frame
+      updateChunkLoading();
+
       // Update highlight box
       const hit = player.raycast(6);
       if (hit.hit && hit.block) {
@@ -265,14 +374,12 @@ export default function MinecraftGame() {
         highlight.visible = false;
       }
 
-      // Animate water texture offset (subtle)
-      // Skipping for performance
-
       renderer.render(scene, camera);
 
       frameCount++;
       if (now - fpsTime > 500) {
         setFps(Math.round((frameCount * 1000) / (now - fpsTime)));
+        setLoadedChunks(chunkMeshes.size);
         frameCount = 0;
         fpsTime = now;
       }
@@ -299,12 +406,13 @@ export default function MinecraftGame() {
       renderer.domElement.removeEventListener("mousedown", handleMouseDown);
       renderer.domElement.removeEventListener("click", handleCanvasClick);
       renderer.domElement.removeEventListener("wheel", handleWheel);
-      // Dispose
       chunkMeshes.forEach((c) => {
         c.opaque?.geometry.dispose();
         c.transparent?.geometry.dispose();
       });
-      Object.values(textures).forEach((t) => t.dispose());
+      atlas.texture.dispose();
+      opaqueMaterial.dispose();
+      transparentMaterial.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
@@ -365,6 +473,7 @@ export default function MinecraftGame() {
       <div className="absolute top-2 left-2 z-20 text-white font-mono text-xs sm:text-sm bg-black/50 px-2 py-1 rounded">
         <div>FPS: {fps}</div>
         <div>X: {posInfo.x} Y: {posInfo.y} Z: {posInfo.z}</div>
+        <div>Chunks: {loadedChunks}</div>
         <div className="mt-1 text-white/70">{BLOCKS[HOTBAR_BLOCKS[selectedSlot]].name}</div>
       </div>
 
@@ -392,7 +501,7 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">F</span> — Modo vuelo</div>
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar / liberar mouse</div>
             </div>
-            <p className="mt-4 text-xs text-stone-400">Consejo: en modo vuelo, Espacio sube y Q baja</p>
+            <p className="mt-4 text-xs text-stone-400">Mundo infinito procedural · Camina y se generan nuevos chunks</p>
           </div>
         </div>
       )}

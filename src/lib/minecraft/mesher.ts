@@ -1,12 +1,9 @@
 // Chunk mesh builder: generates optimized geometry by only creating visible faces
-// Uses a texture atlas so each chunk = 1 opaque mesh + 1 transparent mesh
+// Uses a shared texture atlas with stable, deterministic tile order.
 import * as THREE from "three";
-import { World, WORLD_SIZE, WORLD_HEIGHT } from "./world";
+import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
 import { BlockType, BLOCKS, isAir, isTransparent } from "./blocks";
-
-export const CHUNK_SIZE = 16;
-export const CHUNKS_X = Math.ceil(WORLD_SIZE / CHUNK_SIZE);
-export const CHUNKS_Z = Math.ceil(WORLD_SIZE / CHUNK_SIZE);
+import { TextureAtlas } from "./atlas";
 
 const FACES = [
   {
@@ -76,70 +73,11 @@ function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   if (isAir(block)) return false;
   if (isAir(neighbor)) return true;
   if (isTransparent(neighbor)) {
+    // Don't draw face between two of the same transparent type (e.g. water-water, leaves-leaves)
     if (neighbor === block) return false;
     return true;
   }
   return false;
-}
-
-// Texture atlas
-const ATLAS_TILE = 16;
-const ATLAS_COLS = 8;
-const ATLAS_ROWS = 4;
-const ATLAS_W = ATLAS_TILE * ATLAS_COLS;
-const ATLAS_H = ATLAS_TILE * ATLAS_ROWS;
-
-let atlasCache: {
-  texture: THREE.Texture;
-  map: Record<string, { u0: number; v0: number; u1: number; v1: number }>;
-} | null = null;
-let atlasTexRef: Record<string, THREE.Texture> | null = null;
-
-function getAtlas(textures: Record<string, THREE.Texture>) {
-  if (atlasCache && atlasTexRef === textures) return atlasCache;
-
-  const canvas = document.createElement("canvas");
-  canvas.width = ATLAS_W;
-  canvas.height = ATLAS_H;
-  const ctx = canvas.getContext("2d")!;
-  ctx.imageSmoothingEnabled = false;
-  ctx.fillStyle = "#ff00ff";
-  ctx.fillRect(0, 0, ATLAS_W, ATLAS_H);
-
-  const map: Record<string, { u0: number; v0: number; u1: number; v1: number }> = {};
-  let i = 0;
-  const names = Object.keys(textures);
-  for (const name of names) {
-    const tex = textures[name];
-    const col = i % ATLAS_COLS;
-    const row = Math.floor(i / ATLAS_COLS);
-    const x = col * ATLAS_TILE;
-    const y = row * ATLAS_TILE;
-    const srcCanvas = (tex as THREE.CanvasTexture).image as HTMLCanvasElement;
-    if (srcCanvas) ctx.drawImage(srcCanvas, x, y, ATLAS_TILE, ATLAS_TILE);
-    // UV coords (with small inset to avoid bleeding)
-    const inset = 0.5 / ATLAS_W;
-    map[name] = {
-      u0: (x + inset) / ATLAS_W,
-      v0: 1 - (y + ATLAS_TILE - inset) / ATLAS_H,
-      u1: (x + ATLAS_TILE - inset) / ATLAS_W,
-      v1: 1 - (y + inset) / ATLAS_H,
-    };
-    i++;
-    if (i >= ATLAS_COLS * ATLAS_ROWS) break;
-  }
-
-  const atlasTex = new THREE.CanvasTexture(canvas);
-  atlasTex.magFilter = THREE.NearestFilter;
-  atlasTex.minFilter = THREE.NearestFilter;
-  atlasTex.generateMipmaps = false;
-  atlasTex.wrapS = THREE.ClampToEdgeWrapping;
-  atlasTex.wrapT = THREE.ClampToEdgeWrapping;
-  atlasTex.needsUpdate = true;
-
-  atlasCache = { texture: atlasTex, map };
-  atlasTexRef = textures;
-  return atlasCache;
 }
 
 interface FaceData {
@@ -154,14 +92,30 @@ function newFaceData(): FaceData {
   return { positions: [], normals: [], uvs: [], colors: [], indices: [] };
 }
 
-// Build geometry for a single chunk using atlas UVs
+export interface ChunkMeshes {
+  opaque: THREE.Mesh | null;
+  transparent: THREE.Mesh | null;
+}
+
+// Build geometry for a single chunk using shared atlas UVs.
+// The chunk must already be generated. To correctly cull faces at chunk borders,
+// we generate neighbor chunks if needed (without rendering them yet).
 export function buildChunkGeometry(
   world: World,
   cx: number,
   cz: number,
-  textures: Record<string, THREE.Texture>
-): { opaque: THREE.Mesh | null; transparent: THREE.Mesh | null } {
-  const atlas = getAtlas(textures);
+  atlas: TextureAtlas,
+  opaqueMaterial: THREE.Material,
+  transparentMaterial: THREE.Material
+): ChunkMeshes {
+  const chunk = world.getChunk(cx, cz);
+  if (!chunk) return { opaque: null, transparent: null };
+
+  // Ensure neighbors are generated so we can cull border faces correctly
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    world.getOrCreateChunk(cx + dx, cz + dz);
+  }
+
   const opaque = newFaceData();
   const trans = newFaceData();
 
@@ -172,9 +126,8 @@ export function buildChunkGeometry(
     for (let lz = 0; lz < CHUNK_SIZE; lz++) {
       const wx = x0 + lx;
       const wz = z0 + lz;
-      if (wx >= WORLD_SIZE || wz >= WORLD_SIZE) continue;
       for (let y = 0; y < WORLD_HEIGHT; y++) {
-        const block = world.getBlock(wx, y, wz);
+        const block = chunk.getLocal(lx, y, lz);
         if (isAir(block)) continue;
 
         const isWaterBlock = block === BlockType.Water;
@@ -201,7 +154,7 @@ export function buildChunkGeometry(
           }
 
           const texName = getTextureName(block, fi);
-          const tile = atlas.map[texName];
+          const tile = atlas.tiles[texName];
           if (!tile) continue;
 
           let shade = 1.0;
@@ -242,13 +195,7 @@ export function buildChunkGeometry(
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(opaque.uvs, 2));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(opaque.colors, 3));
     geo.setIndex(opaque.indices);
-
-    const mat = new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      map: atlas.texture,
-      side: THREE.FrontSide,
-    });
-    opaqueMesh = new THREE.Mesh(geo, mat);
+    opaqueMesh = new THREE.Mesh(geo, opaqueMaterial);
     opaqueMesh.frustumCulled = true;
   }
 
@@ -259,48 +206,9 @@ export function buildChunkGeometry(
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(trans.uvs, 2));
     geo.setAttribute("color", new THREE.Float32BufferAttribute(trans.colors, 3));
     geo.setIndex(trans.indices);
-
-    const mat = new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      map: atlas.texture,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    transparentMesh = new THREE.Mesh(geo, mat);
+    transparentMesh = new THREE.Mesh(geo, transparentMaterial);
     transparentMesh.frustumCulled = true;
   }
 
   return { opaque: opaqueMesh, transparent: transparentMesh };
-}
-
-// Rebuild a single chunk after a block edit. Returns the new meshes.
-export function rebuildChunk(
-  world: World,
-  cx: number,
-  cz: number,
-  textures: Record<string, THREE.Texture>
-): { opaque: THREE.Mesh | null; transparent: THREE.Mesh | null } {
-  return buildChunkGeometry(world, cx, cz, textures);
-}
-
-// Get a texture atlas material (for sharing)
-export function getAtlasMaterial(textures: Record<string, THREE.Texture>, transparent: boolean): THREE.Material {
-  const atlas = getAtlas(textures);
-  if (transparent) {
-    return new THREE.MeshLambertMaterial({
-      vertexColors: true,
-      map: atlas.texture,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-  }
-  return new THREE.MeshLambertMaterial({
-    vertexColors: true,
-    map: atlas.texture,
-    side: THREE.FrontSide,
-  });
 }
