@@ -69,15 +69,34 @@ function getTextureName(block: BlockType, faceIndex: number): string {
   return def.textures.side;
 }
 
+// Whether a block renders as a "cutout" (transparent texture but solid pixels, e.g. glass)
+// vs "translucent" (alpha-blended, e.g. water). Cutout goes into opaque pass.
+function isCutout(block: BlockType): boolean {
+  return block === BlockType.Glass;
+}
+
+// Whether a block uses alpha blending
+function isTranslucent(block: BlockType): boolean {
+  return block === BlockType.Water;
+}
+
 function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   if (isAir(block)) return false;
   if (isAir(neighbor)) return true;
-  if (isTransparent(neighbor)) {
-    // Don't draw face between two of the same transparent type (e.g. water-water, leaves-leaves)
-    if (neighbor === block) return false;
-    return true;
+  // Opaque neighbor hides the face
+  if (!isTransparent(neighbor)) return false;
+  // Transparent neighbor:
+  // - Water next to water: hide face (avoid internal water planes)
+  // - Glass next to glass: hide face (looks cleaner)
+  // - Leaves next to leaves: keep face (otherwise trees look hollow)
+  if (neighbor === block) {
+    if (block === BlockType.Water) return false;
+    if (block === BlockType.Glass) return false;
+    if (block === BlockType.Leaves) return true; // draw, so leaves look solid
+    return false;
   }
-  return false;
+  // Different transparent types: draw face
+  return true;
 }
 
 interface FaceData {
@@ -93,13 +112,11 @@ function newFaceData(): FaceData {
 }
 
 export interface ChunkMeshes {
-  opaque: THREE.Mesh | null;
-  transparent: THREE.Mesh | null;
+  opaque: THREE.Mesh | null; // solid blocks + leaves + glass (cutout, depthWrite on)
+  transparent: THREE.Mesh | null; // water only (alpha-blended, depthWrite off)
 }
 
 // Build geometry for a single chunk using shared atlas UVs.
-// The chunk must already be generated. To correctly cull faces at chunk borders,
-// we generate neighbor chunks if needed (without rendering them yet).
 export function buildChunkGeometry(
   world: World,
   cx: number,
@@ -116,8 +133,8 @@ export function buildChunkGeometry(
     world.getOrCreateChunk(cx + dx, cz + dz);
   }
 
-  const opaque = newFaceData();
-  const trans = newFaceData();
+  const opaque = newFaceData(); // includes leaves and glass (drawn with depthWrite on, alphaTest)
+  const trans = newFaceData(); // water only
 
   const x0 = cx * CHUNK_SIZE;
   const z0 = cz * CHUNK_SIZE;
@@ -131,8 +148,7 @@ export function buildChunkGeometry(
         if (isAir(block)) continue;
 
         const isWaterBlock = block === BlockType.Water;
-        const isTransp = isTransparent(block);
-        const target = isTransp ? trans : opaque;
+        const target = isWaterBlock ? trans : opaque;
 
         for (let fi = 0; fi < FACES.length; fi++) {
           const face = FACES[fi];

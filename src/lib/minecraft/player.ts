@@ -13,6 +13,8 @@ const SPRINT_SPEED = 7.5;
 const FLY_SPEED = 9;
 const MAX_FALL = 50;
 
+export type GameMode = "creative" | "survival";
+
 export class Player {
   position: THREE.Vector3; // feet position (center bottom)
   velocity: THREE.Vector3;
@@ -22,6 +24,16 @@ export class Player {
   flying: boolean = false;
   world: World;
   camera: THREE.PerspectiveCamera;
+  mode: GameMode;
+
+  // Survival stats (0-20, like Minecraft)
+  health: number = 20;
+  maxHealth: number = 20;
+  hunger: number = 20;
+  maxHunger: number = 20;
+  // Fall damage tracking
+  fallStartY: number = 0;
+  wasFlying: boolean = false;
 
   // Input state
   keys: Record<string, boolean> = {};
@@ -29,12 +41,17 @@ export class Player {
   mouseDeltaX: number = 0;
   mouseDeltaY: number = 0;
 
-  constructor(world: World, camera: THREE.PerspectiveCamera) {
+  constructor(world: World, camera: THREE.PerspectiveCamera, mode: GameMode = "creative") {
     this.world = world;
     this.camera = camera;
+    this.mode = mode;
+    if (mode === "creative") {
+      this.flying = true;
+    }
     const spawn = world.getSpawnPoint();
     this.position = new THREE.Vector3(spawn.x, spawn.y, spawn.z);
     this.velocity = new THREE.Vector3(0, 0, 0);
+    this.fallStartY = this.position.y;
     this.updateCamera();
   }
 
@@ -48,8 +65,34 @@ export class Player {
   }
 
   toggleFly() {
+    if (this.mode === "survival") {
+      // No fly in survival
+      return;
+    }
     this.flying = !this.flying;
     this.velocity.y = 0;
+  }
+
+  damage(amount: number) {
+    if (this.mode === "creative") return;
+    this.health = Math.max(0, this.health - amount);
+  }
+
+  heal(amount: number) {
+    this.health = Math.min(this.maxHealth, this.health + amount);
+  }
+
+  isDead(): boolean {
+    return this.health <= 0;
+  }
+
+  respawn() {
+    const spawn = this.world.getSpawnPoint();
+    this.position.set(spawn.x, spawn.y, spawn.z);
+    this.velocity.set(0, 0, 0);
+    this.health = this.maxHealth;
+    this.hunger = this.maxHunger;
+    this.fallStartY = this.position.y;
   }
 
   update(dt: number) {
@@ -97,10 +140,6 @@ export class Player {
       this.velocity.x = moveX;
       this.velocity.z = moveZ;
       let vy = 0;
-      if (this.keys["Space"]) vy += FLY_SPEED;
-      if (this.keys["ShiftLeft"] || this.keys["ShiftRight"]) vy -= FLY_SPEED;
-      // For flying up, sprint should not apply downward. Use Space to ascend.
-      // Reset sprint if shift is used for descending
       if (this.keys["Space"]) vy = FLY_SPEED;
       else if (this.keys["ControlLeft"] || this.keys["KeyQ"]) vy = -FLY_SPEED;
       else vy = 0;
@@ -121,10 +160,38 @@ export class Player {
       if (this.velocity.y < -MAX_FALL) this.velocity.y = -MAX_FALL;
     }
 
+    // Track fall start for fall damage in survival
+    if (this.mode === "survival" && !this.flying) {
+      if (this.onGround || this.velocity.y >= 0) {
+        this.fallStartY = this.position.y;
+      }
+    }
+
     // Move with collision per-axis
     this.moveAxis("x", this.velocity.x * dt);
     this.moveAxis("y", this.velocity.y * dt);
     this.moveAxis("z", this.velocity.z * dt);
+
+    // Apply fall damage when landing
+    if (this.mode === "survival" && !this.flying && this.onGround) {
+      const fallDist = this.fallStartY - this.position.y;
+      if (fallDist > 3) {
+        // 1 damage per block beyond 3
+        const dmg = Math.floor(fallDist - 3);
+        if (dmg > 0) {
+          this.damage(dmg);
+        }
+      }
+      this.fallStartY = this.position.y;
+    }
+
+    // Slowly regenerate hunger in creative; in survival, hunger drains slowly
+    if (this.mode === "survival") {
+      this.hunger = Math.max(0, this.hunger - dt * 0.15);
+      if (this.hunger > 17 && this.health < this.maxHealth) {
+        this.heal(dt * 1.0);
+      }
+    }
 
     this.updateCamera();
   }
