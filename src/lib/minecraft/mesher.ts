@@ -105,8 +105,7 @@ function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   // Neighbor is see-through (cutout or translucent)
   if (neighbor === block) {
     if (block === BlockType.Water) return false;
-    // Glass and Leaves: draw faces between same-type blocks so they look solid
-    if (block === BlockType.Glass) return true;
+    if (block === BlockType.Glass) return false; // don't draw glass-glass faces
     if (block === BlockType.Leaves) return true;
     return false;
   }
@@ -167,9 +166,9 @@ export function buildChunkGeometry(
 
         // Choose target buffer
         let target: FaceData;
+        const layer = getRenderLayer(block);
         if (block === BlockType.Water) target = transparent;
-        else if (block === BlockType.Glass) target = glass;
-        else if (getRenderLayer(block) === "cutout") target = cutout;
+        else if (layer === "cutout") target = cutout;
         else target = opaque;
 
         const isWaterBlock = block === BlockType.Water;
@@ -229,7 +228,7 @@ export function buildChunkGeometry(
     opaque: buildMesh(opaque, opaqueMaterial),
     cutout: buildMesh(cutout, cutoutMaterial),
     transparent: buildMesh(transparent, transparentMaterial),
-    glass: buildMesh(glass, glassMaterial),
+    glass: null, // glass now uses cutout layer
   };
 }
 

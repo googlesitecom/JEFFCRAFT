@@ -136,3 +136,14 @@ export function getIconName(id: number, blockIcons: Record<number, { top: string
   }
   return ITEMS[id as ItemType]?.icon ?? "";
 }
+
+// Get ALL item ids for creative inventory (all valid blocks + all items)
+export function getAllItemIds(): number[] {
+  const ids: number[] = [];
+  // Add all items (skip undefined)
+  for (const id of Object.values(ItemType)) {
+    if (typeof id === "number") ids.push(id);
+  }
+  return ids;
+}
+

@@ -55,6 +55,8 @@ export class World {
   noise3D: ReturnType<typeof createNoise3D>;
   noise3DTree: ReturnType<typeof createNoise3D>;
   seed: number;
+  // Track player-modified blocks for save system
+  playerModifications: Map<string, number> = new Map();
 
   constructor(seed = 2024) {
     this.seed = seed;
@@ -114,6 +116,9 @@ export class World {
     return chunk.getLocal(lx, wy, lz);
   }
 
+  // Track if the next setBlock calls should be recorded as player modifications
+  private _trackPlayerMods: boolean = false;
+  
   setBlock(wx: number, wy: number, wz: number, type: BlockType) {
     if (wy < 0 || wy >= WORLD_HEIGHT) return;
     const cx = Math.floor(wx / CHUNK_SIZE);
@@ -122,6 +127,15 @@ export class World {
     const lx = wx - cx * CHUNK_SIZE;
     const lz = wz - cz * CHUNK_SIZE;
     chunk.setLocal(lx, wy, lz, type);
+    // Record player modification if tracking is enabled
+    if (this._trackPlayerMods) {
+      this.playerModifications.set(`${wx},${wy},${wz}`, type);
+    }
+  }
+  
+  // Enable/disable tracking of player modifications (for save system)
+  enablePlayerModificationTracking(enabled: boolean) {
+    this._trackPlayerMods = enabled;
   }
 
   // Peek at terrain height at a world coordinate without generating a chunk

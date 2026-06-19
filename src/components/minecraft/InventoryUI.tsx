@@ -4,12 +4,15 @@ import { useState, useCallback, useEffect } from "react";
 import { Inventory, ItemStack, HOTBAR_SIZE } from "@/lib/minecraft/inventory";
 import { BlockType, BLOCKS } from "@/lib/minecraft/blocks";
 import { ItemType, ITEMS, isItem } from "@/lib/minecraft/items";
-import { matchRecipe, getAvailableRecipes, Recipe } from "@/lib/minecraft/recipes";
+import { matchRecipe, getAvailableRecipes, RECIPES, Recipe } from "@/lib/minecraft/recipes";
+import { getAllBlockIds } from "@/lib/minecraft/blocks";
+import { getAllItemIds } from "@/lib/minecraft/items";
 
 interface InventoryUIProps {
   inventory: Inventory;
   iconUrls: Record<string, string>;
   isCraftingTable: boolean;
+  isCreative?: boolean;
   onClose: () => void;
   onInventoryChange: () => void;
 }
@@ -18,6 +21,7 @@ export function InventoryUI({
   inventory,
   iconUrls,
   isCraftingTable,
+  isCreative = false,
   onClose,
   onInventoryChange,
 }: InventoryUIProps) {
@@ -308,7 +312,22 @@ export function InventoryUI({
     refresh();
   };
 
-  const availableRecipes = getAvailableRecipes(inventory, isCraftingTable);
+  // Show ALL recipes in the book, regardless of crafting surface
+  // Recipes that require a table show a small "T" badge
+  const allRecipes = RECIPES;
+  const craftableIds = new Set(getAvailableRecipes(inventory, isCraftingTable).map((r) => r.result.id + "_" + r.result.count));
+
+  // Creative mode: list all blocks and items
+  const creativeItems: number[] = isCreative
+    ? [...getAllBlockIds().filter((id) => id !== BlockType.Air), ...getAllItemIds()]
+    : [];
+
+  // Click on a creative item: give a stack to the player
+  const handleCreativeItemClick = (id: number) => {
+    inventory.addItem(id, 64);
+    onInventoryChange();
+    refresh();
+  };
 
   // Track mouse position for held item cursor
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -438,33 +457,69 @@ export function InventoryUI({
           {/* Recipe book */}
           {showRecipeBook && (
             <div className="flex-1">
-              <h3 className="text-white text-sm font-mono mb-2">Recetas disponibles ({availableRecipes.length})</h3>
+              <h3 className="text-white text-sm font-mono mb-2">Recetas ({allRecipes.length})</h3>
               <div className="grid grid-cols-6 sm:grid-cols-8 gap-1 p-2 bg-stone-800/60 rounded max-h-64 overflow-y-auto">
-                {availableRecipes.length === 0 && (
-                  <div className="col-span-full text-stone-400 text-xs font-mono p-4 text-center">
-                    No tienes materiales para ninguna receta.
-                    <br />
-                    Recoge madera (troncos) y materiales primero.
-                  </div>
-                )}
-                {availableRecipes.map((recipe, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleRecipeClick(recipe)}
-                    className="w-12 h-12 border-2 border-stone-600 hover:border-green-400 bg-stone-800 flex items-center justify-center cursor-pointer hover:bg-green-400/10"
-                    title={getName(recipe.result.id)}
-                    style={{ imageRendering: "pixelated" }}
-                  >
-                    <img src={getIcon(recipe.result.id)} alt={getName(recipe.result.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
-                  </button>
-                ))}
+                {allRecipes.map((recipe, i) => {
+                  const canCraft = craftableIds.has(recipe.result.id + "_" + recipe.result.count);
+                  const needsTable = recipe.requiresTable && !isCraftingTable;
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => canCraft && !needsTable && handleRecipeClick(recipe)}
+                      className={`w-12 h-12 border-2 flex items-center justify-center relative ${
+                        needsTable
+                          ? "border-blue-600 bg-stone-900/60 cursor-help"
+                          : canCraft
+                            ? "border-green-400 bg-stone-800 hover:bg-green-400/20 cursor-pointer"
+                            : "border-stone-700 bg-stone-900/60 cursor-not-allowed opacity-50"
+                      }`}
+                      title={getName(recipe.result.id) + (needsTable ? " (requiere mesa)" : canCraft ? "" : " (sin materiales)")}
+                      style={{ imageRendering: "pixelated" }}
+                    >
+                      <img src={getIcon(recipe.result.id)} alt={getName(recipe.result.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+                      {canCraft && !needsTable && (
+                        <span className="absolute top-0 right-0 w-2 h-2 bg-green-400 rounded-full" />
+                      )}
+                      {needsTable && (
+                        <span className="absolute bottom-0 right-0 text-[8px] text-blue-400 font-mono font-bold bg-stone-900/80 px-0.5">T</span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
               <p className="text-stone-400 text-xs font-mono mt-2">
-                Click en una receta para craftear automáticamente.
+                <span className="text-green-400">●</span> Con materiales · 
+                <span className="text-stone-500"> ●</span> Sin materiales · 
+                <span className="text-blue-400"> T</span> Requiere mesa
               </p>
             </div>
           )}
         </div>
+
+        {/* Creative items list */}
+        {isCreative && (
+          <div className="mt-6">
+            <h3 className="text-white text-sm font-mono mb-2">Todos los objetos (click para obtener 64)</h3>
+            <div className="grid grid-cols-9 sm:grid-cols-12 gap-1 p-2 bg-stone-800/60 rounded max-h-48 overflow-y-auto">
+              {creativeItems.map((id) => {
+                const icon = getIcon(id);
+                const name = getName(id);
+                if (!icon) return null;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => handleCreativeItemClick(id)}
+                    className="w-12 h-12 border-2 border-stone-600 hover:border-green-400 bg-stone-800 flex items-center justify-center cursor-pointer hover:bg-green-400/20"
+                    title={name}
+                    style={{ imageRendering: "pixelated" }}
+                  >
+                    <img src={icon} alt={name} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Main inventory (27 slots) */}
         <div className="mt-6">

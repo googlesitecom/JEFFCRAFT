@@ -13,6 +13,7 @@ import { Inventory } from "@/lib/minecraft/inventory";
 import { InventoryUI } from "./InventoryUI";
 import { FurnaceUI } from "./FurnaceUI";
 import { AnimalManager, Animal } from "@/lib/minecraft/animals";
+import { saveWorld, loadWorld, applySavedWorld, listSavedWorlds, deleteWorld, SavedWorld } from "@/lib/minecraft/save";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -107,6 +108,12 @@ export default function MinecraftGame() {
   const selectedSlotRef = useRef(0);
   const worldConfigRef = useRef<WorldConfig | null>(null);
   const inventoryRef = useRef<Inventory>(new Inventory());
+  // Refs for save system
+  const worldRef = useRef<World | null>(null);
+  const playerRef = useRef<any>(null);
+  const dayTimeRef = useRef<number>(0.3);
+  const pendingLoadRef = useRef<SavedWorld | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string>("");
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -232,6 +239,31 @@ export default function MinecraftGame() {
     // === World & Player ===
     const world = new World(config.seed);
     const player = new Player(world, camera, config.mode);
+    // Store refs for save system
+    worldRef.current = world;
+    playerRef.current = player;
+
+    // If loading a saved world, apply saved state
+    if (pendingLoadRef.current) {
+      const saved = pendingLoadRef.current;
+      pendingLoadRef.current = null;
+      // Apply modified blocks
+      applySavedWorld(world, saved);
+      // Restore player state
+      player.position.set(saved.player.x, saved.player.y, saved.player.z);
+      player.yaw = saved.player.yaw;
+      player.pitch = saved.player.pitch;
+      player.health = saved.player.health;
+      player.hunger = saved.player.hunger;
+      // Restore inventory
+      inventoryRef.current.deserialize(saved.inventory);
+      // Restore day time
+      dayTimeRef.current = saved.dayTime;
+      // Force inventory refresh
+      setInventoryVersion((v) => v + 1);
+    }
+    // Enable tracking of player modifications (for save system)
+    world.enablePlayerModificationTracking(true);
 
     // === Animal Manager ===
     // Pre-build animal textures from iconUrls (with lazy loading fallback)
@@ -254,7 +286,7 @@ export default function MinecraftGame() {
     const animalManager = new AnimalManager(world, scene, (name: string) => ensureAnimalTexture(name));
 
     // === Day/Night cycle ===
-    let dayTime = 0.3; // 0 = midnight, 0.25 = sunrise, 0.5 = noon, 0.75 = sunset
+    let dayTime = dayTimeRef.current; // restore from ref (in case of load)
     const DAY_LENGTH = 240; // seconds for full cycle
     // Sun and moon meshes
     const sunMesh = new THREE.Mesh(
@@ -286,6 +318,7 @@ export default function MinecraftGame() {
 
     function updateDayNight(dt: number) {
       dayTime = (dayTime + dt / DAY_LENGTH) % 1;
+      dayTimeRef.current = dayTime;
       // Sun position: angle based on dayTime (0.25 = sunrise at east, 0.5 = noon, 0.75 = sunset at west)
       const sunAngle = (dayTime - 0.25) * Math.PI * 2;
       const sunDist = 150;
@@ -954,6 +987,9 @@ export default function MinecraftGame() {
     setScreen("playing");
     setIsLoaded(false);
     setIsDead(false);
+    // Clear inventory for new world (survival starts empty, creative will use creative inventory)
+    inventoryRef.current.clear();
+    pendingLoadRef.current = null;
   }, []);
 
   const handleRespawn = useCallback(() => {
@@ -971,7 +1007,30 @@ export default function MinecraftGame() {
     setScreen("main-menu");
     setIsDead(false);
     setCurrentWorld(null);
+    // Clear inventory
+    inventoryRef.current.clear();
   }, []);
+
+  const handleSaveWorld = useCallback(() => {
+    if (!worldRef.current || !playerRef.current || !currentWorld) return;
+    const success = saveWorld(
+      worldRef.current,
+      currentWorld.name,
+      currentWorld.seed,
+      currentWorld.mode,
+      {
+        position: { x: playerRef.current.position.x, y: playerRef.current.position.y, z: playerRef.current.position.z },
+        yaw: playerRef.current.yaw,
+        pitch: playerRef.current.pitch,
+        health: playerRef.current.health,
+        hunger: playerRef.current.hunger,
+      },
+      inventoryRef.current,
+      dayTimeRef.current
+    );
+    setSaveMessage(success ? "✓ Mundo guardado" : "✗ Error al guardar");
+    setTimeout(() => setSaveMessage(""), 3000);
+  }, [currentWorld]);
 
   const handleStartClick = useCallback(() => {
     const canvas = containerRef.current?.querySelector("canvas");
@@ -980,7 +1039,25 @@ export default function MinecraftGame() {
 
   // === SCREENS ===
   if (screen === "main-menu") {
-    return <MainMenu iconUrls={iconUrls} onCreateWorld={() => setScreen("create-world")} />;
+    return (
+      <MainMenu
+        iconUrls={iconUrls}
+        onCreateWorld={() => setScreen("create-world")}
+        onLoadWorld={(name) => {
+          const saved = loadWorld(name);
+          if (saved) {
+            // Start world with saved config
+            worldConfigRef.current = { name: saved.name, seed: saved.seed, mode: saved.mode };
+            setCurrentWorld({ name: saved.name, seed: saved.seed, mode: saved.mode });
+            setScreen("playing");
+            setIsLoaded(false);
+            setIsDead(false);
+            // We'll apply the saved world in the effect via a ref
+            pendingLoadRef.current = saved;
+          }
+        }}
+      />
+    );
   }
   if (screen === "create-world") {
     return (
@@ -1148,13 +1225,20 @@ export default function MinecraftGame() {
                 ▶ Continuar jugando
               </button>
               <button
+                onClick={handleSaveWorld}
+                className="w-full py-3 bg-blue-700 hover:bg-blue-600 border-2 border-blue-500 rounded text-lg font-bold transition-colors font-mono"
+              >
+                💾 Guardar mundo
+              </button>
+              <button
                 onClick={handleExitToMenu}
                 className="w-full py-3 bg-red-800 hover:bg-red-700 border-2 border-red-500 rounded text-lg font-bold transition-colors font-mono"
               >
                 ✕ Abandonar mundo
               </button>
             </div>
-            <p className="mt-3 text-xs text-stone-400">El mundo no se guardará al abandonar</p>
+            {saveMessage && <p className="mt-2 text-xs text-green-400 font-mono">{saveMessage}</p>}
+            <p className="mt-2 text-xs text-stone-400">Guarda el mundo para continuar después</p>
           </div>
         </div>
       )}
@@ -1198,6 +1282,7 @@ export default function MinecraftGame() {
           inventory={inventoryRef.current}
           iconUrls={iconUrls}
           isCraftingTable={false}
+          isCreative={mode === "creative"}
           onClose={() => {
             setShowInventory(false);
           }}
@@ -1211,6 +1296,7 @@ export default function MinecraftGame() {
           inventory={inventoryRef.current}
           iconUrls={iconUrls}
           isCraftingTable={true}
+          isCreative={mode === "creative"}
           onClose={() => {
             setShowCraftingTable(false);
           }}
@@ -1237,10 +1323,19 @@ export default function MinecraftGame() {
 function MainMenu({
   iconUrls,
   onCreateWorld,
+  onLoadWorld,
 }: {
   iconUrls: Record<string, string>;
   onCreateWorld: () => void;
+  onLoadWorld: (name: string) => void;
 }) {
+  const [showLoadMenu, setShowLoadMenu] = useState(false);
+  const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
+
+  const refreshSavedWorlds = () => {
+    setSavedWorlds(listSavedWorlds());
+  };
+
   return (
     <div className="relative w-full h-screen overflow-hidden bg-gradient-to-b from-sky-400 via-sky-500 to-emerald-800 select-none">
       {/* Animated dirt background pattern */}
@@ -1266,21 +1361,68 @@ function MainMenu({
           </p>
         </div>
 
-        {/* Menu buttons (Minecraft style) */}
-        <div className="flex flex-col gap-3 w-full max-w-md">
-          <MenuButton primary onClick={onCreateWorld}>
-            Crear nuevo mundo
-          </MenuButton>
-          <MenuButton disabled>
-            Cargar mundo
-          </MenuButton>
-          <MenuButton disabled>
-            Opciones
-          </MenuButton>
-          <MenuButton disabled>
-            Salir del juego
-          </MenuButton>
-        </div>
+        {!showLoadMenu ? (
+          /* Main menu buttons */
+          <div className="flex flex-col gap-3 w-full max-w-md">
+            <MenuButton primary onClick={onCreateWorld}>
+              Crear nuevo mundo
+            </MenuButton>
+            <MenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }}>
+              Cargar mundo
+            </MenuButton>
+            <MenuButton disabled>
+              Opciones
+            </MenuButton>
+            <MenuButton disabled>
+              Salir del juego
+            </MenuButton>
+          </div>
+        ) : (
+          /* Load world menu */
+          <div className="w-full max-w-md">
+            <h2 className="text-2xl font-bold text-white font-mono mb-4 text-center">Mundos guardados</h2>
+            <div className="bg-stone-900/80 border-4 border-stone-700 rounded-lg p-4 max-h-80 overflow-y-auto">
+              {savedWorlds.length === 0 ? (
+                <p className="text-stone-400 text-center font-mono py-8">
+                  No hay mundos guardados.
+                  <br />
+                  Crea un mundo y guárdalo desde el menú de pausa.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {savedWorlds.map((w) => (
+                    <div key={w.name} className="flex gap-2 items-center bg-stone-800/80 border-2 border-stone-600 rounded p-2">
+                      <div className="flex-1">
+                        <div className="text-white font-mono font-bold">{w.name}</div>
+                        <div className="text-stone-400 text-xs font-mono">
+                          {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => onLoadWorld(w.name)}
+                        className="px-3 py-2 bg-green-700 hover:bg-green-600 border-2 border-green-500 text-white text-sm font-mono font-bold rounded"
+                      >
+                        ▶ Cargar
+                      </button>
+                      <button
+                        onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }}
+                        className="px-2 py-2 bg-red-800 hover:bg-red-700 border-2 border-red-500 text-white text-sm font-mono rounded"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setShowLoadMenu(false)}
+              className="w-full mt-4 py-2 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white font-mono rounded"
+            >
+              ← Volver
+            </button>
+          </div>
+        )}
 
         <p className="mt-12 text-white/60 text-xs font-mono">
           Minicraft no está afiliado con Mojang o Microsoft.

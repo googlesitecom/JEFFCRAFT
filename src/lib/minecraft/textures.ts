@@ -319,43 +319,41 @@ function texPlanks(): ImageData {
 }
 
 function texGlass(): ImageData {
-  // Glass: visible frame + semi-transparent interior (like real Minecraft glass)
+  // Glass: visible frame + transparent interior (like real Minecraft glass)
+  // The interior is FULLY transparent (alpha 0) so you can see through completely.
+  // Only the border/frame is opaque so the glass block edges are visible.
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
-  const border = [200, 220, 235] as [number, number, number];
-  const interior = [180, 210, 230] as [number, number, number];
+  const border = [180, 220, 240] as [number, number, number];
   const highlight = [255, 255, 255] as [number, number, number];
 
-  // Fill interior with semi-transparent light blue (alpha ~40 so you can see through but tinted)
+  // Start fully transparent (alpha 0) - interior is see-through
   for (let y = 0; y < TEX_SIZE; y++) {
     for (let x = 0; x < TEX_SIZE; x++) {
-      setPixel(img, x, y, interior, 35);
+      setPixel(img, x, y, [255, 255, 255], 0);
     }
   }
-  // Solid border (frame) - opaque so the glass block edges are visible
+
+  // Solid border (frame) - opaque so edges are visible
   for (let i = 0; i < TEX_SIZE; i++) {
     setPixel(img, i, 0, border, 255);
     setPixel(img, i, TEX_SIZE - 1, border, 255);
     setPixel(img, 0, i, border, 255);
     setPixel(img, TEX_SIZE - 1, i, border, 255);
   }
-  // Inner frame line (1 pixel inside) for definition
-  for (let i = 1; i < TEX_SIZE - 1; i++) {
-    setPixel(img, i, 1, border, 200);
-    setPixel(img, i, TEX_SIZE - 2, border, 200);
-    setPixel(img, 1, i, border, 200);
-    setPixel(img, TEX_SIZE - 2, i, border, 200);
+
+  // Diagonal highlight (reflection) in top-left - opaque white pixels
+  for (let i = 2; i < 6; i++) {
+    setPixel(img, i, i, highlight, 220);
   }
-  // Diagonal highlight (reflection) in top-left
-  for (let i = 3; i < 8; i++) {
-    setPixel(img, i, i, highlight, 120);
-  }
+  setPixel(img, 3, 2, highlight, 200);
+  setPixel(img, 2, 3, highlight, 200);
   setPixel(img, 4, 3, highlight, 180);
   setPixel(img, 3, 4, highlight, 180);
-  setPixel(img, 5, 4, highlight, 150);
-  setPixel(img, 4, 5, highlight, 150);
+
   // Small highlight in bottom-right
-  setPixel(img, 11, 11, highlight, 100);
-  setPixel(img, 12, 10, highlight, 80);
+  setPixel(img, 12, 12, highlight, 150);
+  setPixel(img, 13, 11, highlight, 120);
+
   return img;
 }
 

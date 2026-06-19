@@ -95,7 +95,7 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
   [BlockType.Glass]: {
     id: BlockType.Glass, name: "Glass",
     textures: { top: "glass", bottom: "glass", side: "glass" },
-    layer: "translucent", solid: true,
+    layer: "cutout", solid: true,
   },
   [BlockType.Brick]: {
     id: BlockType.Brick, name: "Bricks",
@@ -201,3 +201,9 @@ export const HOTBAR_BLOCKS: BlockType[] = [
   BlockType.Sand,
   BlockType.Glass,
 ];
+
+// Get ALL valid block ids (for creative inventory)
+export function getAllBlockIds(): BlockType[] {
+  return Object.values(BlockType).filter((v) => typeof v === "number") as BlockType[];
+}
+
