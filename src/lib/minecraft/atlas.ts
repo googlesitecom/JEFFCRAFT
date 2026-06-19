@@ -1,8 +1,7 @@
-// Texture atlas builder with stable, deterministic tile order
+// Texture atlas builder with stable, deterministic tile order.
+// Uses padding between tiles to prevent texture bleeding at any resolution/filter.
 import * as THREE from "three";
 
-// Ordered list of texture names - this order is FIXED and deterministic.
-// Adding new textures here MUST append to the end to preserve existing UV mappings.
 export const TEXTURE_NAMES = [
   "dirt",
   "grass_top",
@@ -30,11 +29,13 @@ export const TEXTURE_NAMES = [
 
 export type TextureName = (typeof TEXTURE_NAMES)[number];
 
-const ATLAS_TILE = 16;
+const ATLAS_TILE = 16; // source tile size
+const ATLAS_PADDING = 4; // padding pixels around each tile to prevent bleeding
+const TILE_TOTAL = ATLAS_TILE + ATLAS_PADDING * 2; // 24px per tile slot
 const ATLAS_COLS = 8;
 const ATLAS_ROWS = 4;
-const ATLAS_W = ATLAS_TILE * ATLAS_COLS;
-const ATLAS_H = ATLAS_TILE * ATLAS_ROWS;
+const ATLAS_W = TILE_TOTAL * ATLAS_COLS; // 192
+const ATLAS_H = TILE_TOTAL * ATLAS_ROWS; // 96
 
 export interface AtlasTile {
   u0: number;
@@ -67,28 +68,64 @@ export function buildAtlas(
   TEXTURE_NAMES.forEach((name, i) => {
     const col = i % ATLAS_COLS;
     const row = Math.floor(i / ATLAS_COLS);
-    const x = col * ATLAS_TILE;
-    const y = row * ATLAS_TILE;
+    const x = col * TILE_TOTAL + ATLAS_PADDING;
+    const y = row * TILE_TOTAL + ATLAS_PADDING;
     const src = textureCanvases[name];
     if (src) {
+      // Draw the 16x16 tile, then repeat its edge pixels into the padding
+      // (edge padding) to prevent bleeding at any filter
       ctx.drawImage(src, x, y, ATLAS_TILE, ATLAS_TILE);
+      // Top padding: copy top row
+      const topImg = ctx.getImageData(x, y, ATLAS_TILE, 1);
+      for (let p = 1; p <= ATLAS_PADDING; p++) {
+        ctx.putImageData(topImg, x, y - p);
+      }
+      // Bottom padding: copy bottom row
+      const botImg = ctx.getImageData(x, y + ATLAS_TILE - 1, ATLAS_TILE, 1);
+      for (let p = 0; p < ATLAS_PADDING; p++) {
+        ctx.putImageData(botImg, x, y + ATLAS_TILE + p);
+      }
+      // Left padding: copy left column
+      const leftImg = ctx.getImageData(x, y, 1, ATLAS_TILE);
+      for (let p = 1; p <= ATLAS_PADDING; p++) {
+        ctx.putImageData(leftImg, x - p, y);
+      }
+      // Right padding: copy right column
+      const rightImg = ctx.getImageData(x + ATLAS_TILE - 1, y, 1, ATLAS_TILE);
+      for (let p = 0; p < ATLAS_PADDING; p++) {
+        ctx.putImageData(rightImg, x + ATLAS_TILE + p, y);
+      }
+      // Corner padding: copy corner pixels
+      const tl = ctx.getImageData(x, y, 1, 1);
+      const tr = ctx.getImageData(x + ATLAS_TILE - 1, y, 1, 1);
+      const bl = ctx.getImageData(x, y + ATLAS_TILE - 1, 1, 1);
+      const br = ctx.getImageData(x + ATLAS_TILE - 1, y + ATLAS_TILE - 1, 1, 1);
+      for (let py = 1; py <= ATLAS_PADDING; py++) {
+        for (let px = 1; px <= ATLAS_PADDING; px++) {
+          ctx.putImageData(tl, x - px, y - py);
+          ctx.putImageData(tr, x + ATLAS_TILE - 1 + px, y - py);
+          ctx.putImageData(bl, x - px, y + ATLAS_TILE - 1 + py);
+          ctx.putImageData(br, x + ATLAS_TILE - 1 + px, y + ATLAS_TILE - 1 + py);
+        }
+      }
     }
-    // UV coords with inset to prevent bleeding
-    const inset = 0.5 / ATLAS_W;
+    // UV coords - map to the 16x16 inner tile (padding excluded from UV range)
     tiles[name] = {
-      u0: (x + inset) / ATLAS_W,
-      v0: 1 - (y + ATLAS_TILE - inset) / ATLAS_H,
-      u1: (x + ATLAS_TILE - inset) / ATLAS_W,
-      v1: 1 - (y + inset) / ATLAS_H,
+      u0: x / ATLAS_W,
+      v0: 1 - (y + ATLAS_TILE) / ATLAS_H,
+      u1: (x + ATLAS_TILE) / ATLAS_W,
+      v1: 1 - y / ATLAS_H,
     };
   });
 
   const atlasTexture = new THREE.CanvasTexture(canvas);
+  // Use linear filtering with mipmaps for stable rendering at distance
   atlasTexture.magFilter = THREE.NearestFilter;
   atlasTexture.minFilter = THREE.NearestFilter;
   atlasTexture.generateMipmaps = false;
   atlasTexture.wrapS = THREE.ClampToEdgeWrapping;
   atlasTexture.wrapT = THREE.ClampToEdgeWrapping;
+  atlasTexture.colorSpace = THREE.SRGBColorSpace;
   atlasTexture.needsUpdate = true;
 
   return { texture: atlasTexture, tiles };
@@ -101,4 +138,12 @@ export function getSharedAtlas(
     atlasInstance = buildAtlas(textureCanvases);
   }
   return atlasInstance;
+}
+
+// Reset cached atlas (used when entering a new game session)
+export function resetAtlas() {
+  if (atlasInstance) {
+    atlasInstance.texture.dispose();
+    atlasInstance = null;
+  }
 }

@@ -13,6 +13,14 @@ const SPRINT_SPEED = 7.5;
 const FLY_SPEED = 9;
 const MAX_FALL = 50;
 
+// Water physics
+const WATER_GRAVITY = 4; // slower fall in water
+const WATER_BUOYANCY = 8; // upward force when in water (submerged feet)
+const WATER_SWIM_SPEED = 3.5; // horizontal speed in water
+const WATER_SWIM_UP = 4; // upward speed when pressing space in water
+const MAX_AIR = 10; // seconds of air
+const DROWN_DAMAGE = 2; // damage per second when drowning
+
 export type GameMode = "creative" | "survival";
 
 export class Player {
@@ -26,18 +34,20 @@ export class Player {
   camera: THREE.PerspectiveCamera;
   mode: GameMode;
 
-  // Survival stats (0-20, like Minecraft)
+  // Survival stats
   health: number = 20;
   maxHealth: number = 20;
   hunger: number = 20;
   maxHunger: number = 20;
-  // Fall damage tracking
+  air: number = MAX_AIR; // seconds of air remaining
   fallStartY: number = 0;
-  wasFlying: boolean = false;
+
+  // Water state
+  inWater: boolean = false;
+  headInWater: boolean = false;
 
   // Input state
   keys: Record<string, boolean> = {};
-  // Mouse move delta accumulated
   mouseDeltaX: number = 0;
   mouseDeltaY: number = 0;
 
@@ -65,10 +75,7 @@ export class Player {
   }
 
   toggleFly() {
-    if (this.mode === "survival") {
-      // No fly in survival
-      return;
-    }
+    if (this.mode === "survival") return;
     this.flying = !this.flying;
     this.velocity.y = 0;
   }
@@ -92,7 +99,22 @@ export class Player {
     this.velocity.set(0, 0, 0);
     this.health = this.maxHealth;
     this.hunger = this.maxHunger;
+    this.air = MAX_AIR;
     this.fallStartY = this.position.y;
+  }
+
+  // Check if a given Y level (relative to feet) is in water
+  private isYInWater(y: number): boolean {
+    const x = Math.floor(this.position.x);
+    const z = Math.floor(this.position.z);
+    const blockY = Math.floor(y);
+    return this.world.getBlock(x, blockY, z) === BlockType.Water;
+  }
+
+  // Get water current at player position (based on neighboring water heights)
+  private getWaterCurrent(): THREE.Vector3 {
+    // Simplified: no horizontal current in this version
+    return new THREE.Vector3(0, 0, 0);
   }
 
   update(dt: number) {
@@ -109,8 +131,22 @@ export class Player {
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
+    // Check water state - feet and head positions
+    this.inWater = this.isYInWater(this.position.y + 0.2);
+    this.headInWater = this.isYInWater(this.position.y + EYE_OFFSET);
+
     const sprint = this.keys["ShiftLeft"] || this.keys["ShiftRight"];
-    const speed = this.flying ? FLY_SPEED : sprint ? SPRINT_SPEED : WALK_SPEED;
+
+    let speed: number;
+    if (this.flying) {
+      speed = FLY_SPEED;
+    } else if (this.inWater) {
+      speed = WATER_SWIM_SPEED;
+    } else if (sprint) {
+      speed = SPRINT_SPEED;
+    } else {
+      speed = WALK_SPEED;
+    }
 
     let moveX = 0;
     let moveZ = 0;
@@ -137,6 +173,7 @@ export class Player {
     }
 
     if (this.flying) {
+      // Creative flying
       this.velocity.x = moveX;
       this.velocity.z = moveZ;
       let vy = 0;
@@ -144,24 +181,37 @@ export class Player {
       else if (this.keys["ControlLeft"] || this.keys["KeyQ"]) vy = -FLY_SPEED;
       else vy = 0;
       this.velocity.y = vy;
+    } else if (this.inWater) {
+      // Water physics: buoyancy + horizontal swim
+      this.velocity.x = moveX;
+      this.velocity.z = moveZ;
+      // Upward swim with Space
+      if (this.keys["Space"]) {
+        this.velocity.y = WATER_SWIM_UP;
+      } else {
+        // Slower gravity in water, with mild buoyancy
+        this.velocity.y -= WATER_GRAVITY * dt;
+        // If feet are in water, apply slight buoyancy (float up slowly)
+        if (this.velocity.y < -2) this.velocity.y = -2;
+      }
+      // Damping
+      this.velocity.y *= 0.95;
     } else {
-      // Horizontal: instant set (arcade-like)
+      // Normal land physics
       this.velocity.x = moveX;
       this.velocity.z = moveZ;
 
-      // Jump
       if (this.keys["Space"] && this.onGround) {
         this.velocity.y = JUMP_SPEED;
         this.onGround = false;
       }
 
-      // Gravity
       this.velocity.y -= GRAVITY * dt;
       if (this.velocity.y < -MAX_FALL) this.velocity.y = -MAX_FALL;
     }
 
-    // Track fall start for fall damage in survival
-    if (this.mode === "survival" && !this.flying) {
+    // Track fall start for fall damage (only when not in water)
+    if (this.mode === "survival" && !this.flying && !this.inWater) {
       if (this.onGround || this.velocity.y >= 0) {
         this.fallStartY = this.position.y;
       }
@@ -172,24 +222,37 @@ export class Player {
     this.moveAxis("y", this.velocity.y * dt);
     this.moveAxis("z", this.velocity.z * dt);
 
-    // Apply fall damage when landing
-    if (this.mode === "survival" && !this.flying && this.onGround) {
+    // Apply fall damage when landing (no fall damage in water)
+    if (this.mode === "survival" && !this.flying && !this.inWater && this.onGround) {
       const fallDist = this.fallStartY - this.position.y;
       if (fallDist > 3) {
-        // 1 damage per block beyond 3
         const dmg = Math.floor(fallDist - 3);
-        if (dmg > 0) {
-          this.damage(dmg);
-        }
+        if (dmg > 0) this.damage(dmg);
       }
       this.fallStartY = this.position.y;
     }
 
-    // Slowly regenerate hunger in creative; in survival, hunger drains slowly
+    // Air / drowning
     if (this.mode === "survival") {
-      this.hunger = Math.max(0, this.hunger - dt * 0.15);
+      if (this.headInWater) {
+        this.air -= dt;
+        if (this.air <= 0) {
+          this.damage(DROWN_DAMAGE * dt);
+        }
+      } else {
+        this.air = Math.min(MAX_AIR, this.air + dt * 2);
+      }
+    }
+
+    // Hunger drain and regen
+    if (this.mode === "survival") {
+      this.hunger = Math.max(0, this.hunger - dt * 0.1);
       if (this.hunger > 17 && this.health < this.maxHealth) {
         this.heal(dt * 1.0);
+      }
+      // Starvation damage when hunger reaches 0
+      if (this.hunger <= 0) {
+        this.damage(dt * 0.5);
       }
     }
 
@@ -202,9 +265,7 @@ export class Player {
     this.resolveCollision(axis, amount);
   }
 
-  // Check collision against the world. If colliding, push back along the axis we just moved.
   private resolveCollision(axis: "x" | "y" | "z", amount: number) {
-    // Player AABB: width PLAYER_WIDTH (so half = 0.3), height PLAYER_HEIGHT
     const half = PLAYER_WIDTH / 2;
     const minX = Math.floor(this.position.x - half);
     const maxX = Math.floor(this.position.x + half);
@@ -219,15 +280,12 @@ export class Player {
         for (let z = minZ; z <= maxZ; z++) {
           const b = this.world.getBlock(x, y, z);
           if (!isSolid(b)) continue;
-          // Collision detected
           collided = true;
           if (axis === "y") {
             if (amount > 0) {
-              // Moving up: hit ceiling
               this.position.y = y - PLAYER_HEIGHT - 0.001;
               this.velocity.y = 0;
             } else {
-              // Moving down: hit floor
               this.position.y = y + 1 + 0.001;
               this.velocity.y = 0;
               this.onGround = true;
@@ -262,14 +320,12 @@ export class Player {
       this.position.y + EYE_OFFSET,
       this.position.z
     );
-    // Build rotation from yaw and pitch (YXZ order)
     this.camera.rotation.order = "YXZ";
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
     this.camera.rotation.z = 0;
   }
 
-  // Raycast for block selection (DDA voxel traversal)
   raycast(maxDist: number = 6): {
     hit: boolean;
     block: { x: number; y: number; z: number } | null;
@@ -280,7 +336,6 @@ export class Player {
       this.position.y + EYE_OFFSET,
       this.position.z
     );
-    // Direction from yaw/pitch
     const dir = new THREE.Vector3(
       -Math.sin(this.yaw) * Math.cos(this.pitch),
       Math.sin(this.pitch),
@@ -308,9 +363,7 @@ export class Player {
     let dist = 0;
 
     while (dist < maxDist) {
-      if (
-        y >= 0 && y < WORLD_HEIGHT
-      ) {
+      if (y >= 0 && y < WORLD_HEIGHT) {
         const b = this.world.getBlock(x, y, z);
         if (b !== BlockType.Air && b !== BlockType.Water) {
           const normal = { x: 0, y: 0, z: 0 };

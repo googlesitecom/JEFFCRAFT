@@ -6,7 +6,7 @@ import { World, CHUNK_SIZE, WORLD_HEIGHT } from "@/lib/minecraft/world";
 import { Player, GameMode } from "@/lib/minecraft/player";
 import { buildChunkGeometry, ChunkMeshes } from "@/lib/minecraft/mesher";
 import { buildTextureCanvases, buildIconDataURLs } from "@/lib/minecraft/textures";
-import { getSharedAtlas } from "@/lib/minecraft/atlas";
+import { getSharedAtlas, resetAtlas } from "@/lib/minecraft/atlas";
 import { BlockType, BLOCKS, HOTBAR_BLOCKS } from "@/lib/minecraft/blocks";
 
 const RENDER_RADIUS = 5;
@@ -20,31 +20,34 @@ interface GameStats {
   chunks: number;
   health: number;
   hunger: number;
+  air: number;
+  inWater: boolean;
+  headInWater: boolean;
 }
 
+interface WorldConfig {
+  name: string;
+  seed: number;
+  mode: GameMode;
+}
+
+// =============== MAIN COMPONENT ===============
 export default function MinecraftGame() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [screen, setScreen] = useState<"menu" | "playing">("menu");
-  const [selectedMode, setSelectedMode] = useState<GameMode>("creative");
+  const [screen, setScreen] = useState<"main-menu" | "create-world" | "playing">("main-menu");
+  const [currentWorld, setCurrentWorld] = useState<WorldConfig | null>(null);
   const [selectedSlot, setSelectedSlot] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
   const [stats, setStats] = useState<GameStats>({
-    fps: 0,
-    x: 0,
-    y: 0,
-    z: 0,
-    chunks: 0,
-    health: 20,
-    hunger: 20,
+    fps: 0, x: 0, y: 0, z: 0, chunks: 0,
+    health: 20, hunger: 20, air: 10, inWater: false, headInWater: false,
   });
   const [iconUrls, setIconUrls] = useState<Record<string, string>>({});
   const [isDead, setIsDead] = useState(false);
 
-  // Refs that the game loop reads without re-creating the effect
   const selectedSlotRef = useRef(0);
-  const modeRef = useRef<GameMode>("creative");
-  const startGameRef = useRef<((mode: GameMode) => void) | null>(null);
+  const worldConfigRef = useRef<WorldConfig | null>(null);
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -54,11 +57,12 @@ export default function MinecraftGame() {
     setIconUrls(buildIconDataURLs(buildTextureCanvases()));
   }, []);
 
-  // === Main game effect: only runs when user clicks "Play" ===
+  // === Main game effect ===
   useEffect(() => {
-    if (screen !== "playing") return;
+    if (screen !== "playing" || !worldConfigRef.current) return;
     if (!containerRef.current) return;
 
+    const config = worldConfigRef.current;
     const container = containerRef.current;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -87,32 +91,33 @@ export default function MinecraftGame() {
     scene.add(hemi);
 
     // === Build atlas and shared materials ===
+    resetAtlas();
     const canvases = buildTextureCanvases();
     const atlas = getSharedAtlas(canvases);
-    // Opaque material: solid blocks + leaves + glass (cutout via alphaTest for glass holes)
+    // Opaque material: solid + cutout (glass) - depthWrite on, alphaTest discards empty glass pixels
     const opaqueMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
       side: THREE.FrontSide,
-      alphaTest: 0.1, // discard pixels with alpha < 0.1 (glass border holes)
+      alphaTest: 0.5,
       transparent: false,
       depthWrite: true,
     });
-    // Transparent material: water only (alpha-blended)
+    // Transparent material: water only - alpha blended, depthWrite off
     const transparentMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.7,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
 
     // === World & Player ===
-    const world = new World(2024);
-    const player = new Player(world, camera, modeRef.current);
+    const world = new World(config.seed);
+    const player = new Player(world, camera, config.mode);
 
-    // === Chunk manager state ===
+    // === Chunk manager ===
     const chunkMeshes: Map<string, ChunkMeshes> = new Map();
     const chunkGroup = new THREE.Group();
     scene.add(chunkGroup);
@@ -208,7 +213,6 @@ export default function MinecraftGame() {
       }
     }
 
-    // Initial chunk load
     function initialLoad() {
       const pcx = Math.floor(player.position.x / CHUNK_SIZE);
       const pcz = Math.floor(player.position.z / CHUNK_SIZE);
@@ -238,7 +242,6 @@ export default function MinecraftGame() {
       buildChunk(cx, cz);
     }
 
-    // Place block at the targeted face (used by right-click AND M key)
     function placeBlock(): boolean {
       const result = player.raycast(6);
       if (!result.hit || !result.block || !result.normal) return false;
@@ -285,13 +288,23 @@ export default function MinecraftGame() {
       return true;
     }
 
-    // === Block highlight wireframe ===
-    const highlightGeo = new THREE.BoxGeometry(1.002, 1.002, 1.002);
+    // Block highlight
+    const highlightGeo = new THREE.BoxGeometry(1.005, 1.005, 1.005);
     const highlightEdges = new THREE.EdgesGeometry(highlightGeo);
     const highlightMat = new THREE.LineBasicMaterial({ color: 0x000000 });
     const highlight = new THREE.LineSegments(highlightEdges, highlightMat);
     highlight.visible = false;
     scene.add(highlight);
+
+    // Underwater overlay (blue tint when head in water)
+    const waterOverlay = document.createElement("div");
+    waterOverlay.style.position = "absolute";
+    waterOverlay.style.inset = "0";
+    waterOverlay.style.pointerEvents = "none";
+    waterOverlay.style.zIndex = "5";
+    waterOverlay.style.background = "rgba(40, 90, 200, 0.35)";
+    waterOverlay.style.display = "none";
+    container.appendChild(waterOverlay);
 
     // === Input handling ===
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -307,15 +320,9 @@ export default function MinecraftGame() {
         }
       }
 
-      if (e.code === "KeyF") {
-        player.toggleFly();
-      }
-      if (e.code === "KeyM") {
-        placeBlock();
-      }
-      if (e.code === "Escape") {
-        document.exitPointerLock();
-      }
+      if (e.code === "KeyF") player.toggleFly();
+      if (e.code === "KeyM") placeBlock();
+      if (e.code === "Escape") document.exitPointerLock();
       if (e.code === "Space" || e.code === "ArrowUp" || e.code === "ArrowDown") {
         e.preventDefault();
       }
@@ -334,11 +341,8 @@ export default function MinecraftGame() {
 
     const handleMouseDown = (e: MouseEvent) => {
       if (document.pointerLockElement !== renderer.domElement) return;
-      if (e.button === 0) {
-        breakBlock();
-      } else if (e.button === 2) {
-        placeBlock();
-      }
+      if (e.button === 0) breakBlock();
+      else if (e.button === 2) placeBlock();
     };
     renderer.domElement.addEventListener("mousedown", handleMouseDown);
     renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -381,24 +385,26 @@ export default function MinecraftGame() {
     let fpsTime = lastTime;
     let rafId = 0;
     let posUpdateCounter = 0;
+    let waterAnimTime = 0;
 
     const animate = () => {
       rafId = requestAnimationFrame(animate);
       const now = performance.now();
       const dt = Math.min(0.05, (now - lastTime) / 1000);
       lastTime = now;
+      waterAnimTime += dt;
 
       if (document.pointerLockElement === renderer.domElement && !player.isDead()) {
         player.update(dt);
       }
 
-      // Check death
       if (player.isDead()) {
         setIsDead(true);
       }
 
       updateChunkLoading();
 
+      // Highlight
       const hit = player.raycast(6);
       if (hit.hit && hit.block) {
         highlight.visible = true;
@@ -407,6 +413,12 @@ export default function MinecraftGame() {
         highlight.visible = false;
       }
 
+      // Water overlay
+      waterOverlay.style.display = player.headInWater ? "block" : "none";
+
+      // Slightly tint water material with time for animated feel
+      // (kept simple - just keep opacity stable)
+
       renderer.render(scene, camera);
 
       frameCount++;
@@ -414,7 +426,6 @@ export default function MinecraftGame() {
         const newFps = Math.round((frameCount * 1000) / (now - fpsTime));
         frameCount = 0;
         fpsTime = now;
-        posUpdateCounter = 99; // force update
         setStats((s) => ({
           ...s,
           fps: newFps,
@@ -422,7 +433,7 @@ export default function MinecraftGame() {
         }));
       }
       posUpdateCounter++;
-      if (posUpdateCounter > 10) {
+      if (posUpdateCounter > 8) {
         setStats((s) => ({
           ...s,
           x: Math.floor(player.position.x),
@@ -430,13 +441,15 @@ export default function MinecraftGame() {
           z: Math.floor(player.position.z),
           health: player.health,
           hunger: player.hunger,
+          air: player.air,
+          inWater: player.inWater,
+          headInWater: player.headInWater,
         }));
         posUpdateCounter = 0;
       }
     };
     animate();
 
-    // === Cleanup ===
     return () => {
       cancelAnimationFrame(rafId);
       window.removeEventListener("keydown", handleKeyDown);
@@ -458,35 +471,35 @@ export default function MinecraftGame() {
       if (renderer.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
       }
+      if (waterOverlay.parentElement === container) {
+        container.removeChild(waterOverlay);
+      }
     };
   }, [screen]);
 
-  // === Start game function (from menu) ===
-  const startGame = useCallback((mode: GameMode) => {
-    modeRef.current = mode;
-    setSelectedMode(mode);
+  const startWorld = useCallback((config: WorldConfig) => {
+    worldConfigRef.current = config;
+    setCurrentWorld(config);
     setScreen("playing");
     setIsLoaded(false);
     setIsDead(false);
   }, []);
 
-  // Keep startGame ref in sync for the menu component
-  useEffect(() => {
-    startGameRef.current = startGame;
-  }, [startGame]);
-
   const handleRespawn = useCallback(() => {
-    // Restart the playing effect by toggling screen
-    setScreen("menu");
+    setScreen("main-menu");
     setTimeout(() => {
-      setScreen("playing");
-      setIsDead(false);
+      if (worldConfigRef.current) {
+        setScreen("playing");
+        setIsLoaded(false);
+        setIsDead(false);
+      }
     }, 50);
   }, []);
 
   const handleExitToMenu = useCallback(() => {
-    setScreen("menu");
+    setScreen("main-menu");
     setIsDead(false);
+    setCurrentWorld(null);
   }, []);
 
   const handleStartClick = useCallback(() => {
@@ -494,17 +507,25 @@ export default function MinecraftGame() {
     canvas?.requestPointerLock();
   }, []);
 
-  // === MENU SCREEN ===
-  if (screen === "menu") {
-    return <MainMenu iconUrls={iconUrls} onStart={startGame} />;
+  // === SCREENS ===
+  if (screen === "main-menu") {
+    return <MainMenu iconUrls={iconUrls} onCreateWorld={() => setScreen("create-world")} />;
+  }
+  if (screen === "create-world") {
+    return (
+      <CreateWorldScreen
+        onCancel={() => setScreen("main-menu")}
+        onCreate={startWorld}
+      />
+    );
   }
 
   // === GAME SCREEN ===
+  const mode = currentWorld?.mode || "creative";
   return (
     <div className="relative w-full h-screen overflow-hidden bg-sky-400 select-none">
       <div ref={containerRef} className="absolute inset-0" />
 
-      {/* Crosshair */}
       {isLocked && !isDead && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
           <div className="relative w-6 h-6">
@@ -514,36 +535,37 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* HUD top-left */}
+      {/* HUD */}
       <div className="absolute top-2 left-2 z-20 text-white font-mono text-xs sm:text-sm bg-black/50 px-2 py-1 rounded">
+        <div className="font-bold text-yellow-300">{currentWorld?.name || "Mundo"}</div>
         <div>FPS: {stats.fps}</div>
         <div>X: {stats.x} Y: {stats.y} Z: {stats.z}</div>
         <div>Chunks: {stats.chunks}</div>
         <div className="mt-1 text-white/70">{BLOCKS[HOTBAR_BLOCKS[selectedSlot]].name}</div>
-        <div className="mt-1 text-yellow-300/80">{selectedMode === "creative" ? "Creativo" : "Survival"}</div>
+        <div className="mt-1 text-yellow-300/80">{mode === "creative" ? "Creativo" : "Survival"}</div>
       </div>
 
-      {/* Survival stats: hearts + hunger */}
-      {selectedMode === "survival" && (
+      {/* Survival stats */}
+      {mode === "survival" && (
         <>
-          {/* Hearts */}
           <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 flex gap-0.5">
-            {Array.from({ length: 10 }).map((_, i) => {
-              const filled = Math.min(2, Math.max(0, stats.health - i * 2));
-              return (
-                <Heart key={i} filled={filled} />
-              );
-            })}
+            {Array.from({ length: 10 }).map((_, i) => (
+              <Heart key={i} filled={Math.min(2, Math.max(0, stats.health - i * 2))} />
+            ))}
           </div>
-          {/* Hunger */}
           <div className="absolute bottom-20 left-1/2 translate-x-[180px] z-20 flex gap-0.5">
-            {Array.from({ length: 10 }).map((_, i) => {
-              const filled = Math.min(2, Math.max(0, stats.hunger - i * 2));
-              return (
-                <Drumstick key={i} filled={filled} />
-              );
-            })}
+            {Array.from({ length: 10 }).map((_, i) => (
+              <Drumstick key={i} filled={Math.min(2, Math.max(0, stats.hunger - i * 2))} />
+            ))}
           </div>
+          {/* Air bubbles */}
+          {stats.air < 10 && (
+            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 translate-y-[-30px] z-20 flex gap-0.5">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <Bubble key={i} filled={stats.air > i} />
+              ))}
+            </div>
+          )}
         </>
       )}
 
@@ -563,13 +585,7 @@ export default function MinecraftGame() {
               style={{ imageRendering: "pixelated" }}
             >
               {iconUrl && (
-                <img
-                  src={iconUrl}
-                  alt={def.name}
-                  className="w-10 h-10 sm:w-12 sm:h-12"
-                  style={{ imageRendering: "pixelated" }}
-                  draggable={false}
-                />
+                <img src={iconUrl} alt={def.name} className="w-10 h-10 sm:w-12 sm:h-12" style={{ imageRendering: "pixelated" }} draggable={false} />
               )}
               <span className="absolute top-0 left-1 text-[10px] text-white/80 font-mono">{i + 1}</span>
             </div>
@@ -577,30 +593,25 @@ export default function MinecraftGame() {
         })}
       </div>
 
-      {/* Start overlay (when not pointer-locked yet) */}
+      {/* Start overlay */}
       {!isLocked && isLoaded && !isDead && (
-        <div
-          className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer bg-black/50 backdrop-blur-sm"
-          onClick={handleStartClick}
-        >
-          <div className="bg-stone-800/90 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
+        <div className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer bg-black/60 backdrop-blur-sm" onClick={handleStartClick}>
+          <div className="bg-stone-800/95 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
             <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-wide" style={{ fontFamily: "monospace" }}>
-              MINICRAFT
+              {currentWorld?.name || "MINICRAFT"}
             </h1>
             <p className="mb-3 text-stone-300 text-sm">
-              Modo: <span className="text-yellow-400 font-bold">{selectedMode === "creative" ? "Creativo" : "Survival"}</span>
+              Modo: <span className="text-yellow-400 font-bold">{mode === "creative" ? "Creativo" : "Survival"}</span>
             </p>
             <div className="text-left text-xs sm:text-sm space-y-1 bg-stone-900/60 p-4 rounded">
               <div><span className="text-yellow-400 font-bold">WASD</span> — Moverse</div>
               <div><span className="text-yellow-400 font-bold">Mouse</span> — Mirar alrededor</div>
-              <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar</div>
+              <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
               <div><span className="text-yellow-400 font-bold">Click izq</span> — Romper bloque</div>
               <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque</div>
               <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar bloque</div>
-              {selectedMode === "creative" && (
-                <div><span className="text-yellow-400 font-bold">F</span> — Activar/desactivar vuelo</div>
-              )}
+              {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
             <p className="mt-3 text-xs text-stone-400">Click para jugar</p>
@@ -614,16 +625,10 @@ export default function MinecraftGame() {
           <div className="text-center text-white">
             <h1 className="text-5xl font-bold mb-6" style={{ fontFamily: "monospace" }}>¡Has muerto!</h1>
             <div className="flex gap-4 justify-center">
-              <button
-                onClick={handleRespawn}
-                className="px-6 py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 rounded text-lg font-bold transition-colors"
-              >
+              <button onClick={handleRespawn} className="px-6 py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 rounded text-lg font-bold transition-colors">
                 Reaparecer
               </button>
-              <button
-                onClick={handleExitToMenu}
-                className="px-6 py-3 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 rounded text-lg font-bold transition-colors"
-              >
+              <button onClick={handleExitToMenu} className="px-6 py-3 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 rounded text-lg font-bold transition-colors">
                 Menú principal
               </button>
             </div>
@@ -631,7 +636,6 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* Loading screen */}
       {!isLoaded && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
           <div className="text-white font-mono text-xl">Generando mundo...</div>
@@ -641,178 +645,295 @@ export default function MinecraftGame() {
   );
 }
 
-// === Heart icon for health ===
-function Heart({ filled }: { filled: number }) {
-  // filled: 0 (empty), 1 (half), 2 (full)
-  return (
-    <svg width="18" height="18" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
-      {/* Empty heart background (dark) */}
-      <path
-        d="M3,2 L5,2 L5,3 L3,3 Z M5,3 L7,3 L7,4 L5,4 Z M7,4 L9,4 L9,5 L7,5 Z M9,3 L11,3 L11,4 L9,4 Z M11,2 L13,2 L13,3 L11,3 Z M3,3 L2,3 L2,5 L3,5 Z M13,3 L14,3 L14,5 L13,5 Z M2,5 L3,5 L3,6 L2,6 Z M13,5 L14,5 L14,6 L13,6 Z M3,6 L4,6 L4,7 L3,7 Z M12,6 L13,6 L13,7 L12,7 Z M4,7 L5,7 L5,8 L4,8 Z M11,7 L12,7 L12,8 L11,8 Z M5,8 L6,8 L6,9 L5,9 Z M10,8 L11,8 L11,9 L10,9 Z M6,9 L7,9 L7,10 L6,10 Z M9,9 L10,9 L10,10 L9,10 Z M7,10 L8,10 L8,11 L7,11 Z M8,10 L9,10 L9,11 L8,11 Z"
-        fill="#3a0000"
-      />
-      {/* Filled portion (red) */}
-      {filled >= 1 && (
-        <path
-          d="M4,3 L5,3 L5,4 L4,4 Z M6,4 L7,4 L7,5 L6,5 Z M8,4 L9,4 L9,5 L8,5 Z M10,3 L11,3 L11,4 L10,4 Z M3,4 L4,4 L4,5 L3,5 Z M12,4 L13,4 L13,5 L12,5 Z M3,5 L4,5 L4,6 L3,6 Z M12,5 L13,5 L13,6 L12,6 Z M4,6 L5,5 L5,6 L4,6 Z M11,6 L12,6 L12,5 L11,5 Z M5,7 L6,7 L6,8 L5,8 Z M10,7 L11,7 L11,8 L10,8 Z M6,8 L7,8 L7,9 L6,9 Z M9,8 L10,8 L10,9 L9,9 Z M7,9 L8,9 L8,10 L7,10 Z M8,9 L9,9 L9,10 L8,10 Z"
-          fill="#ff0000"
-        />
-      )}
-    </svg>
-  );
-}
-
-// === Drumstick icon for hunger ===
-function Drumstick({ filled }: { filled: number }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
-      {/* Empty (dark) */}
-      <path
-        d="M10,2 L12,2 L12,3 L13,3 L13,4 L14,4 L14,5 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,13 L5,13 L5,14 L4,14 L4,13 L3,13 L3,12 L4,12 L4,11 L5,11 L5,10 L6,10 L6,9 L7,9 L7,8 L8,8 L8,7 L9,7 L9,6 L10,6 L10,5 L11,5 L11,4 L10,4 Z"
-        fill="#3a2a00"
-      />
-      {/* Filled (brown) */}
-      {filled >= 1 && (
-        <path
-          d="M10,3 L11,3 L11,4 L12,4 L12,5 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,11 L7,11 L7,10 L8,10 L8,9 L9,9 L9,8 L10,8 L10,7 L11,7 L11,6 L12,6 L12,5 L11,5 L11,4 L10,4 Z"
-          fill="#8b4513"
-        />
-      )}
-      {filled >= 2 && (
-        <path
-          d="M5,12 L6,12 L6,13 L5,13 Z M4,13 L5,13 L5,14 L4,14 Z"
-          fill="#deb887"
-        />
-      )}
-    </svg>
-  );
-}
-
-// === Main Menu Component ===
+// =============== MAIN MENU (Minecraft-style) ===============
 function MainMenu({
   iconUrls,
-  onStart,
+  onCreateWorld,
 }: {
   iconUrls: Record<string, string>;
-  onStart: (mode: GameMode) => void;
+  onCreateWorld: () => void;
 }) {
-  const [hovered, setHovered] = useState<GameMode | null>(null);
-
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-gradient-to-b from-sky-400 via-sky-500 to-emerald-700 select-none">
-      {/* Animated background blocks (decorative) */}
-      <div className="absolute inset-0 opacity-30 pointer-events-none">
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-green-800" />
-        <div className="absolute bottom-32 left-0 right-0 h-8 bg-green-600" />
-        <div className="absolute bottom-40 left-1/4 w-16 h-20 bg-amber-800" />
-        <div className="absolute bottom-40 left-1/4 w-24 h-32 -translate-x-4 bg-green-700" />
-        <div className="absolute bottom-40 right-1/4 w-16 h-24 bg-amber-800" />
-        <div className="absolute bottom-40 right-1/4 w-24 h-36 translate-x-4 bg-green-700" />
-        <div className="absolute bottom-40 left-1/2 w-16 h-28 bg-amber-800 -translate-x-8" />
-        <div className="absolute bottom-40 left-1/2 w-24 h-40 bg-green-700 -translate-x-12" />
-        {/* Clouds */}
-        <div className="absolute top-12 left-1/4 w-32 h-8 bg-white/60 rounded" />
-        <div className="absolute top-20 right-1/4 w-40 h-10 bg-white/60 rounded" />
-        <div className="absolute top-8 left-1/2 w-24 h-6 bg-white/60 rounded" />
-      </div>
+    <div className="relative w-full h-screen overflow-hidden bg-gradient-to-b from-sky-400 via-sky-500 to-emerald-800 select-none">
+      {/* Animated dirt background pattern */}
+      <div className="absolute inset-0 opacity-20 pointer-events-none" style={{
+        backgroundImage: "repeating-linear-gradient(0deg, #5e3f29 0px, #79553a 16px, #5e3f29 32px), repeating-linear-gradient(90deg, transparent 0px, transparent 16px, rgba(0,0,0,0.2) 16px, rgba(0,0,0,0.2) 32px)"
+      }} />
 
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
-        {/* Title */}
-        <div className="mb-8 text-center">
+        {/* Logo */}
+        <div className="mb-12 text-center transform -rotate-3">
           <h1
-            className="text-5xl sm:text-7xl font-black tracking-wider text-white drop-shadow-[4px_4px_0_rgba(0,0,0,0.5)]"
-            style={{ fontFamily: "monospace" }}
+            className="text-6xl sm:text-8xl font-black tracking-wider text-white"
+            style={{
+              fontFamily: "monospace",
+              textShadow: "4px 4px 0 #2a2a2a, 8px 8px 0 rgba(0,0,0,0.3)",
+              WebkitTextStroke: "2px #2a2a2a",
+            }}
           >
             MINICRAFT
           </h1>
-          <p className="text-white/80 mt-2 text-sm sm:text-base font-mono">
-            Mundo infinito procedural · Voxel sandbox
+          <p className="text-white/90 mt-2 text-sm font-mono drop-shadow-lg">
+            Edición voxel · Java-inspired
           </p>
         </div>
 
-        {/* Mode selection */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-3xl w-full">
-          {/* Creative */}
-          <button
-            onMouseEnter={() => setHovered("creative")}
-            onMouseLeave={() => setHovered(null)}
-            onClick={() => onStart("creative")}
-            className={`group relative overflow-hidden rounded-lg border-4 p-6 transition-all transform hover:scale-105 ${
-              hovered === "creative"
-                ? "border-yellow-400 bg-yellow-400/20 shadow-2xl shadow-yellow-500/50"
-                : "border-stone-700 bg-stone-900/80 hover:border-yellow-400"
-            }`}
-          >
-            <div className="flex items-center gap-4 mb-3">
-              <div className="w-14 h-14 bg-gradient-to-br from-yellow-300 to-orange-500 rounded flex items-center justify-center text-3xl shadow-inner">
-                <svg viewBox="0 0 24 24" className="w-9 h-9" fill="white">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </div>
-              <div className="text-left">
-                <h2 className="text-2xl font-bold text-white">Creativo</h2>
-                <p className="text-xs text-stone-300">Vuelo libre · Bloques infinitos</p>
-              </div>
-            </div>
-            <ul className="text-left text-xs text-stone-300 space-y-1">
-              <li>✓ Vuelo activado por defecto (F para alternar)</li>
-              <li>✓ Sin daño por caída</li>
-              <li>✓ Salud infinita</li>
-              <li>✓ Construye sin límites</li>
-            </ul>
-          </button>
-
-          {/* Survival */}
-          <button
-            onMouseEnter={() => setHovered("survival")}
-            onMouseLeave={() => setHovered(null)}
-            onClick={() => onStart("survival")}
-            className={`group relative overflow-hidden rounded-lg border-4 p-6 transition-all transform hover:scale-105 ${
-              hovered === "survival"
-                ? "border-red-400 bg-red-400/20 shadow-2xl shadow-red-500/50"
-                : "border-stone-700 bg-stone-900/80 hover:border-red-400"
-            }`}
-          >
-            <div className="flex items-center gap-4 mb-3">
-              <div className="w-14 h-14 bg-gradient-to-br from-red-500 to-rose-700 rounded flex items-center justify-center text-3xl shadow-inner">
-                <svg viewBox="0 0 24 24" className="w-9 h-9" fill="white">
-                  <path d="M14.5 3.5l-2 2-7 7-2 5 5-2 7-7 2-2-3-3zm-2.5 6.5l2 2M5 19l-2 2M9 15l-4 4" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </div>
-              <div className="text-left">
-                <h2 className="text-2xl font-bold text-white">Survival</h2>
-                <p className="text-xs text-stone-300">Sobrevive · Cuidado con caer</p>
-              </div>
-            </div>
-            <ul className="text-left text-xs text-stone-300 space-y-1">
-              <li>⚠ Sin vuelo — solo caminar y saltar</li>
-              <li>⚠ Daño por caída (&gt;3 bloques)</li>
-              <li>⚠ Salud y hambre limitadas</li>
-              <li>✓ Recoge bloques al romperlos</li>
-            </ul>
-          </button>
+        {/* Menu buttons (Minecraft style) */}
+        <div className="flex flex-col gap-3 w-full max-w-md">
+          <MenuButton primary onClick={onCreateWorld}>
+            Crear nuevo mundo
+          </MenuButton>
+          <MenuButton disabled>
+            Cargar mundo
+          </MenuButton>
+          <MenuButton disabled>
+            Opciones
+          </MenuButton>
+          <MenuButton disabled>
+            Salir del juego
+          </MenuButton>
         </div>
 
-        {/* Controls preview */}
-        <div className="mt-8 max-w-2xl w-full bg-stone-900/80 border-2 border-stone-700 rounded-lg p-4">
-          <h3 className="text-white font-bold mb-2 text-center text-sm">Controles</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs text-stone-300 font-mono">
-            <div><span className="text-yellow-400">WASD</span> Mover</div>
-            <div><span className="text-yellow-400">Mouse</span> Mirar</div>
-            <div><span className="text-yellow-400">Espacio</span> Saltar</div>
-            <div><span className="text-yellow-400">Shift</span> Correr</div>
-            <div><span className="text-yellow-400">Click izq</span> Romper</div>
-            <div><span className="text-yellow-400">Click der / M</span> Colocar</div>
-            <div><span className="text-yellow-400">1-9</span> Seleccionar</div>
-            <div><span className="text-yellow-400">F</span> Vuelo (creativo)</div>
-            <div><span className="text-yellow-400">Esc</span> Pausar</div>
+        <p className="mt-12 text-white/60 text-xs font-mono">
+          Minicraft no está afiliado con Mojang o Microsoft.
+        </p>
+      </div>
+
+      {/* Decorative blocks at bottom */}
+      <div className="absolute bottom-0 left-0 right-0 h-16 flex">
+        {Array.from({ length: 32 }).map((_, i) => {
+          const blocks = ["grass_top", "dirt", "stone", "sand", "wood_top", "leaves"];
+          const name = blocks[i % blocks.length];
+          const url = iconUrls[name];
+          return (
+            <div key={i} className="flex-1 h-full" style={{ imageRendering: "pixelated" }}>
+              {url && <img src={url} alt="" className="w-full h-full" style={{ imageRendering: "pixelated" }} />}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MenuButton({
+  children,
+  onClick,
+  primary,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  primary?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`
+        relative py-3 px-6 text-lg font-bold font-mono tracking-wide transition-all
+        ${disabled
+          ? "bg-stone-700/50 text-stone-500 cursor-not-allowed border-2 border-stone-800"
+          : primary
+            ? "bg-stone-800 hover:bg-stone-700 text-white border-2 border-stone-900 hover:border-green-400 hover:scale-[1.02] active:scale-95 shadow-lg"
+            : "bg-stone-800/80 hover:bg-stone-700 text-white border-2 border-stone-900 hover:border-stone-400 hover:scale-[1.02] active:scale-95 shadow-lg"
+        }
+      `}
+      style={{ imageRendering: "pixelated" }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// =============== CREATE WORLD SCREEN ===============
+function CreateWorldScreen({
+  onCancel,
+  onCreate,
+}: {
+  onCancel: () => void;
+  onCreate: (config: WorldConfig) => void;
+}) {
+  const [name, setName] = useState("Nuevo Mundo");
+  const [seedStr, setSeedStr] = useState("");
+  const [mode, setMode] = useState<GameMode>("creative");
+
+  const handleCreate = () => {
+    // Generate seed from string or random
+    let seed: number;
+    if (seedStr.trim() === "") {
+      seed = Math.floor(Math.random() * 1000000);
+    } else {
+      // Hash string to seed
+      let h = 0;
+      for (let i = 0; i < seedStr.length; i++) {
+        h = (h * 31 + seedStr.charCodeAt(i)) | 0;
+      }
+      seed = Math.abs(h);
+    }
+    onCreate({ name: name.trim() || "Nuevo Mundo", seed, mode });
+  };
+
+  return (
+    <div className="relative w-full h-screen overflow-hidden bg-gradient-to-b from-stone-800 to-stone-900 select-none">
+      <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
+        <h2
+          className="text-4xl sm:text-5xl font-black text-white mb-8"
+          style={{
+            fontFamily: "monospace",
+            textShadow: "3px 3px 0 #2a2a2a",
+            WebkitTextStroke: "1px #2a2a2a",
+          }}
+        >
+          Crear Nuevo Mundo
+        </h2>
+
+        <div className="w-full max-w-2xl bg-stone-900/80 border-4 border-stone-700 rounded-lg p-6 space-y-6">
+          {/* World name */}
+          <div>
+            <label className="block text-white font-mono text-sm mb-2">Nombre del mundo</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={32}
+              className="w-full bg-stone-800 border-2 border-stone-600 focus:border-green-400 text-white font-mono px-4 py-2 rounded outline-none transition-colors"
+              placeholder="Mi mundo épico"
+            />
+          </div>
+
+          {/* Seed */}
+          <div>
+            <label className="block text-white font-mono text-sm mb-2">
+              Semilla del mundo <span className="text-stone-500">(opcional)</span>
+            </label>
+            <input
+              type="text"
+              value={seedStr}
+              onChange={(e) => setSeedStr(e.target.value)}
+              className="w-full bg-stone-800 border-2 border-stone-600 focus:border-green-400 text-white font-mono px-4 py-2 rounded outline-none transition-colors"
+              placeholder="Dejar vacío para semilla aleatoria"
+            />
+            <p className="text-stone-500 text-xs mt-1 font-mono">
+              La misma semilla siempre genera el mismo mundo
+            </p>
+          </div>
+
+          {/* Mode selection */}
+          <div>
+            <label className="block text-white font-mono text-sm mb-3">Modo de juego</label>
+            <div className="grid grid-cols-2 gap-4">
+              <ModeCard
+                selected={mode === "creative"}
+                onClick={() => setMode("creative")}
+                title="Creativo"
+                icon="🏗️"
+                description="Vuelo libre, bloques infinitos, sin daño"
+                color="yellow"
+              />
+              <ModeCard
+                selected={mode === "survival"}
+                onClick={() => setMode("survival")}
+                title="Survival"
+                icon="⚔️"
+                description="Sobrevive, hambre, daño por caída, ahogo"
+                color="red"
+              />
+            </div>
           </div>
         </div>
 
-        <p className="mt-6 text-white/70 text-xs font-mono">
-          Selecciona un modo para empezar a jugar
-        </p>
+        {/* Action buttons */}
+        <div className="flex gap-4 mt-8">
+          <button
+            onClick={onCancel}
+            className="px-6 py-3 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white font-mono font-bold rounded transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleCreate}
+            className="px-8 py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 text-white font-mono font-bold rounded transition-colors shadow-lg"
+          >
+            Crear Mundo
+          </button>
+        </div>
       </div>
     </div>
+  );
+}
+
+function ModeCard({
+  selected,
+  onClick,
+  title,
+  icon,
+  description,
+  color,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  title: string;
+  icon: string;
+  description: string;
+  color: "yellow" | "red";
+}) {
+  const border = selected ? (color === "yellow" ? "border-yellow-400" : "border-red-400") : "border-stone-600";
+  const bg = selected ? (color === "yellow" ? "bg-yellow-400/10" : "bg-red-400/10") : "bg-stone-800";
+  return (
+    <button
+      onClick={onClick}
+      className={`p-4 border-2 ${border} ${bg} rounded-lg text-left transition-all hover:scale-[1.02]`}
+    >
+      <div className="flex items-center gap-3 mb-2">
+        <span className="text-3xl">{icon}</span>
+        <h3 className="text-white font-mono font-bold text-lg">{title}</h3>
+        {selected && (
+          <span className={`ml-auto text-xs font-mono px-2 py-1 rounded ${color === "yellow" ? "bg-yellow-400 text-stone-900" : "bg-red-400 text-stone-900"}`}>
+            ✓
+          </span>
+        )}
+      </div>
+      <p className="text-stone-400 text-xs font-mono">{description}</p>
+    </button>
+  );
+}
+
+// =============== HUD ICONS ===============
+function Heart({ filled }: { filled: number }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
+      <path d="M3,2 L5,2 L5,3 L3,3 Z M5,3 L7,3 L7,4 L5,4 Z M7,4 L9,4 L9,5 L7,5 Z M9,3 L11,3 L11,4 L9,4 Z M11,2 L13,2 L13,3 L11,3 Z M3,3 L2,3 L2,5 L3,5 Z M13,3 L14,3 L14,5 L13,5 Z M2,5 L3,5 L3,6 L2,6 Z M13,5 L14,5 L14,6 L13,6 Z M3,6 L4,6 L4,7 L3,7 Z M12,6 L13,6 L13,7 L12,7 Z M4,7 L5,7 L5,8 L4,8 Z M11,7 L12,7 L12,8 L11,8 Z M5,8 L6,8 L6,9 L5,9 Z M10,8 L11,8 L11,9 L10,9 Z M6,9 L7,9 L7,10 L6,10 Z M9,9 L10,9 L10,10 L9,10 Z M7,10 L8,10 L8,11 L7,11 Z M8,10 L9,10 L9,11 L8,11 Z" fill="#3a0000" />
+      {filled >= 1 && (
+        <path d="M4,3 L5,3 L5,4 L4,4 Z M6,4 L7,4 L7,5 L6,5 Z M8,4 L9,4 L9,5 L8,5 Z M10,3 L11,3 L11,4 L10,4 Z M3,4 L4,4 L4,5 L3,5 Z M12,4 L13,4 L13,5 L12,5 Z M3,5 L4,5 L4,6 L3,6 Z M12,5 L13,5 L13,6 L12,6 Z M4,6 L5,5 L5,6 L4,6 Z M11,6 L12,6 L12,5 L11,5 Z M5,7 L6,7 L6,8 L5,8 Z M10,7 L11,7 L11,8 L10,8 Z M6,8 L7,8 L7,9 L6,9 Z M9,8 L10,8 L10,9 L9,9 Z M7,9 L8,9 L8,10 L7,10 Z M8,9 L9,9 L9,10 L8,10 Z" fill="#ff0000" />
+      )}
+    </svg>
+  );
+}
+
+function Drumstick({ filled }: { filled: number }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
+      <path d="M10,2 L12,2 L12,3 L13,3 L13,4 L14,4 L14,5 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,13 L5,13 L5,14 L4,14 L4,13 L3,13 L3,12 L4,12 L4,11 L5,11 L5,10 L6,10 L6,9 L7,9 L7,8 L8,8 L8,7 L9,7 L9,6 L10,6 L10,5 L11,5 L11,4 L10,4 Z" fill="#3a2a00" />
+      {filled >= 1 && (
+        <path d="M10,3 L11,3 L11,4 L12,4 L12,5 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,11 L7,11 L7,10 L8,10 L8,9 L9,9 L9,8 L10,8 L10,7 L11,7 L11,6 L12,6 L12,5 L11,5 L11,4 L10,4 Z" fill="#8b4513" />
+      )}
+      {filled >= 2 && (
+        <path d="M5,12 L6,12 L6,13 L5,13 Z M4,13 L5,13 L5,14 L4,14 Z" fill="#deb887" />
+      )}
+    </svg>
+  );
+}
+
+function Bubble({ filled }: { filled: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
+      {filled ? (
+        <path d="M4,4 L12,4 L12,12 L4,12 Z M6,6 L10,6 L10,10 L6,10 Z" fill="#aaaaee" />
+      ) : (
+        <path d="M4,4 L12,4 L12,12 L4,12 Z M6,6 L10,6 L10,10 L6,10 Z" fill="#333344" />
+      )}
+    </svg>
   );
 }
