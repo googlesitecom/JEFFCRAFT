@@ -8,9 +8,59 @@ import { buildChunkGeometry, ChunkMeshes } from "@/lib/minecraft/mesher";
 import { buildTextureCanvases, buildIconDataURLs } from "@/lib/minecraft/textures";
 import { getSharedAtlas, resetAtlas } from "@/lib/minecraft/atlas";
 import { BlockType, BLOCKS, HOTBAR_BLOCKS } from "@/lib/minecraft/blocks";
+import { ItemType, ITEMS, isItem, getDisplayName } from "@/lib/minecraft/items";
+import { Inventory } from "@/lib/minecraft/inventory";
+import { InventoryUI } from "./InventoryUI";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
+
+// Block hardness (mining time in seconds with bare hands)
+const BLOCK_HARDNESS: Partial<Record<BlockType, number>> = {
+  [BlockType.Grass]: 0.6,
+  [BlockType.Dirt]: 0.5,
+  [BlockType.Sand]: 0.5,
+  [BlockType.Gravel]: 0.6,
+  [BlockType.Snow]: 0.3,
+  [BlockType.Planks]: 1.0,
+  [BlockType.Wood]: 1.5,
+  [BlockType.Leaves]: 0.3,
+  [BlockType.Glass]: 0.3,
+  [BlockType.Brick]: 2.0,
+  [BlockType.Stone]: 1.5,
+  [BlockType.Cobblestone]: 2.0,
+  [BlockType.CoalOre]: 3.0,
+  [BlockType.IronOre]: 3.0,
+  [BlockType.GoldOre]: 3.0,
+  [BlockType.DiamondOre]: 3.0,
+  [BlockType.Bedrock]: Infinity,
+  [BlockType.CraftingTable]: 1.0,
+  [BlockType.Bookshelf]: 1.0,
+  [BlockType.Pumpkin]: 1.0,
+};
+
+// What each block drops when broken
+const BLOCK_DROPS: Partial<Record<BlockType, { id: number; count: number }>> = {
+  [BlockType.Grass]: { id: BlockType.Dirt, count: 1 },
+  [BlockType.Dirt]: { id: BlockType.Dirt, count: 1 },
+  [BlockType.Sand]: { id: BlockType.Sand, count: 1 },
+  [BlockType.Gravel]: { id: BlockType.Gravel, count: 1 },
+  [BlockType.Snow]: { id: BlockType.Snow, count: 1 },
+  [BlockType.Planks]: { id: BlockType.Planks, count: 1 },
+  [BlockType.Wood]: { id: BlockType.Wood, count: 1 },
+  [BlockType.Leaves]: { id: BlockType.Leaves, count: 1 }, // sometimes drops sapling/apple, keep simple
+  [BlockType.Glass]: { id: BlockType.Glass, count: 1 }, // Minecraft: glass breaks and drops nothing, but we'll be generous
+  [BlockType.Brick]: { id: BlockType.Brick, count: 1 },
+  [BlockType.Stone]: { id: BlockType.Cobblestone, count: 1 }, // stone drops cobblestone
+  [BlockType.Cobblestone]: { id: BlockType.Cobblestone, count: 1 },
+  [BlockType.CoalOre]: { id: ItemType.Coal, count: 1 },
+  [BlockType.IronOre]: { id: BlockType.IronOre, count: 1 }, // needs smelting, but we'll give the ore for now
+  [BlockType.GoldOre]: { id: BlockType.GoldOre, count: 1 },
+  [BlockType.DiamondOre]: { id: ItemType.Diamond, count: 1 },
+  [BlockType.CraftingTable]: { id: BlockType.CraftingTable, count: 1 },
+  [BlockType.Bookshelf]: { id: BlockType.Bookshelf, count: 1 },
+  [BlockType.Pumpkin]: { id: BlockType.Pumpkin, count: 1 },
+};
 
 interface GameStats {
   fps: number;
@@ -23,6 +73,7 @@ interface GameStats {
   air: number;
   inWater: boolean;
   headInWater: boolean;
+  breakProgress: number; // 0-1
 }
 
 interface WorldConfig {
@@ -41,13 +92,17 @@ export default function MinecraftGame() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [stats, setStats] = useState<GameStats>({
     fps: 0, x: 0, y: 0, z: 0, chunks: 0,
-    health: 20, hunger: 20, air: 10, inWater: false, headInWater: false,
+    health: 20, hunger: 20, air: 10, inWater: false, headInWater: false, breakProgress: 0,
   });
   const [iconUrls, setIconUrls] = useState<Record<string, string>>({});
   const [isDead, setIsDead] = useState(false);
+  const [showInventory, setShowInventory] = useState(false);
+  const [showCraftingTable, setShowCraftingTable] = useState(false);
+  const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
   const worldConfigRef = useRef<WorldConfig | null>(null);
+  const inventoryRef = useRef<Inventory>(new Inventory());
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -264,7 +319,22 @@ export default function MinecraftGame() {
       if (py < 0 || py >= WORLD_HEIGHT) return false;
       const existing = world.getBlock(px, py, pz);
       if (existing !== BlockType.Air && existing !== BlockType.Water) return false;
-      const blockType = HOTBAR_BLOCKS[selectedSlotRef.current];
+
+      // In survival: use the selected hotbar item (must be a placeable block)
+      // In creative: use HOTBAR_BLOCKS
+      let blockType: BlockType;
+      const mode = worldConfigRef.current?.mode;
+      if (mode === "survival") {
+        const selected = inventoryRef.current.getSelected();
+        if (!selected || selected.id >= 100) return false; // no selected item or it's a tool/food
+        blockType = selected.id as BlockType;
+        // Remove one from inventory
+        if (!inventoryRef.current.removeSelected(1)) return false;
+        setInventoryVersion((v) => v + 1);
+      } else {
+        blockType = HOTBAR_BLOCKS[selectedSlotRef.current];
+      }
+
       const playerMinX = player.position.x - 0.3;
       const playerMaxX = player.position.x + 0.3;
       const playerMinY = player.position.y;
@@ -276,6 +346,11 @@ export default function MinecraftGame() {
         py + 1 > playerMinY && py < playerMaxY &&
         pz + 1 > playerMinZ && pz < playerMaxZ
       ) {
+        // Refund the item
+        if (mode === "survival") {
+          inventoryRef.current.addItem(blockType, 1);
+          setInventoryVersion((v) => v + 1);
+        }
         return false;
       }
       world.setBlock(px, py, pz, blockType);
@@ -287,18 +362,93 @@ export default function MinecraftGame() {
       return true;
     }
 
+    // Mining state: track which block is being mined and progress
+    let miningBlock: { x: number; y: number; z: number } | null = null;
+    let miningProgress: number = 0; // 0 to 1
+
     function breakBlock(): boolean {
+      // Instant break (creative mode)
       const result = player.raycast(6);
       if (!result.hit || !result.block) return false;
       const { x, y, z } = result.block;
-      if (world.getBlock(x, y, z) === BlockType.Bedrock) return false;
+      const blockType = world.getBlock(x, y, z);
+      if (blockType === BlockType.Bedrock) return false;
       world.setBlock(x, y, z, BlockType.Air);
       rebuildChunkAt(x, z);
       if (x % CHUNK_SIZE === 0) rebuildChunkAt(x - 1, z);
       if (x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x + 1, z);
       if (z % CHUNK_SIZE === 0) rebuildChunkAt(x, z - 1);
       if (z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x, z + 1);
+      // Drop in creative too (for inventory mode)
+      const drop = BLOCK_DROPS[blockType];
+      if (drop && worldConfigRef.current?.mode === "survival") {
+        inventoryRef.current.addItem(drop.id, drop.count);
+        setInventoryVersion((v) => v + 1);
+      }
       return true;
+    }
+
+    // Continuous mining for survival mode - called every frame while mouse held
+    function mineBlockContinuous(dt: number) {
+      if (!miningBlock) return;
+      const { x, y, z } = miningBlock;
+      const blockType = world.getBlock(x, y, z);
+      if (blockType === BlockType.Air || blockType === BlockType.Bedrock) {
+        miningProgress = 0;
+        miningBlock = null;
+        return;
+      }
+
+      const hardness = BLOCK_HARDNESS[blockType] ?? 1.0;
+      if (hardness === Infinity) return;
+
+      // Get mining speed from selected tool
+      let speed = 1.0;
+      const selected = inventoryRef.current.getSelected();
+      if (selected && selected.id >= 100) {
+        const itemDef = ITEMS[selected.id as ItemType];
+        if (itemDef?.miningSpeed) {
+          const isStoneLike = [BlockType.Stone, BlockType.Cobblestone, BlockType.CoalOre, BlockType.IronOre, BlockType.GoldOre, BlockType.DiamondOre, BlockType.Brick].includes(blockType);
+          if (isStoneLike && itemDef.toolType === "pickaxe") {
+            speed = itemDef.miningSpeed;
+          } else if (!isStoneLike && (itemDef.toolType === "axe" || itemDef.toolType === "shovel")) {
+            speed = itemDef.miningSpeed;
+          }
+        }
+      }
+
+      // Stone and ores require a pickaxe
+      const requiresPickaxe = [BlockType.Stone, BlockType.Cobblestone, BlockType.CoalOre, BlockType.IronOre, BlockType.GoldOre, BlockType.DiamondOre, BlockType.Brick].includes(blockType);
+      if (requiresPickaxe) {
+        const hasPickaxe = selected && selected.id >= 100 && ITEMS[selected.id as ItemType]?.toolType === "pickaxe";
+        if (!hasPickaxe) {
+          miningProgress = 0;
+          return;
+        }
+      }
+
+      const miningTime = hardness / speed;
+      miningProgress += dt / miningTime;
+
+      if (miningProgress >= 1.0) {
+        // Block broken!
+        world.setBlock(x, y, z, BlockType.Air);
+        rebuildChunkAt(x, z);
+        if (x % CHUNK_SIZE === 0) rebuildChunkAt(x - 1, z);
+        if (x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x + 1, z);
+        if (z % CHUNK_SIZE === 0) rebuildChunkAt(x, z - 1);
+        if (z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x, z + 1);
+
+        // Drop the item
+        const drop = BLOCK_DROPS[blockType];
+        if (drop) {
+          inventoryRef.current.addItem(drop.id, drop.count);
+          setInventoryVersion((v) => v + 1);
+        }
+
+        miningProgress = 0;
+        miningBlock = null;
+      }
     }
 
     // Block highlight
@@ -320,7 +470,17 @@ export default function MinecraftGame() {
     container.appendChild(waterOverlay);
 
     // === Input handling ===
+    // Track mouse button states for continuous mining
+    let leftMouseDown = false;
+    let rightMouseDown = false;
+
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "KeyE" && document.pointerLockElement) {
+        // Open inventory
+        document.exitPointerLock();
+        setShowInventory(true);
+        return;
+      }
       if (!document.pointerLockElement) return;
       player.setKey(e.code, true);
 
@@ -330,6 +490,7 @@ export default function MinecraftGame() {
           const idx = num - 1;
           setSelectedSlot(idx);
           selectedSlotRef.current = idx;
+          inventoryRef.current.setSelected(idx);
         }
       }
 
@@ -354,10 +515,46 @@ export default function MinecraftGame() {
 
     const handleMouseDown = (e: MouseEvent) => {
       if (document.pointerLockElement !== renderer.domElement) return;
-      if (e.button === 0) breakBlock();
-      else if (e.button === 2) placeBlock();
+      if (e.button === 0) {
+        leftMouseDown = true;
+        // In creative, break immediately. In survival, mining happens in render loop.
+        if (worldConfigRef.current?.mode === "creative") {
+          breakBlock();
+        } else {
+          // Start mining - initialize the mining block
+          const hit = player.raycast(6);
+          if (hit.hit && hit.block) {
+            miningBlock = { ...hit.block };
+            miningProgress = 0;
+          }
+        }
+      } else if (e.button === 2) {
+        rightMouseDown = true;
+        // Check if we're right-clicking a crafting table
+        const hit = player.raycast(6);
+        if (hit.hit && hit.block) {
+          const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+          if (block === BlockType.CraftingTable) {
+            // Open crafting table UI
+            document.exitPointerLock();
+            setShowCraftingTable(true);
+            return;
+          }
+        }
+        placeBlock();
+      }
+    };
+    const handleMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) {
+        leftMouseDown = false;
+        miningProgress = 0;
+        miningBlock = null;
+      } else if (e.button === 2) {
+        rightMouseDown = false;
+      }
     };
     renderer.domElement.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mouseup", handleMouseUp);
     renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
     const handlePointerLockChange = () => {
@@ -415,6 +612,24 @@ export default function MinecraftGame() {
         setIsDead(true);
       }
 
+      // Continuous mining in survival mode when left mouse is held
+      if (leftMouseDown && document.pointerLockElement === renderer.domElement && !player.isDead()) {
+        // Check if we're still looking at the same block
+        const hit = player.raycast(6);
+        if (hit.hit && hit.block) {
+          if (!miningBlock || miningBlock.x !== hit.block.x || miningBlock.y !== hit.block.y || miningBlock.z !== hit.block.z) {
+            // Changed block, reset progress
+            miningProgress = 0;
+            miningBlock = { ...hit.block };
+          }
+          // Continue mining (uses dt-based progress now)
+          mineBlockContinuous(dt);
+        } else {
+          miningProgress = 0;
+          miningBlock = null;
+        }
+      }
+
       updateChunkLoading();
 
       // Highlight
@@ -422,6 +637,12 @@ export default function MinecraftGame() {
       if (hit.hit && hit.block) {
         highlight.visible = true;
         highlight.position.set(hit.block.x + 0.5, hit.block.y + 0.5, hit.block.z + 0.5);
+        // Highlight color changes with mining progress
+        if (miningProgress > 0) {
+          (highlight.material as THREE.LineBasicMaterial).color.setRGB(1, 1 - miningProgress * 0.5, 0);
+        } else {
+          (highlight.material as THREE.LineBasicMaterial).color.setRGB(0, 0, 0);
+        }
       } else {
         highlight.visible = false;
       }
@@ -457,6 +678,7 @@ export default function MinecraftGame() {
           air: player.air,
           inWater: player.inWater,
           headInWater: player.headInWater,
+          breakProgress: miningProgress,
         }));
         posUpdateCounter = 0;
       }
@@ -468,6 +690,7 @@ export default function MinecraftGame() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("resize", handleResize);
       document.removeEventListener("pointerlockchange", handlePointerLockChange);
       renderer.domElement.removeEventListener("mousedown", handleMouseDown);
@@ -556,8 +779,20 @@ export default function MinecraftGame() {
         <div>FPS: {stats.fps}</div>
         <div>X: {stats.x} Y: {stats.y} Z: {stats.z}</div>
         <div>Chunks: {stats.chunks}</div>
-        <div className="mt-1 text-white/70">{BLOCKS[HOTBAR_BLOCKS[selectedSlot]].name}</div>
+        <div className="mt-1 text-white/70">
+          {mode === "survival"
+            ? (() => {
+                const stack = inventoryRef.current.slots[selectedSlot];
+                if (!stack) return "(vacío)";
+                if (stack.id < 100) return BLOCKS[stack.id as BlockType]?.name ?? "Unknown";
+                return ITEMS[stack.id as ItemType]?.name ?? "Unknown";
+              })()
+            : BLOCKS[HOTBAR_BLOCKS[selectedSlot]].name}
+        </div>
         <div className="mt-1 text-yellow-300/80">{mode === "creative" ? "Creativo" : "Survival"}</div>
+        {mode === "survival" && (
+          <div className="mt-1 text-white/50 text-[10px]">E: Inventario</div>
+        )}
       </div>
 
       {/* Survival stats */}
@@ -585,12 +820,45 @@ export default function MinecraftGame() {
       )}
 
       {/* Hotbar */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex gap-1 p-1 bg-black/40 rounded-md backdrop-blur-sm">
-        {HOTBAR_BLOCKS.map((blockType, i) => {
-          const def = BLOCKS[blockType];
-          const iconName = def.textures.side === "grass_side" ? "grass_side" : def.textures.top === "dirt" ? "dirt" : def.textures.top || def.textures.side;
-          const iconUrl = iconUrls[iconName];
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex gap-1 p-1 bg-black/40 rounded-md backdrop-blur-sm" key={inventoryVersion}>
+        {Array.from({ length: 9 }).map((_, i) => {
           const isSelected = i === selectedSlot;
+          let iconUrl = "";
+          let count = 0;
+          let name = "";
+
+          if (mode === "survival") {
+            // Show inventory items
+            const stack = inventoryRef.current.slots[i];
+            if (stack) {
+              count = stack.count;
+              if (stack.id < 100) {
+                // Block
+                const def = BLOCKS[stack.id as BlockType];
+                if (def) {
+                  name = def.name;
+                  const iconName = stack.id === BlockType.Grass ? "grass_side" : (def.textures.side || def.textures.top);
+                  iconUrl = iconUrls[iconName] ?? "";
+                }
+              } else {
+                // Item
+                const def = ITEMS[stack.id as ItemType];
+                if (def) {
+                  name = def.name;
+                  iconUrl = iconUrls[def.icon] ?? "";
+                }
+              }
+            }
+          } else {
+            // Creative: show HOTBAR_BLOCKS
+            const blockType = HOTBAR_BLOCKS[i];
+            const def = BLOCKS[blockType];
+            name = def.name;
+            const iconName = def.textures.side === "grass_side" ? "grass_side" : def.textures.top === "dirt" ? "dirt" : def.textures.top || def.textures.side;
+            iconUrl = iconUrls[iconName] ?? "";
+            count = 0; // infinite in creative
+          }
+
           return (
             <div
               key={i}
@@ -598,18 +866,24 @@ export default function MinecraftGame() {
                 isSelected ? "border-white bg-white/20" : "border-gray-500 bg-gray-800/60"
               }`}
               style={{ imageRendering: "pixelated" }}
+              title={name}
             >
               {iconUrl && (
-                <img src={iconUrl} alt={def.name} className="w-10 h-10 sm:w-12 sm:h-12" style={{ imageRendering: "pixelated" }} draggable={false} />
+                <img src={iconUrl} alt={name} className="w-10 h-10 sm:w-12 sm:h-12" style={{ imageRendering: "pixelated" }} draggable={false} />
               )}
               <span className="absolute top-0 left-1 text-[10px] text-white/80 font-mono">{i + 1}</span>
+              {count > 1 && (
+                <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
+                  {count}
+                </span>
+              )}
             </div>
           );
         })}
       </div>
 
       {/* Start overlay */}
-      {!isLocked && isLoaded && !isDead && (
+      {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && (
         <div className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer bg-black/60 backdrop-blur-sm" onClick={handleStartClick}>
           <div className="bg-stone-800/95 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
             <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-wide" style={{ fontFamily: "monospace" }}>
@@ -623,9 +897,11 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">Mouse</span> — Mirar alrededor</div>
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
-              <div><span className="text-yellow-400 font-bold">Click izq</span> — Romper bloque</div>
+              <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque (mantén presionado)" : "Romper bloque"}</div>
               <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque</div>
-              <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar bloque</div>
+              <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
+              {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
+              {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
               {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
@@ -655,6 +931,42 @@ export default function MinecraftGame() {
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
           <div className="text-white font-mono text-xl">Generando mundo...</div>
         </div>
+      )}
+
+      {/* Mining progress bar */}
+      {stats.breakProgress > 0 && stats.breakProgress < 1 && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-8 z-15 w-24 h-3 bg-black/60 border border-white/50 rounded">
+          <div
+            className="h-full bg-white/80 transition-all"
+            style={{ width: `${stats.breakProgress * 100}%` }}
+          />
+        </div>
+      )}
+
+      {/* Inventory UI */}
+      {showInventory && (
+        <InventoryUI
+          inventory={inventoryRef.current}
+          iconUrls={iconUrls}
+          isCraftingTable={false}
+          onClose={() => {
+            setShowInventory(false);
+          }}
+          onInventoryChange={() => setInventoryVersion((v) => v + 1)}
+        />
+      )}
+
+      {/* Crafting Table UI */}
+      {showCraftingTable && (
+        <InventoryUI
+          inventory={inventoryRef.current}
+          iconUrls={iconUrls}
+          isCraftingTable={true}
+          onClose={() => {
+            setShowCraftingTable(false);
+          }}
+          onInventoryChange={() => setInventoryVersion((v) => v + 1)}
+        />
       )}
     </div>
   );

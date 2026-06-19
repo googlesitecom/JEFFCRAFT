@@ -1,0 +1,130 @@
+// Item definitions: food, materials, tools
+// Block IDs are 0-99, Item IDs are 100+
+
+export enum ItemType {
+  // Food
+  Apple = 100,
+  RawPorkchop = 101,
+  CookedPorkchop = 102,
+  RawBeef = 103,
+  CookedBeef = 104,
+  RawChicken = 105,
+  CookedChicken = 106,
+  // Materials
+  Stick = 200,
+  Coal = 201,
+  Charcoal = 202,
+  IronIngot = 203,
+  GoldIngot = 204,
+  Diamond = 205,
+  // Tools - Pickaxes
+  WoodPickaxe = 300,
+  StonePickaxe = 301,
+  IronPickaxe = 302,
+  DiamondPickaxe = 303,
+  // Tools - Axes
+  WoodAxe = 310,
+  StoneAxe = 311,
+  IronAxe = 312,
+  DiamondAxe = 313,
+  // Tools - Swords
+  WoodSword = 320,
+  StoneSword = 321,
+  IronSword = 322,
+  DiamondSword = 323,
+  // Tools - Shovels
+  WoodShovel = 330,
+  StoneShovel = 331,
+  IronShovel = 332,
+  DiamondShovel = 333,
+}
+
+export type ToolTier = "wood" | "stone" | "iron" | "diamond";
+export type ToolType = "pickaxe" | "axe" | "sword" | "shovel";
+
+export interface ItemDef {
+  id: ItemType;
+  name: string;
+  icon: string; // texture name
+  food?: number; // hunger restored
+  maxStack: number;
+  // Tool properties
+  toolType?: ToolType;
+  toolTier?: ToolTier;
+  // Mining speed multiplier (1.0 = bare hand)
+  miningSpeed?: number;
+  // Whether this item can break blocks requiring tools (stone, ores)
+  canMineHard?: boolean;
+}
+
+export const ITEMS: Record<ItemType, ItemDef> = {
+  // Food
+  [ItemType.Apple]: { id: ItemType.Apple, name: "Apple", icon: "apple", food: 4, maxStack: 64 },
+  [ItemType.RawPorkchop]: { id: ItemType.RawPorkchop, name: "Raw Porkchop", icon: "raw_porkchop", food: 3, maxStack: 64 },
+  [ItemType.CookedPorkchop]: { id: ItemType.CookedPorkchop, name: "Cooked Porkchop", icon: "cooked_porkchop", food: 8, maxStack: 64 },
+  [ItemType.RawBeef]: { id: ItemType.RawBeef, name: "Raw Beef", icon: "raw_beef", food: 3, maxStack: 64 },
+  [ItemType.CookedBeef]: { id: ItemType.CookedBeef, name: "Steak", icon: "cooked_beef", food: 8, maxStack: 64 },
+  [ItemType.RawChicken]: { id: ItemType.RawChicken, name: "Raw Chicken", icon: "raw_chicken", food: 2, maxStack: 64 },
+  [ItemType.CookedChicken]: { id: ItemType.CookedChicken, name: "Cooked Chicken", icon: "cooked_chicken", food: 6, maxStack: 64 },
+  // Materials
+  [ItemType.Stick]: { id: ItemType.Stick, name: "Stick", icon: "stick", maxStack: 64 },
+  [ItemType.Coal]: { id: ItemType.Coal, name: "Coal", icon: "coal", maxStack: 64 },
+  [ItemType.Charcoal]: { id: ItemType.Charcoal, name: "Charcoal", icon: "charcoal", maxStack: 64 },
+  [ItemType.IronIngot]: { id: ItemType.IronIngot, name: "Iron Ingot", icon: "iron_ingot", maxStack: 64 },
+  [ItemType.GoldIngot]: { id: ItemType.GoldIngot, name: "Gold Ingot", icon: "gold_ingot", maxStack: 64 },
+  [ItemType.Diamond]: { id: ItemType.Diamond, name: "Diamond", icon: "diamond", maxStack: 64 },
+  // Pickaxes
+  [ItemType.WoodPickaxe]: { id: ItemType.WoodPickaxe, name: "Wooden Pickaxe", icon: "wood_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "wood", miningSpeed: 2.0, canMineHard: true },
+  [ItemType.StonePickaxe]: { id: ItemType.StonePickaxe, name: "Stone Pickaxe", icon: "stone_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "stone", miningSpeed: 4.0, canMineHard: true },
+  [ItemType.IronPickaxe]: { id: ItemType.IronPickaxe, name: "Iron Pickaxe", icon: "iron_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "iron", miningSpeed: 6.0, canMineHard: true },
+  [ItemType.DiamondPickaxe]: { id: ItemType.DiamondPickaxe, name: "Diamond Pickaxe", icon: "diamond_pickaxe", maxStack: 1, toolType: "pickaxe", toolTier: "diamond", miningSpeed: 8.0, canMineHard: true },
+  // Axes
+  [ItemType.WoodAxe]: { id: ItemType.WoodAxe, name: "Wooden Axe", icon: "wood_axe", maxStack: 1, toolType: "axe", toolTier: "wood", miningSpeed: 2.0, canMineHard: false },
+  [ItemType.StoneAxe]: { id: ItemType.StoneAxe, name: "Stone Axe", icon: "stone_axe", maxStack: 1, toolType: "axe", toolTier: "stone", miningSpeed: 4.0, canMineHard: false },
+  [ItemType.IronAxe]: { id: ItemType.IronAxe, name: "Iron Axe", icon: "iron_axe", maxStack: 1, toolType: "axe", toolTier: "iron", miningSpeed: 6.0, canMineHard: false },
+  [ItemType.DiamondAxe]: { id: ItemType.DiamondAxe, name: "Diamond Axe", icon: "diamond_axe", maxStack: 1, toolType: "axe", toolTier: "diamond", miningSpeed: 8.0, canMineHard: false },
+  // Swords
+  [ItemType.WoodSword]: { id: ItemType.WoodSword, name: "Wooden Sword", icon: "wood_sword", maxStack: 1, toolType: "sword", toolTier: "wood", miningSpeed: 1.5, canMineHard: false },
+  [ItemType.StoneSword]: { id: ItemType.StoneSword, name: "Stone Sword", icon: "stone_sword", maxStack: 1, toolType: "sword", toolTier: "stone", miningSpeed: 1.5, canMineHard: false },
+  [ItemType.IronSword]: { id: ItemType.IronSword, name: "Iron Sword", icon: "iron_sword", maxStack: 1, toolType: "sword", toolTier: "iron", miningSpeed: 1.5, canMineHard: false },
+  [ItemType.DiamondSword]: { id: ItemType.DiamondSword, name: "Diamond Sword", icon: "diamond_sword", maxStack: 1, toolType: "sword", toolTier: "diamond", miningSpeed: 1.5, canMineHard: false },
+  // Shovels
+  [ItemType.WoodShovel]: { id: ItemType.WoodShovel, name: "Wooden Shovel", icon: "wood_shovel", maxStack: 1, toolType: "shovel", toolTier: "wood", miningSpeed: 2.0, canMineHard: false },
+  [ItemType.StoneShovel]: { id: ItemType.StoneShovel, name: "Stone Shovel", icon: "stone_shovel", maxStack: 1, toolType: "shovel", toolTier: "stone", miningSpeed: 4.0, canMineHard: false },
+  [ItemType.IronShovel]: { id: ItemType.IronShovel, name: "Iron Shovel", icon: "iron_shovel", maxStack: 1, toolType: "shovel", toolTier: "iron", miningSpeed: 6.0, canMineHard: false },
+  [ItemType.DiamondShovel]: { id: ItemType.DiamondShovel, name: "Diamond Shovel", icon: "diamond_shovel", maxStack: 1, toolType: "shovel", toolTier: "diamond", miningSpeed: 8.0, canMineHard: false },
+};
+
+// Check if an ID is an item (not a block)
+export function isItem(id: number): boolean {
+  return id >= 100;
+}
+
+// Get item definition
+export function getItemDef(id: ItemType): ItemDef | undefined {
+  return ITEMS[id];
+}
+
+// Get display name for any id (block or item)
+export function getDisplayName(id: number, blockNames: Record<number, string>): string {
+  if (id < 100) return blockNames[id] ?? "Unknown";
+  return ITEMS[id as ItemType]?.name ?? "Unknown";
+}
+
+// Get max stack size for any id
+export function getMaxStack(id: number): number {
+  if (id < 100) return 64; // blocks
+  return ITEMS[id as ItemType]?.maxStack ?? 64;
+}
+
+// Get icon texture name for any id
+export function getIconName(id: number, blockIcons: Record<number, { top: string; side: string }>): string {
+  if (id < 100) {
+    const icons = blockIcons[id];
+    if (!icons) return "";
+    // For grass, use grass_side; for others, use side or top
+    if (id === 1) return icons.side; // grass
+    return icons.side || icons.top;
+  }
+  return ITEMS[id as ItemType]?.icon ?? "";
+}

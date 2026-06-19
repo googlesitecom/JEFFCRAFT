@@ -1,51 +1,90 @@
 // Chunk mesh builder: generates optimized geometry with visible-face culling.
 // Three render layers: opaque (solid blocks), cutout (leaves, glass), translucent (water).
+// CRITICAL: All face windings are CCW when viewed from OUTSIDE, so they're front-facing.
 import * as THREE from "three";
 import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
-import { BlockType, BLOCKS, isAir, isOpaque, isCutout, isTranslucent, getRenderLayer } from "./blocks";
+import { BlockType, BLOCKS, isAir, isOpaque, getRenderLayer } from "./blocks";
 import { TextureAtlas } from "./atlas";
 
-// Face definitions: dir (toward neighbor), corners (CCW from outside), uv per corner, normal
+// Each face: dir (toward neighbor), 4 corners in CCW order from outside, UV per corner, normal.
+// Triangles are: (0,1,2) and (0,2,3) - this gives CCW front face from outside.
 const FACES = [
-  { // +X (right)
+  { // +X (right face, viewed from +X looking toward -X)
+    // Outside view: Y up, Z to the LEFT
+    // CCW from outside: bottom-left, bottom-right, top-right, top-left
     dir: [1, 0, 0] as [number, number, number],
-    corners: [[1, 1, 0], [1, 0, 0], [1, 0, 1], [1, 1, 1]] as [number, number, number][],
-    uv: [[0, 1], [0, 0], [1, 0], [1, 1]] as [number, number][],
+    corners: [
+      [1, 0, 1], // bottom-left (z=1 is left in view)
+      [1, 0, 0], // bottom-right (z=0 is right in view)
+      [1, 1, 0], // top-right
+      [1, 1, 1], // top-left
+    ] as [number, number, number][],
+    uv: [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][],
     normal: [1, 0, 0] as [number, number, number],
     faceIndex: 0,
   },
-  { // -X (left)
+  { // -X (left face, viewed from -X looking toward +X)
+    // Outside view: Y up, Z to the RIGHT
     dir: [-1, 0, 0] as [number, number, number],
-    corners: [[0, 1, 1], [0, 0, 1], [0, 0, 0], [0, 1, 0]] as [number, number, number][],
-    uv: [[0, 1], [0, 0], [1, 0], [1, 1]] as [number, number][],
+    corners: [
+      [0, 0, 0], // bottom-left (z=0 is left in view)
+      [0, 0, 1], // bottom-right (z=1 is right in view)
+      [0, 1, 1], // top-right
+      [0, 1, 0], // top-left
+    ] as [number, number, number][],
+    uv: [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][],
     normal: [-1, 0, 0] as [number, number, number],
     faceIndex: 1,
   },
-  { // +Y (top)
+  { // +Y (top face, viewed from above looking down)
+    // Outside view: X right, Z "down" in screen (toward viewer)
     dir: [0, 1, 0] as [number, number, number],
-    corners: [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]] as [number, number, number][],
-    uv: [[0, 1], [1, 1], [1, 0], [0, 0]] as [number, number][],
+    corners: [
+      [0, 1, 1], // bottom-left (x=0 left, z=1 bottom of view)
+      [1, 1, 1], // bottom-right
+      [1, 1, 0], // top-right
+      [0, 1, 0], // top-left
+    ] as [number, number, number][],
+    uv: [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][],
     normal: [0, 1, 0] as [number, number, number],
     faceIndex: 2,
   },
-  { // -Y (bottom)
+  { // -Y (bottom face, viewed from below looking up)
+    // Outside view: X right, Z up in screen
     dir: [0, -1, 0] as [number, number, number],
-    corners: [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]] as [number, number, number][],
+    corners: [
+      [0, 0, 0], // bottom-left
+      [1, 0, 0], // bottom-right
+      [1, 0, 1], // top-right
+      [0, 0, 1], // top-left
+    ] as [number, number, number][],
     uv: [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][],
     normal: [0, -1, 0] as [number, number, number],
     faceIndex: 3,
   },
-  { // +Z (front)
+  { // +Z (front face, viewed from +Z looking toward -Z)
+    // Outside view: Y up, X to the LEFT
     dir: [0, 0, 1] as [number, number, number],
-    corners: [[1, 1, 1], [0, 1, 1], [0, 0, 1], [1, 0, 1]] as [number, number, number][],
-    uv: [[1, 1], [0, 1], [0, 0], [1, 0]] as [number, number][],
+    corners: [
+      [0, 0, 1], // bottom-left (x=0 left)
+      [1, 0, 1], // bottom-right (x=1 right)
+      [1, 1, 1], // top-right
+      [0, 1, 1], // top-left
+    ] as [number, number, number][],
+    uv: [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][],
     normal: [0, 0, 1] as [number, number, number],
     faceIndex: 4,
   },
-  { // -Z (back)
+  { // -Z (back face, viewed from -Z looking toward +Z)
+    // Outside view: Y up, X to the RIGHT
     dir: [0, 0, -1] as [number, number, number],
-    corners: [[0, 1, 0], [1, 1, 0], [1, 0, 0], [0, 0, 0]] as [number, number, number][],
-    uv: [[0, 1], [1, 1], [1, 0], [0, 0]] as [number, number][],
+    corners: [
+      [1, 0, 0], // bottom-left (x=1 left in view)
+      [0, 0, 0], // bottom-right (x=0 right in view)
+      [0, 1, 0], // top-right
+      [1, 1, 0], // top-left
+    ] as [number, number, number][],
+    uv: [[0, 0], [1, 0], [1, 1], [0, 1]] as [number, number][],
     normal: [0, 0, -1] as [number, number, number],
     faceIndex: 5,
   },
@@ -59,24 +98,17 @@ function getTextureName(block: BlockType, faceIndex: number): string {
 }
 
 // Strict visibility rule: draw a face iff the neighbor doesn't fully occlude it.
-// - Air neighbor: draw
-// - Opaque neighbor (stone, dirt...): don't draw (face is hidden)
-// - Cutout/Translucent neighbor: draw, with one exception:
-//   - Same block type AND both water/glass: don't draw (avoid internal planes)
 function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   if (isAir(block)) return false;
   if (isAir(neighbor)) return true;
   if (isOpaque(neighbor)) return false;
   // Neighbor is see-through (cutout or translucent)
-  // For water and glass: don't draw faces between same-type blocks
   if (neighbor === block) {
     if (block === BlockType.Water) return false;
     if (block === BlockType.Glass) return false;
-    // Leaves: draw faces so trees look solid
     if (block === BlockType.Leaves) return true;
     return false;
   }
-  // Different see-through types: draw the face
   return true;
 }
 
@@ -110,7 +142,6 @@ export function buildChunkGeometry(
   const chunk = world.getChunk(cx, cz);
   if (!chunk) return { opaque: null, cutout: null, transparent: null };
 
-  // Ensure neighbors are generated for correct border culling
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     world.getOrCreateChunk(cx + dx, cz + dz);
   }
@@ -130,9 +161,8 @@ export function buildChunkGeometry(
         const block = chunk.getLocal(lx, y, lz);
         if (isAir(block)) continue;
 
-        // Choose target buffer based on render layer
-        let target: FaceData;
         const layer = getRenderLayer(block);
+        let target: FaceData;
         if (layer === "translucent") target = transparent;
         else if (layer === "cutout") target = cutout;
         else target = opaque;
@@ -148,16 +178,12 @@ export function buildChunkGeometry(
 
           if (!shouldDrawFace(block, neighbor)) continue;
 
-          // Water-specific extra culling
           if (isWaterBlock) {
             if (fi === 2) {
-              // Top face: only draw if air above
               if (neighbor !== BlockType.Air) continue;
             } else if (fi === 3) {
-              // Bottom face: only draw if solid below
               if (isAir(neighbor) || neighbor === BlockType.Water) continue;
             } else {
-              // Side face: skip if water-water
               if (neighbor === BlockType.Water) continue;
             }
           }
@@ -166,14 +192,12 @@ export function buildChunkGeometry(
           const tile = atlas.tiles[texName];
           if (!tile) continue;
 
-          // Per-face shading (like Minecraft's ambient lighting)
           let shade = 1.0;
-          if (fi === 2) shade = 1.0;       // top: full bright
-          else if (fi === 3) shade = 0.55; // bottom: darkest
-          else if (fi === 0 || fi === 1) shade = 0.72; // X sides
-          else shade = 0.88;               // Z sides
+          if (fi === 2) shade = 1.0;
+          else if (fi === 3) shade = 0.55;
+          else if (fi === 0 || fi === 1) shade = 0.72;
+          else shade = 0.88;
 
-          // Water surface slightly lowered for visual depth
           const yOffset = isWaterBlock && fi === 2 ? -0.12 : 0;
 
           const startIndex = target.positions.length / 3;
@@ -189,7 +213,6 @@ export function buildChunkGeometry(
             target.colors.push(shade, shade, shade);
           }
 
-          // Two triangles per face
           target.indices.push(startIndex, startIndex + 1, startIndex + 2);
           target.indices.push(startIndex, startIndex + 2, startIndex + 3);
         }

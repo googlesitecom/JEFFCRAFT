@@ -531,8 +531,10 @@ function texBookshelf(): ImageData {
 // EXPORT
 // ============================================================
 
+import { buildItemCanvases } from "./item-textures";
+
 export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
-  return {
+  const blocks: Record<string, HTMLCanvasElement> = {
     dirt: imageDataToCanvas(texDirt()),
     grass_top: imageDataToCanvas(texGrassTop()),
     grass_side: imageDataToCanvas(texGrassSide()),
@@ -559,6 +561,9 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
     crafting_table_side: imageDataToCanvas(texCraftingTableSide()),
     bookshelf: imageDataToCanvas(texBookshelf()),
   };
+  // Merge in item textures
+  const items = buildItemCanvases();
+  return { ...blocks, ...items };
 }
 
 export function buildIconDataURLs(canvases: Record<string, HTMLCanvasElement>): Record<string, string> {

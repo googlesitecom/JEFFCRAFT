@@ -4,7 +4,7 @@ import * as THREE from "three";
 
 // Fixed, ordered list of all texture names
 export const TEXTURE_NAMES = [
-  // Blocks
+  // Blocks (25)
   "dirt",
   "grass_top",
   "grass_side",
@@ -30,6 +30,38 @@ export const TEXTURE_NAMES = [
   "crafting_table_top",
   "crafting_table_side",
   "bookshelf",
+  // Materials (6)
+  "stick",
+  "coal",
+  "iron_ingot",
+  "gold_ingot",
+  "diamond",
+  "charcoal",
+  // Food (7)
+  "apple",
+  "raw_porkchop",
+  "cooked_porkchop",
+  "raw_beef",
+  "cooked_beef",
+  "raw_chicken",
+  "cooked_chicken",
+  // Tools (16)
+  "wood_pickaxe",
+  "wood_axe",
+  "wood_sword",
+  "wood_shovel",
+  "stone_pickaxe",
+  "stone_axe",
+  "stone_sword",
+  "stone_shovel",
+  "iron_pickaxe",
+  "iron_axe",
+  "iron_sword",
+  "iron_shovel",
+  "diamond_pickaxe",
+  "diamond_axe",
+  "diamond_sword",
+  "diamond_shovel",
 ] as const;
 
 export type TextureName = (typeof TEXTURE_NAMES)[number];
@@ -40,9 +72,9 @@ const TILE_SIZE = 16;
 const PADDING = 8;
 const SLOT = TILE_SIZE + PADDING * 2; // 32 pixels per slot
 const COLS = 8;
-const ROWS = Math.ceil(TEXTURE_NAMES.length / COLS); // = 4
+const ROWS = 8; // 8x8 = 64 slots, enough for 54 textures
 const ATLAS_W = SLOT * COLS; // 256
-const ATLAS_H = SLOT * ROWS; // 128
+const ATLAS_H = SLOT * ROWS; // 256
 
 export interface AtlasTile {
   u0: number;
