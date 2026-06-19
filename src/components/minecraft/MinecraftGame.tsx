@@ -94,16 +94,24 @@ export default function MinecraftGame() {
     resetAtlas();
     const canvases = buildTextureCanvases();
     const atlas = getSharedAtlas(canvases);
-    // Opaque material: solid + cutout (glass) - depthWrite on, alphaTest discards empty glass pixels
+    // Opaque material: solid blocks (no alpha)
     const opaqueMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
       side: THREE.FrontSide,
-      alphaTest: 0.5,
       transparent: false,
       depthWrite: true,
     });
-    // Transparent material: water only - alpha blended, depthWrite off
+    // Cutout material: leaves, glass - uses alphaTest (no blending, but discards transparent pixels)
+    const cutoutMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      map: atlas.texture,
+      side: THREE.DoubleSide,
+      transparent: false,
+      alphaTest: 0.5,
+      depthWrite: true,
+    });
+    // Translucent material: water only - alpha blended, depthWrite off
     const transparentMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
@@ -131,7 +139,7 @@ export default function MinecraftGame() {
       const key = chunkKey(cx, cz);
       if (chunkMeshes.has(key)) return;
       world.getOrCreateChunk(cx, cz);
-      chunkMeshes.set(key, { opaque: null, transparent: null });
+      chunkMeshes.set(key, { opaque: null, cutout: null, transparent: null });
       chunksToBuild.push({ cx, cz });
     }
 
@@ -146,8 +154,9 @@ export default function MinecraftGame() {
         chunkGroup.remove(old.transparent);
         old.transparent.geometry.dispose();
       }
-      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, transparentMaterial);
+      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, cutoutMaterial, transparentMaterial);
       if (meshes.opaque) chunkGroup.add(meshes.opaque);
+      if (meshes.cutout) chunkGroup.add(meshes.cutout);
       if (meshes.transparent) chunkGroup.add(meshes.transparent);
       chunkMeshes.set(key, meshes);
     }
@@ -159,6 +168,10 @@ export default function MinecraftGame() {
       if (m.opaque) {
         chunkGroup.remove(m.opaque);
         m.opaque.geometry.dispose();
+      }
+      if (m.cutout) {
+        chunkGroup.remove(m.cutout);
+        m.cutout.geometry.dispose();
       }
       if (m.transparent) {
         chunkGroup.remove(m.transparent);
@@ -226,7 +239,7 @@ export default function MinecraftGame() {
           const cx = pcx + dx;
           const cz = pcz + dz;
           const key = chunkKey(cx, cz);
-          chunkMeshes.set(key, { opaque: null, transparent: null });
+          chunkMeshes.set(key, { opaque: null, cutout: null, transparent: null });
           buildChunk(cx, cz);
         }
       }
@@ -462,10 +475,12 @@ export default function MinecraftGame() {
       renderer.domElement.removeEventListener("wheel", handleWheel);
       chunkMeshes.forEach((c) => {
         c.opaque?.geometry.dispose();
+        c.cutout?.geometry.dispose();
         c.transparent?.geometry.dispose();
       });
       atlas.texture.dispose();
       opaqueMaterial.dispose();
+      cutoutMaterial.dispose();
       transparentMaterial.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === container) {

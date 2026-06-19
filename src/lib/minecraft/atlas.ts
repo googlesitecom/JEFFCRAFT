@@ -1,8 +1,10 @@
 // Texture atlas builder with stable, deterministic tile order.
-// Uses padding between tiles to prevent texture bleeding at any resolution/filter.
+// Uses generous padding between tiles to PREVENT any texture bleeding.
 import * as THREE from "three";
 
+// Fixed, ordered list of all texture names
 export const TEXTURE_NAMES = [
+  // Blocks
   "dirt",
   "grass_top",
   "grass_side",
@@ -28,44 +30,19 @@ export const TEXTURE_NAMES = [
   "crafting_table_top",
   "crafting_table_side",
   "bookshelf",
-  "apple",
-  "raw_porkchop",
-  "cooked_porkchop",
-  "raw_beef",
-  "cooked_beef",
-  "raw_chicken",
-  "cooked_chicken",
-  "stick",
-  "coal",
-  "iron_ingot",
-  "gold_ingot",
-  "diamond",
-  "wood_pickaxe",
-  "wood_axe",
-  "wood_sword",
-  "stone_pickaxe",
-  "stone_axe",
-  "stone_sword",
-  "iron_pickaxe",
-  "iron_axe",
-  "iron_sword",
-  "diamond_pickaxe",
-  "diamond_axe",
-  "diamond_sword",
-  "pig",
-  "cow",
-  "chicken",
 ] as const;
 
 export type TextureName = (typeof TEXTURE_NAMES)[number];
 
-const ATLAS_TILE = 16; // source tile size
-const ATLAS_PADDING = 4; // padding pixels around each tile to prevent bleeding
-const TILE_TOTAL = ATLAS_TILE + ATLAS_PADDING * 2; // 24px per tile slot
-const ATLAS_COLS = 8;
-const ATLAS_ROWS = 8; // increased to fit 53 textures
-const ATLAS_W = TILE_TOTAL * ATLAS_COLS; // 192
-const ATLAS_H = TILE_TOTAL * ATLAS_ROWS; // 192
+// Tile source size = 16x16 pixels (classic Minecraft)
+const TILE_SIZE = 16;
+// Padding pixels around each tile - generous to avoid ANY bleeding
+const PADDING = 8;
+const SLOT = TILE_SIZE + PADDING * 2; // 32 pixels per slot
+const COLS = 8;
+const ROWS = Math.ceil(TEXTURE_NAMES.length / COLS); // = 4
+const ATLAS_W = SLOT * COLS; // 256
+const ATLAS_H = SLOT * ROWS; // 128
 
 export interface AtlasTile {
   u0: number;
@@ -89,67 +66,68 @@ export function buildAtlas(
   canvas.height = ATLAS_H;
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingEnabled = false;
-  // Fill with magenta as error indicator
+  // Fill background magenta so missing textures are obvious
   ctx.fillStyle = "#ff00ff";
   ctx.fillRect(0, 0, ATLAS_W, ATLAS_H);
 
   const tiles: Record<string, AtlasTile> = {};
 
   TEXTURE_NAMES.forEach((name, i) => {
-    const col = i % ATLAS_COLS;
-    const row = Math.floor(i / ATLAS_COLS);
-    const x = col * TILE_TOTAL + ATLAS_PADDING;
-    const y = row * TILE_TOTAL + ATLAS_PADDING;
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    // Top-left of the inner 16x16 tile
+    const x = col * SLOT + PADDING;
+    const y = row * SLOT + PADDING;
     const src = textureCanvases[name];
     if (src) {
-      // Draw the 16x16 tile, then repeat its edge pixels into the padding
-      // (edge padding) to prevent bleeding at any filter
-      ctx.drawImage(src, x, y, ATLAS_TILE, ATLAS_TILE);
-      // Top padding: copy top row
-      const topImg = ctx.getImageData(x, y, ATLAS_TILE, 1);
-      for (let p = 1; p <= ATLAS_PADDING; p++) {
-        ctx.putImageData(topImg, x, y - p);
+      // Draw the source tile
+      ctx.drawImage(src, x, y, TILE_SIZE, TILE_SIZE);
+      // === Edge padding: replicate border pixels into the padding region ===
+      // This prevents bleeding when the GPU samples slightly outside the tile
+      // Top edge: copy top row of source into PADDING rows above
+      const topRow = ctx.getImageData(x, y, TILE_SIZE, 1);
+      for (let p = 1; p <= PADDING; p++) {
+        ctx.putImageData(topRow, x, y - p);
       }
-      // Bottom padding: copy bottom row
-      const botImg = ctx.getImageData(x, y + ATLAS_TILE - 1, ATLAS_TILE, 1);
-      for (let p = 0; p < ATLAS_PADDING; p++) {
-        ctx.putImageData(botImg, x, y + ATLAS_TILE + p);
+      // Bottom edge
+      const botRow = ctx.getImageData(x, y + TILE_SIZE - 1, TILE_SIZE, 1);
+      for (let p = 0; p < PADDING; p++) {
+        ctx.putImageData(botRow, x, y + TILE_SIZE + p);
       }
-      // Left padding: copy left column
-      const leftImg = ctx.getImageData(x, y, 1, ATLAS_TILE);
-      for (let p = 1; p <= ATLAS_PADDING; p++) {
-        ctx.putImageData(leftImg, x - p, y);
+      // Left edge
+      const leftCol = ctx.getImageData(x, y, 1, TILE_SIZE);
+      for (let p = 1; p <= PADDING; p++) {
+        ctx.putImageData(leftCol, x - p, y);
       }
-      // Right padding: copy right column
-      const rightImg = ctx.getImageData(x + ATLAS_TILE - 1, y, 1, ATLAS_TILE);
-      for (let p = 0; p < ATLAS_PADDING; p++) {
-        ctx.putImageData(rightImg, x + ATLAS_TILE + p, y);
+      // Right edge
+      const rightCol = ctx.getImageData(x + TILE_SIZE - 1, y, 1, TILE_SIZE);
+      for (let p = 0; p < PADDING; p++) {
+        ctx.putImageData(rightCol, x + TILE_SIZE + p, y);
       }
-      // Corner padding: copy corner pixels
+      // Corners: copy 1x1 corner pixels into the corner padding regions
       const tl = ctx.getImageData(x, y, 1, 1);
-      const tr = ctx.getImageData(x + ATLAS_TILE - 1, y, 1, 1);
-      const bl = ctx.getImageData(x, y + ATLAS_TILE - 1, 1, 1);
-      const br = ctx.getImageData(x + ATLAS_TILE - 1, y + ATLAS_TILE - 1, 1, 1);
-      for (let py = 1; py <= ATLAS_PADDING; py++) {
-        for (let px = 1; px <= ATLAS_PADDING; px++) {
+      const tr = ctx.getImageData(x + TILE_SIZE - 1, y, 1, 1);
+      const bl = ctx.getImageData(x, y + TILE_SIZE - 1, 1, 1);
+      const br = ctx.getImageData(x + TILE_SIZE - 1, y + TILE_SIZE - 1, 1, 1);
+      for (let py = 1; py <= PADDING; py++) {
+        for (let px = 1; px <= PADDING; px++) {
           ctx.putImageData(tl, x - px, y - py);
-          ctx.putImageData(tr, x + ATLAS_TILE - 1 + px, y - py);
-          ctx.putImageData(bl, x - px, y + ATLAS_TILE - 1 + py);
-          ctx.putImageData(br, x + ATLAS_TILE - 1 + px, y + ATLAS_TILE - 1 + py);
+          ctx.putImageData(tr, x + TILE_SIZE - 1 + px, y - py);
+          ctx.putImageData(bl, x - px, y + TILE_SIZE - 1 + py);
+          ctx.putImageData(br, x + TILE_SIZE - 1 + px, y + TILE_SIZE - 1 + py);
         }
       }
     }
-    // UV coords - map to the 16x16 inner tile (padding excluded from UV range)
+    // UV coords - map exactly to the inner 16x16 tile
     tiles[name] = {
       u0: x / ATLAS_W,
-      v0: 1 - (y + ATLAS_TILE) / ATLAS_H,
-      u1: (x + ATLAS_TILE) / ATLAS_W,
+      v0: 1 - (y + TILE_SIZE) / ATLAS_H,
+      u1: (x + TILE_SIZE) / ATLAS_W,
       v1: 1 - y / ATLAS_H,
     };
   });
 
   const atlasTexture = new THREE.CanvasTexture(canvas);
-  // Use linear filtering with mipmaps for stable rendering at distance
   atlasTexture.magFilter = THREE.NearestFilter;
   atlasTexture.minFilter = THREE.NearestFilter;
   atlasTexture.generateMipmaps = false;
@@ -170,7 +148,6 @@ export function getSharedAtlas(
   return atlasInstance;
 }
 
-// Reset cached atlas (used when entering a new game session)
 export function resetAtlas() {
   if (atlasInstance) {
     atlasInstance.texture.dispose();
