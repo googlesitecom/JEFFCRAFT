@@ -18,6 +18,7 @@ import { HandView, HandAction } from "@/lib/minecraft/hand";
 import { DropManager } from "@/lib/minecraft/drops";
 import { getSound } from "@/lib/minecraft/sound";
 import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
+import { XpState } from "@/lib/minecraft/xp";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -69,6 +70,23 @@ const BLOCK_DROPS: Partial<Record<BlockType, { id: number; count: number }>> = {
   [BlockType.Pumpkin]: { id: BlockType.Pumpkin, count: 1 },
 };
 
+// XP dropped per block (Minecraft values, simplified)
+// coal_ore: 0..2, diamond_ore: 3..7, gold_ore: 0..1, emerald_ore: 3..7
+const BLOCK_XP_DROPS: Partial<Record<BlockType, { min: number; max: number }>> = {
+  [BlockType.CoalOre]: { min: 0, max: 2 },
+  [BlockType.DiamondOre]: { min: 3, max: 7 },
+  [BlockType.GoldOre]: { min: 0, max: 1 },
+};
+
+// XP dropped when killing entities (Minecraft values)
+const ANIMAL_XP = { min: 1, max: 3 };   // passive mobs
+const MONSTER_XP = { min: 5, max: 5 };  // zombies, skeletons, spiders, creepers
+
+function randXp(range: { min: number; max: number }): number {
+  if (range.max <= 0) return 0;
+  return range.min + Math.floor(Math.random() * (range.max - range.min + 1));
+}
+
 interface GameStats {
   fps: number;
   x: number;
@@ -81,6 +99,8 @@ interface GameStats {
   inWater: boolean;
   headInWater: boolean;
   breakProgress: number; // 0-1
+  xpLevel: number;
+  xpProgress: number; // 0-1
 }
 
 interface WorldConfig {
@@ -100,6 +120,7 @@ export default function MinecraftGame() {
   const [stats, setStats] = useState<GameStats>({
     fps: 0, x: 0, y: 0, z: 0, chunks: 0,
     health: 20, hunger: 20, air: 10, inWater: false, headInWater: false, breakProgress: 0,
+    xpLevel: 0, xpProgress: 0,
   });
   const [iconUrls, setIconUrls] = useState<Record<string, string>>({});
   const iconUrlsRef = useRef<Record<string, string>>({});
@@ -117,6 +138,8 @@ export default function MinecraftGame() {
   const playerRef = useRef<any>(null);
   const dayTimeRef = useRef<number>(0.3);
   const pendingLoadRef = useRef<SavedWorld | null>(null);
+  const xpStateRef = useRef<XpState>(new XpState());
+  const pendingXpLoadRef = useRef<{ level: number; progress: number } | null>(null);
   const [saveMessage, setSaveMessage] = useState<string>("");
 
   useEffect(() => {
@@ -306,8 +329,22 @@ export default function MinecraftGame() {
       inventoryRef.current.deserialize(saved.inventory);
       // Restore day time
       dayTimeRef.current = saved.dayTime;
+      // Restore XP state if available
+      if (pendingXpLoadRef.current) {
+        xpStateRef.current.deserialize(pendingXpLoadRef.current);
+        pendingXpLoadRef.current = null;
+      } else {
+        xpStateRef.current.reset();
+      }
       // Force inventory refresh
       setInventoryVersion((v) => v + 1);
+    } else if (pendingXpLoadRef.current) {
+      // Respawn case: no saved world to apply, but preserve XP from before respawn
+      xpStateRef.current.deserialize(pendingXpLoadRef.current);
+      pendingXpLoadRef.current = null;
+    } else {
+      // Fresh new world - reset XP
+      xpStateRef.current.reset();
     }
     // Enable tracking of player modifications (for save system)
     world.enablePlayerModificationTracking(true);
@@ -670,6 +707,12 @@ export default function MinecraftGame() {
       if (drop && worldConfigRef.current?.mode === "survival") {
         dropManager.spawnDrop(drop.id, drop.count, x + 0.5, y + 0.5, z + 0.5);
       }
+      // Drop XP (in survival)
+      const xpDrop = BLOCK_XP_DROPS[blockType];
+      if (xpDrop && worldConfigRef.current?.mode === "survival") {
+        const xp = randXp(xpDrop);
+        if (xp > 0) dropManager.spawnXpOrb(xp, x + 0.5, y + 0.5, z + 0.5);
+      }
       return true;
     }
 
@@ -728,6 +771,12 @@ export default function MinecraftGame() {
         const drop = BLOCK_DROPS[blockType];
         if (drop) {
           dropManager.spawnDrop(drop.id, drop.count, x + 0.5, y + 0.5, z + 0.5);
+        }
+        // Drop XP for certain ores
+        const xpDrop = BLOCK_XP_DROPS[blockType];
+        if (xpDrop) {
+          const xp = randXp(xpDrop);
+          if (xp > 0) dropManager.spawnXpOrb(xp, x + 0.5, y + 0.5, z + 0.5);
         }
         // Sound
         sound.blockSound(blockType, "break");
@@ -1008,11 +1057,28 @@ export default function MinecraftGame() {
       // Update item drops and pick up nearby ones
       const pickedUp = dropManager.update(dt, player.position.x, player.position.y + 0.8, player.position.z);
       if (pickedUp.length > 0) {
+        let pickedXp = 0;
+        let pickedItems = false;
         for (const p of pickedUp) {
-          inventoryRef.current.addItem(p.id, p.count);
+          if (p.isXp) {
+            pickedXp += p.id; // for XP orbs, id holds the xp amount
+          } else {
+            inventoryRef.current.addItem(p.id, p.count);
+            pickedItems = true;
+          }
+        }
+        if (pickedXp > 0) {
+          const levelsGained = xpStateRef.current.addXp(pickedXp);
+          if (levelsGained > 0) {
+            sound.levelUp();
+          } else {
+            sound.orbPickup();
+          }
+        }
+        if (pickedItems) {
+          sound.pickup();
         }
         setInventoryVersion((v) => v + 1);
-        sound.pickup();
       }
 
       // Update monsters (spawn at night in survival, attack player)
@@ -1047,7 +1113,7 @@ export default function MinecraftGame() {
             if (itemDef?.toolType === "sword") {
               // Wood=6 (4 hits), Stone=7 (3 hits), Iron=8 (3 hits), Gold=6 (4 hits), Diamond=10 (2 hits)
               const tierDmg: Record<string, number> = { wood: 6, stone: 7, iron: 8, gold: 6, diamond: 10 };
-              damage = tierDmg[itemDef.toolTier] || 6;
+              damage = (itemDef.toolTier && tierDmg[itemDef.toolTier]) || 6;
             } else if (itemDef?.toolType === "axe") {
               damage = 4;
             }
@@ -1061,6 +1127,9 @@ export default function MinecraftGame() {
               for (const drop of drops) {
                 dropManager.spawnDrop(drop.id, drop.count, monster.position.x, monster.position.y + 0.5, monster.position.z);
               }
+              // Drop XP for monster kill
+              const xp = randXp(MONSTER_XP);
+              if (xp > 0) dropManager.spawnXpOrb(xp, monster.position.x, monster.position.y + 0.5, monster.position.z);
               monsterManager.removeMonster(monster);
             }
           } else if (animal) {
@@ -1070,6 +1139,9 @@ export default function MinecraftGame() {
               for (const drop of drops) {
                 dropManager.spawnDrop(drop.id, drop.count, animal.position.x, animal.position.y + 0.5, animal.position.z);
               }
+              // Drop XP for animal kill
+              const xp = randXp(ANIMAL_XP);
+              if (xp > 0) dropManager.spawnXpOrb(xp, animal.position.x, animal.position.y + 0.5, animal.position.z);
               animalManager.removeAnimal(animal);
             }
           }
@@ -1164,6 +1236,8 @@ export default function MinecraftGame() {
           inWater: player.inWater,
           headInWater: player.headInWater,
           breakProgress: miningProgress,
+          xpLevel: xpStateRef.current.level,
+          xpProgress: xpStateRef.current.progressFraction,
         }));
         posUpdateCounter = 0;
       }
@@ -1237,15 +1311,23 @@ export default function MinecraftGame() {
     // Clear inventory for new world (survival starts empty, creative will use creative inventory)
     inventoryRef.current.clear();
     pendingLoadRef.current = null;
+    pendingXpLoadRef.current = null;
+    // Reset XP state for new world
+    xpStateRef.current.reset();
   }, []);
 
   const handleRespawn = useCallback(() => {
+    // On respawn, keep XP at current level (like Minecraft) - save it before the screen change
+    // so the game effect can restore it when re-creating the world.
+    pendingXpLoadRef.current = xpStateRef.current.serialize();
     setScreen("main-menu");
     setTimeout(() => {
       if (worldConfigRef.current) {
         setScreen("playing");
         setIsLoaded(false);
         setIsDead(false);
+        // XP will be restored from pendingXpLoadRef in the game effect
+        // (Minecraft actually drops half your XP on death. We keep it simple and keep all.)
       }
     }, 50);
   }, []);
@@ -1256,6 +1338,8 @@ export default function MinecraftGame() {
     setCurrentWorld(null);
     // Clear inventory
     inventoryRef.current.clear();
+    // Reset XP state when leaving the world without saving
+    xpStateRef.current.reset();
   }, []);
 
   const handleSaveWorld = useCallback(() => {
@@ -1273,7 +1357,8 @@ export default function MinecraftGame() {
         hunger: playerRef.current.hunger,
       },
       inventoryRef.current,
-      dayTimeRef.current
+      dayTimeRef.current,
+      xpStateRef.current.serialize()
     );
     setSaveMessage(success ? "✓ Mundo guardado" : "✗ Error al guardar");
     setTimeout(() => setSaveMessage(""), 3000);
@@ -1301,6 +1386,9 @@ export default function MinecraftGame() {
             setIsDead(false);
             // We'll apply the saved world in the effect via a ref
             pendingLoadRef.current = saved;
+            pendingXpLoadRef.current = saved.xp || null;
+            // Clear inventory before loading saved one
+            inventoryRef.current.clear();
           }
         }}
       />
@@ -1336,6 +1424,7 @@ export default function MinecraftGame() {
         <div>FPS: {stats.fps}</div>
         <div>X: {stats.x} Y: {stats.y} Z: {stats.z}</div>
         <div>Chunks: {stats.chunks}</div>
+        <div className="text-white/60 text-[10px]">Seed: {currentWorld?.seed ?? 0}</div>
         <div className="mt-1 text-white/70">
           {mode === "survival"
             ? (() => {
@@ -1355,7 +1444,8 @@ export default function MinecraftGame() {
       {/* Survival stats - centered above hotbar like Minecraft */}
       {mode === "survival" && (
         <>
-          <div className="absolute bottom-[76px] left-1/2 -translate-x-1/2 z-20 flex flex-row items-end" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
+          {/* Hearts + hunger row (topmost) */}
+          <div className="absolute bottom-[100px] left-1/2 -translate-x-1/2 z-20 flex flex-row items-end" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
             {/* Hearts (left of center) */}
             <div className="flex gap-px">
               {Array.from({ length: 10 }).map((_, i) => (
@@ -1371,9 +1461,25 @@ export default function MinecraftGame() {
               ))}
             </div>
           </div>
+          {/* XP bar (between hearts/hunger and hotbar) */}
+          <div className="absolute bottom-[78px] left-1/2 -translate-x-1/2 z-20 flex items-center" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
+            {/* XP level number (centered on top of bar) */}
+            {stats.xpLevel > 0 && (
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-green-400 font-mono font-bold text-sm leading-none" style={{ textShadow: "1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000" }}>
+                {stats.xpLevel}
+              </div>
+            )}
+            {/* XP bar background + fill */}
+            <div className="w-[364px] sm:w-[364px] h-[9px] bg-black/60 border border-black/80 relative overflow-hidden" style={{ imageRendering: "pixelated" }}>
+              <div
+                className="h-full bg-green-500 transition-[width] duration-150 ease-linear"
+                style={{ width: `${Math.max(0, Math.min(100, stats.xpProgress * 100))}%` }}
+              />
+            </div>
+          </div>
           {/* Air bubbles above hearts */}
           {stats.air < 10 && (
-            <div className="absolute bottom-[100px] left-1/2 -translate-x-1/2 z-20 flex gap-px" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
+            <div className="absolute bottom-[124px] left-1/2 -translate-x-1/2 z-20 flex gap-px" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
               {Array.from({ length: 10 }).map((_, i) => (
                 <Bubble key={i} filled={stats.air > i} />
               ))}
@@ -1680,7 +1786,14 @@ function CreateWorldScreen({
   onCancel: () => void;
   onCreate: (config: WorldConfig) => void;
 }) {
-  const [name, setName] = useState("Nuevo Mundo");
+  // Default world name is unique (Nuevo Mundo N where N = next available)
+  const [name, setName] = useState(() => {
+    const existing = listSavedWorlds().map((w) => w.name);
+    let n = 1;
+    while (existing.includes(`Nuevo Mundo ${n}`)) n++;
+    return `Nuevo Mundo ${n}`;
+  });
+  // Default seed is empty (= random), but show a hint button to generate one
   const [seedStr, setSeedStr] = useState("");
   const [mode, setMode] = useState<GameMode>("creative");
 
@@ -1688,16 +1801,27 @@ function CreateWorldScreen({
     // Generate seed from string or random
     let seed: number;
     if (seedStr.trim() === "") {
-      seed = Math.floor(Math.random() * 1000000);
+      // Random seed (like Minecraft - each new world is unique)
+      seed = Math.floor(Math.random() * 2147483647);
     } else {
-      // Hash string to seed
-      let h = 0;
-      for (let i = 0; i < seedStr.length; i++) {
-        h = (h * 31 + seedStr.charCodeAt(i)) | 0;
+      // If it's a number, use it directly. Otherwise hash the string.
+      const parsed = parseInt(seedStr, 10);
+      if (!isNaN(parsed) && seedStr.trim() === String(parsed)) {
+        seed = Math.abs(parsed);
+      } else {
+        let h = 0;
+        for (let i = 0; i < seedStr.length; i++) {
+          h = (h * 31 + seedStr.charCodeAt(i)) | 0;
+        }
+        seed = Math.abs(h);
       }
-      seed = Math.abs(h);
     }
     onCreate({ name: name.trim() || "Nuevo Mundo", seed, mode });
+  };
+
+  // Generate a random numeric seed and fill the input
+  const handleRandomSeed = () => {
+    setSeedStr(String(Math.floor(Math.random() * 2147483647)));
   };
 
   return (
@@ -1733,15 +1857,27 @@ function CreateWorldScreen({
             <label className="block text-white font-mono text-sm mb-2">
               Semilla del mundo <span className="text-stone-500">(opcional)</span>
             </label>
-            <input
-              type="text"
-              value={seedStr}
-              onChange={(e) => setSeedStr(e.target.value)}
-              className="w-full bg-stone-800 border-2 border-stone-600 focus:border-green-400 text-white font-mono px-4 py-2 rounded outline-none transition-colors"
-              placeholder="Dejar vacío para semilla aleatoria"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={seedStr}
+                onChange={(e) => setSeedStr(e.target.value)}
+                className="flex-1 bg-stone-800 border-2 border-stone-600 focus:border-green-400 text-white font-mono px-4 py-2 rounded outline-none transition-colors"
+                placeholder="Vacío = semilla aleatoria (como Minecraft)"
+              />
+              <button
+                type="button"
+                onClick={handleRandomSeed}
+                title="Generar semilla aleatoria"
+                className="px-3 py-2 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white font-mono rounded transition-colors"
+              >
+                🎲
+              </button>
+            </div>
             <p className="text-stone-500 text-xs mt-1 font-mono">
-              La misma semilla siempre genera el mismo mundo
+              {seedStr.trim() === ""
+                ? "Se generará una semilla aleatoria: cada mundo es único"
+                : "La misma semilla siempre genera el mismo mundo"}
             </p>
           </div>
 

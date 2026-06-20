@@ -242,6 +242,19 @@ export class SoundManager {
     setTimeout(() => this.tone(1200, 0.06, 0.12, "sine", 1600), 30);
   }
 
+  // XP orb pickup - a pleasant ding sound
+  orbPickup() {
+    this.tone(1318, 0.06, 0.12, "sine", 1700); // E6
+    setTimeout(() => this.tone(1568, 0.08, 0.10, "sine", 1800), 40); // G6
+  }
+
+  // XP level-up sound
+  levelUp() {
+    this.tone(523, 0.1, 0.18, "triangle"); // C5
+    setTimeout(() => this.tone(659, 0.1, 0.18, "triangle"), 90);   // E5
+    setTimeout(() => this.tone(784, 0.15, 0.20, "triangle"), 180); // G5
+  }
+
   // === Background music ===
   private musicTimer: ReturnType<typeof setTimeout> | null = null;
   private musicPlaying: boolean = false;

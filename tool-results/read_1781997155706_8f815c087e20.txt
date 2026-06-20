@@ -1,0 +1,774 @@
+     1→// Procedural pixel-art texture generation for Minecraft blocks
+     2→// Returns HTMLCanvasElement (not THREE.Texture) so the atlas can be built deterministically.
+     3→const TEX_SIZE = 16;
+     4→
+     5→function makeRng(seed: number) {
+     6→  let s = seed >>> 0;
+     7→  return () => {
+     8→    s = (s * 1664525 + 1013904223) >>> 0;
+     9→    return s / 4294967296;
+    10→  };
+    11→}
+    12→
+    13→function hexToRgb(hex: string): [number, number, number] {
+    14→  const h = hex.replace("#", "");
+    15→  return [
+    16→    parseInt(h.substring(0, 2), 16),
+    17→    parseInt(h.substring(2, 4), 16),
+    18→    parseInt(h.substring(4, 6), 16),
+    19→  ];
+    20→}
+    21→
+    22→function clamp(n: number, min: number, max: number) {
+    23→  return Math.max(min, Math.min(max, n));
+    24→}
+    25→
+    26→function shade(rgb: [number, number, number], amount: number): [number, number, number] {
+    27→  return [clamp(rgb[0] + amount, 0, 255), clamp(rgb[1] + amount, 0, 255), clamp(rgb[2] + amount, 0, 255)];
+    28→}
+    29→
+    30→function variation(rgb: [number, number, number], v: number, rng: () => number): [number, number, number] {
+    31→  return [
+    32→    clamp(rgb[0] + (rng() - 0.5) * 2 * v, 0, 255),
+    33→    clamp(rgb[1] + (rng() - 0.5) * 2 * v, 0, 255),
+    34→    clamp(rgb[2] + (rng() - 0.5) * 2 * v, 0, 255),
+    35→  ];
+    36→}
+    37→
+    38→function setPixel(img: ImageData, x: number, y: number, rgb: [number, number, number], alpha = 255) {
+    39→  if (x < 0 || x >= img.width || y < 0 || y >= img.height) return;
+    40→  const i = (y * img.width + x) * 4;
+    41→  img.data[i] = rgb[0];
+    42→  img.data[i + 1] = rgb[1];
+    43→  img.data[i + 2] = rgb[2];
+    44→  img.data[i + 3] = alpha;
+    45→}
+    46→
+    47→function fill(img: ImageData, rgb: [number, number, number]) {
+    48→  for (let y = 0; y < img.height; y++) {
+    49→    for (let x = 0; x < img.width; x++) {
+    50→      setPixel(img, x, y, rgb);
+    51→    }
+    52→  }
+    53→}
+    54→
+    55→function noiseFill(img: ImageData, base: [number, number, number], v: number, seed: number) {
+    56→  const rng = makeRng(seed);
+    57→  for (let y = 0; y < img.height; y++) {
+    58→    for (let x = 0; x < img.width; x++) {
+    59→      setPixel(img, x, y, variation(base, v, rng));
+    60→    }
+    61→  }
+    62→}
+    63→
+    64→function clearTransparent(img: ImageData) {
+    65→  for (let i = 0; i < img.data.length; i += 4) {
+    66→    img.data[i + 3] = 0;
+    67→  }
+    68→}
+    69→
+    70→function fillRect(img: ImageData, x: number, y: number, w: number, h: number, rgb: [number, number, number], alpha = 255) {
+    71→  for (let dy = 0; dy < h; dy++) {
+    72→    for (let dx = 0; dx < w; dx++) {
+    73→      setPixel(img, x + dx, y + dy, rgb, alpha);
+    74→    }
+    75→  }
+    76→}
+    77→
+    78→function imageDataToCanvas(img: ImageData): HTMLCanvasElement {
+    79→  const canvas = document.createElement("canvas");
+    80→  canvas.width = img.width;
+    81→  canvas.height = img.height;
+    82→  const ctx = canvas.getContext("2d")!;
+    83→  ctx.putImageData(img, 0, 0);
+    84→  return canvas;
+    85→}
+    86→
+    87→// ============================================================
+    88→// BLOCK TEXTURES (16x16 each)
+    89→// ============================================================
+    90→
+    91→function texDirt(): ImageData {
+    92→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+    93→  noiseFill(img, hexToRgb("#79553a"), 14, 1);
+    94→  const rng = makeRng(100);
+    95→  // Darker specks
+    96→  for (let i = 0; i < 22; i++) {
+    97→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#5e3f29"), -10 + rng() * 15));
+    98→  }
+    99→  // Lighter specks
+   100→  for (let i = 0; i < 12; i++) {
+   101→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#8a6342"), 0 + rng() * 15));
+   102→  }
+   103→  return img;
+   104→}
+   105→
+   106→function texGrassTop(): ImageData {
+   107→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   108→  noiseFill(img, hexToRgb("#5fa83b"), 14, 2);
+   109→  const rng = makeRng(102);
+   110→  for (let i = 0; i < 24; i++) {
+   111→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#4d8f30"), -10 + rng() * 25));
+   112→  }
+   113→  for (let i = 0; i < 10; i++) {
+   114→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#74c14a"), 0 + rng() * 15));
+   115→  }
+   116→  return img;
+   117→}
+   118→
+   119→function texGrassSide(): ImageData {
+   120→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   121→  // Bottom: dirt
+   122→  noiseFill(img, hexToRgb("#79553a"), 14, 3);
+   123→  const rng = makeRng(103);
+   124→  // Top: grass overlay (3-4 pixels deep)
+   125→  for (let x = 0; x < TEX_SIZE; x++) {
+   126→    const grassH = 3 + Math.floor(rng() * 2);
+   127→    for (let y = 0; y < grassH; y++) {
+   128→      setPixel(img, x, y, variation(hexToRgb("#5fa83b"), 14, rng));
+   129→    }
+   130→    // Dangling grass pixels below
+   131→    if (rng() > 0.55) {
+   132→      setPixel(img, x, grassH, variation(hexToRgb("#4d8f30"), 12, rng));
+   133→    }
+   134→  }
+   135→  // Add a few specks on dirt
+   136→  for (let i = 0; i < 10; i++) {
+   137→    setPixel(img, Math.floor(rng() * TEX_SIZE), 5 + Math.floor(rng() * 11), shade(hexToRgb("#5e3f29"), -5 + rng() * 10));
+   138→  }
+   139→  return img;
+   140→}
+   141→
+   142→function texStone(): ImageData {
+   143→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   144→  noiseFill(img, hexToRgb("#7d7d7d"), 10, 4);
+   145→  const rng = makeRng(104);
+   146→  for (let i = 0; i < 18; i++) {
+   147→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#5e5e5e"), -8 + rng() * 16));
+   148→  }
+   149→  for (let i = 0; i < 8; i++) {
+   150→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#9a9a9a"), 0 + rng() * 12));
+   151→  }
+   152→  return img;
+   153→}
+   154→
+   155→function texCobblestone(): ImageData {
+   156→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   157→  fill(img, hexToRgb("#383838")); // dark mortar
+   158→  const rng = makeRng(5);
+   159→  // Stones of various sizes
+   160→  const stones = [
+   161→    { x: 0, y: 0, w: 5, h: 4 },
+   162→    { x: 6, y: 0, w: 6, h: 4 },
+   163→    { x: 13, y: 0, w: 3, h: 5 },
+   164→    { x: 0, y: 5, w: 4, h: 5 },
+   165→    { x: 5, y: 5, w: 5, h: 4 },
+   166→    { x: 11, y: 6, w: 5, h: 5 },
+   167→    { x: 0, y: 11, w: 6, h: 5 },
+   168→    { x: 7, y: 10, w: 4, h: 6 },
+   169→    { x: 12, y: 12, w: 4, h: 4 },
+   170→  ];
+   171→  for (const s of stones) {
+   172→    const base = variation(hexToRgb("#8a8a8a"), 14, rng);
+   173→    for (let y = s.y; y < s.y + s.h && y < TEX_SIZE; y++) {
+   174→      for (let x = s.x; x < s.x + s.w && x < TEX_SIZE; x++) {
+   175→        setPixel(img, x, y, variation(base, 8, rng));
+   176→      }
+   177→    }
+   178→    // Dark outline on left/top
+   179→    for (let y = s.y; y < s.y + s.h && y < TEX_SIZE; y++) {
+   180→      setPixel(img, s.x, y, hexToRgb("#383838"));
+   181→    }
+   182→    for (let x = s.x; x < s.x + s.w && x < TEX_SIZE; x++) {
+   183→      setPixel(img, x, s.y, hexToRgb("#383838"));
+   184→    }
+   185→  }
+   186→  return img;
+   187→}
+   188→
+   189→function texWoodTop(): ImageData {
+   190→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   191→  fill(img, hexToRgb("#a07640"));
+   192→  const cx = 8, cy = 8;
+   193→  const rng = makeRng(6);
+   194→  for (let y = 0; y < TEX_SIZE; y++) {
+   195→    for (let x = 0; x < TEX_SIZE; x++) {
+   196→      const dx = x - cx;
+   197→      const dy = y - cy;
+   198→      const d = Math.sqrt(dx * dx + dy * dy);
+   199→      const ring = Math.floor(d) % 2 === 0;
+   200→      if (ring) {
+   201→        setPixel(img, x, y, shade(hexToRgb("#7a5a30"), -5 + (d % 3) * 3));
+   202→      } else {
+   203→        setPixel(img, x, y, variation(hexToRgb("#9a6f3a"), 6, rng));
+   204→      }
+   205→    }
+   206→  }
+   207→  // Center knot
+   208→  setPixel(img, 8, 8, hexToRgb("#5a3e22"));
+   209→  return img;
+   210→}
+   211→
+   212→function texWoodSide(): ImageData {
+   213→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   214→  const rng = makeRng(7);
+   215→  for (let y = 0; y < TEX_SIZE; y++) {
+   216→    for (let x = 0; x < TEX_SIZE; x++) {
+   217→      // Vertical bark stripes
+   218→      const stripe = (x + Math.floor(rng() * 2)) % 4 < 2;
+   219→      const base = stripe ? hexToRgb("#6e4d28") : hexToRgb("#7a5a30");
+   220→      setPixel(img, x, y, variation(base, 6, rng));
+   221→    }
+   222→  }
+   223→  // Knot
+   224→  const kx = 5, ky = 6;
+   225→  for (let dy = -1; dy <= 1; dy++) {
+   226→    for (let dx = -1; dx <= 1; dx++) {
+   227→      setPixel(img, kx + dx, ky + dy, hexToRgb("#4a3318"));
+   228→    }
+   229→  }
+   230→  return img;
+   231→}
+   232→
+   233→function texLeaves(): ImageData {
+   234→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   235→  const rng = makeRng(8);
+   236→  for (let y = 0; y < TEX_SIZE; y++) {
+   237→    for (let x = 0; x < TEX_SIZE; x++) {
+   238→      const r = rng();
+   239→      let c: [number, number, number];
+   240→      if (r < 0.2) c = variation(hexToRgb("#2d5e1c"), 8, rng);
+   241→      else if (r < 0.5) c = variation(hexToRgb("#3a7d28"), 12, rng);
+   242→      else if (r < 0.8) c = variation(hexToRgb("#4a8f35"), 12, rng);
+   243→      else c = variation(hexToRgb("#1f4012"), 8, rng);
+   244→      setPixel(img, x, y, c, 255);
+   245→    }
+   246→  }
+   247→  // Darker spots for depth
+   248→  for (let i = 0; i < 10; i++) {
+   249→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), hexToRgb("#16380a"));
+   250→  }
+   251→  return img;
+   252→}
+   253→
+   254→function texSand(): ImageData {
+   255→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   256→  noiseFill(img, hexToRgb("#e0d39b"), 8, 9);
+   257→  const rng = makeRng(109);
+   258→  for (let i = 0; i < 20; i++) {
+   259→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#c9bb83"), -3 + rng() * 8));
+   260→  }
+   261→  return img;
+   262→}
+   263→
+   264→function texWater(): ImageData {
+   265→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   266→  noiseFill(img, hexToRgb("#2b5fb3"), 10, 10);
+   267→  const rng = makeRng(110);
+   268→  // Horizontal wave lines
+   269→  for (let i = 0; i < 5; i++) {
+   270→    const y = Math.floor(rng() * TEX_SIZE);
+   271→    for (let x = 0; x < TEX_SIZE; x++) {
+   272→      if (rng() > 0.4) {
+   273→        setPixel(img, x, y, shade(hexToRgb("#3a72c8"), 12));
+   274→      }
+   275→    }
+   276→  }
+   277→  return img;
+   278→}
+   279→
+   280→function texBedrock(): ImageData {
+   281→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   282→  fill(img, hexToRgb("#3a3a3a"));
+   283→  const rng = makeRng(11);
+   284→  for (let i = 0; i < 70; i++) {
+   285→    const x = Math.floor(rng() * TEX_SIZE);
+   286→    const y = Math.floor(rng() * TEX_SIZE);
+   287→    const gray = 40 + Math.floor(rng() * 70);
+   288→    setPixel(img, x, y, [gray, gray, gray]);
+   289→  }
+   290→  return img;
+   291→}
+   292→
+   293→function texPlanks(): ImageData {
+   294→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   295→  const rng = makeRng(12);
+   296→  // Horizontal planks (4 rows of 4px)
+   297→  for (let y = 0; y < TEX_SIZE; y++) {
+   298→    for (let x = 0; x < TEX_SIZE; x++) {
+   299→      const plankRow = Math.floor(y / 4);
+   300→      const base = plankRow % 2 === 0 ? hexToRgb("#a07640") : hexToRgb("#8a6536");
+   301→      setPixel(img, x, y, variation(base, 6, rng));
+   302→    }
+   303→  }
+   304→  // Plank separator lines
+   305→  for (let y = 0; y < TEX_SIZE; y += 4) {
+   306→    for (let x = 0; x < TEX_SIZE; x++) {
+   307→      setPixel(img, x, y, hexToRgb("#6e4d28"));
+   308→    }
+   309→  }
+   310→  // Vertical seams (offset per row)
+   311→  const rng2 = makeRng(13);
+   312→  for (let row = 0; row < 4; row++) {
+   313→    const x = 4 + Math.floor(rng2() * 8);
+   314→    for (let y = row * 4; y < row * 4 + 4; y++) {
+   315→      setPixel(img, x, y, hexToRgb("#6e4d28"));
+   316→    }
+   317→  }
+   318→  return img;
+   319→}
+   320→
+   321→function texGlass(): ImageData {
+   322→  // Glass: mostly transparent with a thin visible border
+   323→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   324→  const border = [180, 220, 240] as [number, number, number];
+   325→
+   326→  // All pixels start fully transparent (alpha 0) - you can see through
+   327→  for (let y = 0; y < TEX_SIZE; y++) {
+   328→    for (let x = 0; x < TEX_SIZE; x++) {
+   329→      setPixel(img, x, y, [200, 220, 240], 0);
+   330→    }
+   331→  }
+   332→
+   333→  // Thin border (just the outer edge) - opaque so the block edges are visible
+   334→  for (let i = 0; i < TEX_SIZE; i++) {
+   335→    setPixel(img, i, 0, border, 255);
+   336→    setPixel(img, i, TEX_SIZE - 1, border, 255);
+   337→    setPixel(img, 0, i, border, 255);
+   338→    setPixel(img, TEX_SIZE - 1, i, border, 255);
+   339→  }
+   340→
+   341→  // Small highlight in top-left corner (3 pixels)
+   342→  setPixel(img, 2, 2, [255, 255, 255], 180);
+   343→  setPixel(img, 3, 2, [255, 255, 255], 150);
+   344→  setPixel(img, 2, 3, [255, 255, 255], 150);
+   345→
+   346→  return img;
+   347→}
+   348→
+   349→function texBrick(): ImageData {
+   350→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   351→  fill(img, hexToRgb("#9c4f3b")); // mortar color
+   352→  const rng = makeRng(14);
+   353→  const brickH = 4;
+   354→  for (let y = 0; y < TEX_SIZE; y++) {
+   355→    for (let x = 0; x < TEX_SIZE; x++) {
+   356→      const row = Math.floor(y / brickH);
+   357→      const offset = row % 2 === 0 ? 0 : 4;
+   358→      const bx = (x + offset) % 8;
+   359→      const by = y % brickH;
+   360→      if (bx === 0 || by === 0) {
+   361→        setPixel(img, x, y, hexToRgb("#cccccc")); // mortar line
+   362→      } else {
+   363→        setPixel(img, x, y, variation(hexToRgb("#b15a44"), 10, rng));
+   364→      }
+   365→    }
+   366→  }
+   367→  return img;
+   368→}
+   369→
+   370→function texOre(stoneSeed: number, oreColor: [number, number, number], oreSeed: number): ImageData {
+   371→  // Copy stone base
+   372→  const base = texStone();
+   373→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   374→  img.data.set(base.data);
+   375→  const rng = makeRng(oreSeed);
+   376→  // 4-6 ore clusters
+   377→  for (let i = 0; i < 5; i++) {
+   378→    const cx = 2 + Math.floor(rng() * (TEX_SIZE - 4));
+   379→    const cy = 2 + Math.floor(rng() * (TEX_SIZE - 4));
+   380→    // 3x3 cluster with random holes
+   381→    for (let dy = -1; dy <= 1; dy++) {
+   382→      for (let dx = -1; dx <= 1; dx++) {
+   383→        if (rng() > 0.3) {
+   384→          setPixel(img, cx + dx, cy + dy, variation(oreColor, 14, rng));
+   385→        }
+   386→      }
+   387→    }
+   388→  }
+   389→  return img;
+   390→}
+   391→
+   392→function texCoalOre(): ImageData { return texOre(4, hexToRgb("#1a1a1a"), 15); }
+   393→function texIronOre(): ImageData { return texOre(4, hexToRgb("#c69b80"), 16); }
+   394→function texGoldOre(): ImageData { return texOre(4, hexToRgb("#f7d046"), 17); }
+   395→function texDiamondOre(): ImageData { return texOre(4, hexToRgb("#5edcdc"), 18); }
+   396→
+   397→function texSnow(): ImageData {
+   398→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   399→  noiseFill(img, hexToRgb("#f5fbff"), 5, 19);
+   400→  const rng = makeRng(119);
+   401→  for (let i = 0; i < 14; i++) {
+   402→    setPixel(img, Math.floor(rng() * TEX_SIZE), Math.floor(rng() * TEX_SIZE), shade(hexToRgb("#e0e8f0"), -3 + rng() * 6));
+   403→  }
+   404→  return img;
+   405→}
+   406→
+   407→function texPumpkinTop(): ImageData {
+   408→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   409→  noiseFill(img, hexToRgb("#c67d2a"), 10, 20);
+   410→  // Stem in center
+   411→  for (let y = 6; y < 10; y++) {
+   412→    for (let x = 6; x < 10; x++) {
+   413→      setPixel(img, x, y, hexToRgb("#5e7d2a"));
+   414→    }
+   415→  }
+   416→  setPixel(img, 7, 7, hexToRgb("#4a6620"));
+   417→  setPixel(img, 8, 8, hexToRgb("#4a6620"));
+   418→  return img;
+   419→}
+   420→
+   421→function texPumpkinSide(): ImageData {
+   422→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   423→  noiseFill(img, hexToRgb("#c67d2a"), 10, 21);
+   424→  const rng = makeRng(121);
+   425→  // Vertical ridges
+   426→  for (let x = 0; x < TEX_SIZE; x++) {
+   427→    if (x % 5 === 0) {
+   428→      for (let y = 0; y < TEX_SIZE; y++) {
+   429→        setPixel(img, x, y, hexToRgb("#9a5e1f"));
+   430→      }
+   431→    }
+   432→  }
+   433→  // Stem top
+   434→  for (let x = 6; x < 10; x++) {
+   435→    setPixel(img, x, 0, hexToRgb("#5e7d2a"));
+   436→    setPixel(img, x, 1, hexToRgb("#5e7d2a"));
+   437→  }
+   438→  return img;
+   439→}
+   440→
+   441→function texGravel(): ImageData {
+   442→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   443→  fill(img, hexToRgb("#6b6b6b"));
+   444→  const rng = makeRng(22);
+   445→  for (let i = 0; i < 32; i++) {
+   446→    const x = Math.floor(rng() * TEX_SIZE);
+   447→    const y = Math.floor(rng() * TEX_SIZE);
+   448→    const size = 1 + Math.floor(rng() * 2);
+   449→    const gray = 70 + Math.floor(rng() * 80);
+   450→    for (let dy = 0; dy < size; dy++) {
+   451→      for (let dx = 0; dx < size; dx++) {
+   452→        if (x + dx < TEX_SIZE && y + dy < TEX_SIZE) {
+   453→          setPixel(img, x + dx, y + dy, [gray, gray, gray]);
+   454→        }
+   455→      }
+   456→    }
+   457→  }
+   458→  return img;
+   459→}
+   460→
+   461→function texCraftingTableTop(): ImageData {
+   462→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   463→  // Planks base
+   464→  const base = texPlanks();
+   465→  img.data.set(base.data);
+   466→  // Darker border
+   467→  for (let i = 0; i < TEX_SIZE; i++) {
+   468→    setPixel(img, i, 0, hexToRgb("#4a3318"));
+   469→    setPixel(img, i, TEX_SIZE - 1, hexToRgb("#4a3318"));
+   470→    setPixel(img, 0, i, hexToRgb("#4a3318"));
+   471→    setPixel(img, TEX_SIZE - 1, i, hexToRgb("#4a3318"));
+   472→  }
+   473→  // Cross/grid pattern in the center (crafting grid)
+   474→  for (let i = 2; i < 14; i++) {
+   475→    setPixel(img, i, 5, hexToRgb("#4a3318"));
+   476→    setPixel(img, i, 10, hexToRgb("#4a3318"));
+   477→    setPixel(img, 5, i, hexToRgb("#4a3318"));
+   478→    setPixel(img, 10, i, hexToRgb("#4a3318"));
+   479→  }
+   480→  return img;
+   481→}
+   482→
+   483→function texCraftingTableSide(): ImageData {
+   484→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   485→  const base = texPlanks();
+   486→  img.data.set(base.data);
+   487→  // Tool icons (simplified)
+   488→  // Top: saw/handle
+   489→  for (let x = 3; x < 13; x++) {
+   490→    setPixel(img, x, 3, hexToRgb("#3a3a3a"));
+   491→  }
+   492→  setPixel(img, 3, 4, hexToRgb("#3a3a3a"));
+   493→  setPixel(img, 4, 4, hexToRgb("#3a3a3a"));
+   494→  // Bottom: crafting grid hint
+   495→  for (let i = 6; i < 14; i++) {
+   496→    setPixel(img, i, 8, hexToRgb("#4a3318"));
+   497→    setPixel(img, i, 11, hexToRgb("#4a3318"));
+   498→  }
+   499→  return img;
+   500→}
+   501→
+   502→function texBookshelf(): ImageData {
+   503→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   504→  const base = texPlanks();
+   505→  img.data.set(base.data);
+   506→  const rng = makeRng(31);
+   507→  const bookColors = [
+   508→    hexToRgb("#aa2222"),
+   509→    hexToRgb("#2244aa"),
+   510→    hexToRgb("#22aa44"),
+   511→    hexToRgb("#aa8822"),
+   512→    hexToRgb("#882288"),
+   513→    hexToRgb("#222222"),
+   514→  ];
+   515→  for (let x = 0; x < TEX_SIZE; x++) {
+   516→    setPixel(img, x, 4, hexToRgb("#4a3318"));
+   517→    setPixel(img, x, 11, hexToRgb("#4a3318"));
+   518→  }
+   519→  let x = 1;
+   520→  while (x < 15) {
+   521→    const color = bookColors[Math.floor(rng() * bookColors.length)];
+   522→    const bookW = 1 + Math.floor(rng() * 2);
+   523→    for (let dx = 0; dx < bookW && x + dx < 15; dx++) {
+   524→      for (let y = 5; y < 11; y++) {
+   525→        setPixel(img, x + dx, y, variation(color, 8, rng));
+   526→      }
+   527→    }
+   528→    x += bookW;
+   529→    if (rng() > 0.7) x += 1;
+   530→  }
+   531→  return img;
+   532→}
+   533→
+   534→function texFurnaceTop(): ImageData {
+   535→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   536→  // Stone-like base
+   537→  noiseFill(img, hexToRgb("#6b6b6b"), 8, 41);
+   538→  // Center hole (dark)
+   539→  fillRect(img, 4, 4, 8, 8, hexToRgb("#2a2a2a"));
+   540→  fillRect(img, 5, 5, 6, 6, hexToRgb("#1a1a1a"));
+   541→  // Border ring
+   542→  for (let i = 3; i <= 12; i++) {
+   543→    setPixel(img, i, 3, hexToRgb("#4a4a4a"));
+   544→    setPixel(img, i, 12, hexToRgb("#4a4a4a"));
+   545→    setPixel(img, 3, i, hexToRgb("#4a4a4a"));
+   546→    setPixel(img, 12, i, hexToRgb("#4a4a4a"));
+   547→  }
+   548→  return img;
+   549→}
+   550→
+   551→function texFurnaceSide(): ImageData {
+   552→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   553→  noiseFill(img, hexToRgb("#6b6b6b"), 8, 42);
+   554→  // Furnace opening (dark hole with fire glow)
+   555→  fillRect(img, 4, 6, 8, 6, hexToRgb("#1a1a1a"));
+   556→  // Fire glow at bottom of opening
+   557→  fillRect(img, 5, 10, 6, 2, hexToRgb("#cc4400"));
+   558→  fillRect(img, 6, 11, 4, 1, hexToRgb("#ff8800"));
+   559→  setPixel(img, 7, 10, hexToRgb("#ffaa00"));
+   560→  setPixel(img, 8, 10, hexToRgb("#ffaa00"));
+   561→  // Top edge of opening
+   562→  for (let i = 4; i <= 11; i++) {
+   563→    setPixel(img, i, 6, hexToRgb("#4a4a4a"));
+   564→  }
+   565→  return img;
+   566→}
+   567→
+   568→function texFurnaceFront(): ImageData {
+   569→  return texFurnaceSide();
+   570→}
+   571→
+   572→function texTorch(): ImageData {
+   573→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   574→  clearTransparent(img);
+   575→  // Stick (brown)
+   576→  const stick = hexToRgb("#6e4d28");
+   577→  const stickLight = hexToRgb("#8a6536");
+   578→  fillRect(img, 7, 7, 2, 7, stick);
+   579→  setPixel(img, 7, 7, stickLight);
+   580→  setPixel(img, 8, 8, stickLight);
+   581→  // Flame (orange/yellow)
+   582→  const flameOrange = hexToRgb("#ff6600");
+   583→  const flameYellow = hexToRgb("#ffaa00");
+   584→  const flameLight = hexToRgb("#ffdd44");
+   585→  fillRect(img, 6, 4, 4, 3, flameOrange);
+   586→  fillRect(img, 7, 3, 2, 2, flameYellow);
+   587→  setPixel(img, 7, 2, flameLight);
+   588→  setPixel(img, 8, 2, flameLight);
+   589→  // Glow
+   590→  setPixel(img, 5, 5, flameOrange);
+   591→  setPixel(img, 10, 5, flameOrange);
+   592→  return img;
+   593→}
+   594→
+   595→// === ANIMAL TEXTURES (top-down view for sprites) ===
+   596→function texPig(): ImageData {
+   597→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   598→  clearTransparent(img);
+   599→  const pink = hexToRgb("#e89b9b");
+   600→  const lightPink = hexToRgb("#f5b8b8");
+   601→  const darkPink = hexToRgb("#c47878");
+   602→  const black = hexToRgb("#1a1a1a");
+   603→  // Body (oval, horizontal)
+   604→  fillRect(img, 3, 6, 10, 5, pink);
+   605→  fillRect(img, 4, 5, 8, 1, pink);
+   606→  fillRect(img, 4, 11, 8, 1, pink);
+   607→  // Highlight
+   608→  fillRect(img, 4, 6, 4, 1, lightPink);
+   609→  // Shadow
+   610→  fillRect(img, 9, 10, 3, 1, darkPink);
+   611→  // Head (snout) on right
+   612→  fillRect(img, 12, 7, 2, 3, pink);
+   613→  fillRect(img, 13, 8, 1, 2, darkPink); // snout
+   614→  // Eye
+   615→  setPixel(img, 12, 7, black);
+   616→  // Legs
+   617→  fillRect(img, 4, 11, 1, 2, darkPink);
+   618→  fillRect(img, 7, 11, 1, 2, darkPink);
+   619→  fillRect(img, 10, 11, 1, 2, darkPink);
+   620→  fillRect(img, 12, 11, 1, 2, darkPink);
+   621→  return img;
+   622→}
+   623→
+   624→function texCow(): ImageData {
+   625→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   626→  clearTransparent(img);
+   627→  const brown = hexToRgb("#6b4226");
+   628→  const darkBrown = hexToRgb("#4a2e1a");
+   629→  const white = hexToRgb("#e8d8c0");
+   630→  const black = hexToRgb("#1a1a1a");
+   631→  // Body
+   632→  fillRect(img, 3, 6, 10, 5, brown);
+   633→  fillRect(img, 4, 5, 8, 1, brown);
+   634→  fillRect(img, 4, 11, 8, 1, brown);
+   635→  // White patches
+   636→  fillRect(img, 5, 7, 3, 2, white);
+   637→  fillRect(img, 9, 8, 2, 2, white);
+   638→  setPixel(img, 4, 9, white);
+   639→  // Shadow
+   640→  fillRect(img, 9, 10, 3, 1, darkBrown);
+   641→  // Head on right
+   642→  fillRect(img, 12, 7, 2, 3, brown);
+   643→  // Eye
+   644→  setPixel(img, 12, 7, black);
+   645→  // Horns
+   646→  setPixel(img, 12, 6, white);
+   647→  setPixel(img, 13, 6, white);
+   648→  // Legs
+   649→  fillRect(img, 4, 11, 1, 2, darkBrown);
+   650→  fillRect(img, 7, 11, 1, 2, darkBrown);
+   651→  fillRect(img, 10, 11, 1, 2, darkBrown);
+   652→  fillRect(img, 12, 11, 1, 2, darkBrown);
+   653→  return img;
+   654→}
+   655→
+   656→function texChicken(): ImageData {
+   657→  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+   658→  clearTransparent(img);
+   659→  const white = hexToRgb("#fafafa");
+   660→  const red = hexToRgb("#cc2222");
+   661→  const orange = hexToRgb("#dd8800");
+   662→  const black = hexToRgb("#1a1a1a");
+   663→  // Body (smaller)
+   664→  fillRect(img, 5, 7, 6, 4, white);
+   665→  fillRect(img, 6, 6, 4, 1, white);
+   666→  fillRect(img, 6, 11, 4, 1, white);
+   667→  // Head
+   668→  fillRect(img, 10, 5, 3, 3, white);
+   669→  // Beak (orange)
+   670→  setPixel(img, 13, 6, orange);
+   671→  setPixel(img, 13, 7, orange);
+   672→  // Comb (red)
+   673→  setPixel(img, 11, 4, red);
+   674→  setPixel(img, 12, 4, red);
+   675→  setPixel(img, 11, 5, red);
+   676→  // Eye
+   677→  setPixel(img, 11, 6, black);
+   678→  // Legs
+   679→  setPixel(img, 7, 12, orange);
+   680→  setPixel(img, 9, 12, orange);
+   681→  return img;
+   682→}
+   683→
+   684→// ============================================================
+   685→// EXPORT
+   686→// ============================================================
+   687→
+   688→import { buildItemCanvases } from "./item-textures";
+   689→import { loadTextureImage } from "./texture-loader";
+   690→
+   691→// Build procedural textures (synchronous)
+   692→export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
+   693→  const blocks: Record<string, HTMLCanvasElement> = {
+   694→    dirt: imageDataToCanvas(texDirt()),
+   695→    grass_top: imageDataToCanvas(texGrassTop()),
+   696→    grass_side: imageDataToCanvas(texGrassSide()),
+   697→    stone: imageDataToCanvas(texStone()),
+   698→    cobblestone: imageDataToCanvas(texCobblestone()),
+   699→    wood_top: imageDataToCanvas(texWoodTop()),
+   700→    wood_side: imageDataToCanvas(texWoodSide()),
+   701→    leaves: imageDataToCanvas(texLeaves()),
+   702→    sand: imageDataToCanvas(texSand()),
+   703→    water: imageDataToCanvas(texWater()),
+   704→    bedrock: imageDataToCanvas(texBedrock()),
+   705→    planks: imageDataToCanvas(texPlanks()),
+   706→    glass: imageDataToCanvas(texGlass()),
+   707→    brick: imageDataToCanvas(texBrick()),
+   708→    coal_ore: imageDataToCanvas(texCoalOre()),
+   709→    iron_ore: imageDataToCanvas(texIronOre()),
+   710→    gold_ore: imageDataToCanvas(texGoldOre()),
+   711→    diamond_ore: imageDataToCanvas(texDiamondOre()),
+   712→    snow: imageDataToCanvas(texSnow()),
+   713→    pumpkin_top: imageDataToCanvas(texPumpkinTop()),
+   714→    pumpkin_side: imageDataToCanvas(texPumpkinSide()),
+   715→    gravel: imageDataToCanvas(texGravel()),
+   716→    crafting_table_top: imageDataToCanvas(texCraftingTableTop()),
+   717→    crafting_table_side: imageDataToCanvas(texCraftingTableSide()),
+   718→    bookshelf: imageDataToCanvas(texBookshelf()),
+   719→    furnace_top: imageDataToCanvas(texFurnaceTop()),
+   720→    furnace_side: imageDataToCanvas(texFurnaceSide()),
+   721→    furnace_front: imageDataToCanvas(texFurnaceFront()),
+   722→    torch: imageDataToCanvas(texTorch()),
+   723→    pig: imageDataToCanvas(texPig()),
+   724→    cow: imageDataToCanvas(texCow()),
+   725→    chicken: imageDataToCanvas(texChicken()),
+   726→  };
+   727→  // Merge in item textures
+   728→  const items = buildItemCanvases();
+   729→  return { ...blocks, ...items };
+   730→}
+   731→
+   732→// Load real texture images from /public and replace procedural ones
+   733→// This is called asynchronously after the game starts
+   734→export async function loadRealTextures(): Promise<Record<string, HTMLCanvasElement>> {
+   735→  const replacements: Record<string, HTMLCanvasElement> = {};
+   736→  try {
+   737→    const [grassSide, grassTop, dirt, stone, sand, woodSide, woodTop, planks, coalOre, ironOre, diamondOre] = await Promise.all([
+   738→      loadTextureImage("/tex_grass_side.jpeg"),
+   739→      loadTextureImage("/tex_grass_top.jpeg"),
+   740→      loadTextureImage("/tex_dirt.jpeg"),
+   741→      loadTextureImage("/tex_stone.png"),
+   742→      loadTextureImage("/tex_sand.jpeg"),
+   743→      loadTextureImage("/tex_wood_side.png"),
+   744→      loadTextureImage("/tex_wood_top.jpeg"),
+   745→      loadTextureImage("/tex_planks.jpeg"),
+   746→      loadTextureImage("/tex_coal_ore.jpeg"),
+   747→      loadTextureImage("/tex_iron_ore.jpeg"),
+   748→      loadTextureImage("/tex_diamond_ore.jpeg"),
+   749→    ]);
+   750→    replacements["grass_side"] = grassSide;
+   751→    replacements["grass_top"] = grassTop;
+   752→    replacements["dirt"] = dirt;
+   753→    replacements["stone"] = stone;
+   754→    replacements["sand"] = sand;
+   755→    replacements["wood_side"] = woodSide;
+   756→    replacements["wood_top"] = woodTop;
+   757→    replacements["planks"] = planks;
+   758→    replacements["coal_ore"] = coalOre;
+   759→    replacements["iron_ore"] = ironOre;
+   760→    replacements["diamond_ore"] = diamondOre;
+   761→  } catch (e) {
+   762→    console.error("Failed to load real textures:", e);
+   763→  }
+   764→  return replacements;
+   765→}
+   766→
+   767→export function buildIconDataURLs(canvases: Record<string, HTMLCanvasElement>): Record<string, string> {
+   768→  const out: Record<string, string> = {};
+   769→  for (const [name, canvas] of Object.entries(canvases)) {
+   770→    out[name] = canvas.toDataURL();
+   771→  }
+   772→  return out;
+   773→}
+   774→

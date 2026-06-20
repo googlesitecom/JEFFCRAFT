@@ -310,7 +310,7 @@ export class World {
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
       const y = Math.floor(oreRand() * 110);
       const size = 8 + Math.floor(oreRand() * 9); // 8-16
-      placeVein(BlockType.Coal, lx, y, lz, size);
+      placeVein(BlockType.CoalOre, lx, y, lz, size);
     }
 
     // HIERRO: 15 attempts, Y=0 to Y=80, vein 4-8 blocks (COMMON)
@@ -319,7 +319,7 @@ export class World {
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
       const y = Math.floor(oreRand() * 80);
       const size = 4 + Math.floor(oreRand() * 5); // 4-8
-      placeVein(BlockType.Iron, lx, y, lz, size);
+      placeVein(BlockType.IronOre, lx, y, lz, size);
     }
 
     // ORO: 6 attempts, Y=0 to Y=40, vein 2-6 blocks (RARE)
@@ -328,7 +328,7 @@ export class World {
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
       const y = Math.floor(oreRand() * 40);
       const size = 2 + Math.floor(oreRand() * 5); // 2-6
-      placeVein(BlockType.Gold, lx, y, lz, size);
+      placeVein(BlockType.GoldOre, lx, y, lz, size);
     }
 
     // DIAMANTE: 3 attempts, Y=0 to Y=20, vein 1-4 blocks (VERY RARE)
@@ -337,7 +337,7 @@ export class World {
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
       const y = Math.floor(oreRand() * 20);
       const size = 1 + Math.floor(oreRand() * 4); // 1-4
-      placeVein(BlockType.Diamond, lx, y, lz, size);
+      placeVein(BlockType.DiamondOre, lx, y, lz, size);
     }
 
     // --- Plant trees ---
