@@ -164,11 +164,51 @@ export function buildChunkGeometry(
         const block = chunk.getLocal(lx, y, lz);
         if (isAir(block)) continue;
 
+        // Torch: render as small cross (like Minecraft) instead of full cube
+        if (block === BlockType.Torch) {
+          const tile = atlas.tiles["torch"];
+          if (tile) {
+            const target = cutout;
+            // Small torch: 2 crossed planes at center of block
+            // Plane 1 (X-aligned)
+            const cx = wx + 0.5, cy = y + 0.2, cz = wz + 0.5;
+            const w = 0.15, h = 0.5;
+            // Front face (+Z side)
+            const si = target.positions.length / 3;
+            target.positions.push(cx - w, cy, cz, cx + w, cy, cz, cx + w, cy + h, cz, cx - w, cy + h, cz);
+            target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
+            target.uvs.push(tile.u0, tile.v0, tile.u1, tile.v0, tile.u1, tile.v1, tile.u0, tile.v1);
+            target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+            target.indices.push(si, si + 1, si + 2, si, si + 2, si + 3);
+            // Back face (-Z side)
+            const si2 = target.positions.length / 3;
+            target.positions.push(cx - w, cy, cz, cx + w, cy, cz, cx + w, cy + h, cz, cx - w, cy + h, cz);
+            target.normals.push(0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1);
+            target.uvs.push(tile.u1, tile.v0, tile.u0, tile.v0, tile.u0, tile.v1, tile.u1, tile.v1);
+            target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+            target.indices.push(si2, si2 + 1, si2 + 2, si2, si2 + 2, si2 + 3);
+            // Side faces (X-aligned cross)
+            const si3 = target.positions.length / 3;
+            target.positions.push(cx, cy, cz - w, cx, cy, cz + w, cx, cy + h, cz + w, cx, cy + h, cz - w);
+            target.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
+            target.uvs.push(tile.u0, tile.v0, tile.u1, tile.v0, tile.u1, tile.v1, tile.u0, tile.v1);
+            target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+            target.indices.push(si3, si3 + 1, si3 + 2, si3, si3 + 2, si3 + 3);
+            const si4 = target.positions.length / 3;
+            target.positions.push(cx, cy, cz - w, cx, cy, cz + w, cx, cy + h, cz + w, cx, cy + h, cz - w);
+            target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
+            target.uvs.push(tile.u1, tile.v0, tile.u0, tile.v0, tile.u0, tile.v1, tile.u1, tile.v1);
+            target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+            target.indices.push(si4, si4 + 1, si4 + 2, si4, si4 + 2, si4 + 3);
+          }
+          continue; // skip normal block rendering for torches
+        }
+
         // Choose target buffer
         let target: FaceData;
-        const layer = getRenderLayer(block);
         if (block === BlockType.Water) target = transparent;
-        else if (layer === "cutout") target = cutout;
+        else if (block === BlockType.Glass) target = glass;
+        else if (getRenderLayer(block) === "cutout") target = cutout;
         else target = opaque;
 
         const isWaterBlock = block === BlockType.Water;
@@ -228,7 +268,7 @@ export function buildChunkGeometry(
     opaque: buildMesh(opaque, opaqueMaterial),
     cutout: buildMesh(cutout, cutoutMaterial),
     transparent: buildMesh(transparent, transparentMaterial),
-    glass: null, // glass now uses cutout layer
+    glass: buildMesh(glass, glassMaterial),
   };
 }
 

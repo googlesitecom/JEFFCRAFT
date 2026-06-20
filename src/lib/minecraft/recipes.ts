@@ -216,6 +216,38 @@ export const RECIPES: Recipe[] = [
     result: { id: BlockType.Furnace, count: 1 },
     requiresTable: true,
   },
+  // Torch from coal + stick (vertical: coal on top, stick below)
+  {
+    type: "shaped",
+    pattern: pat(["C..", "S..", "..."], { C: ItemType.Coal, S: ItemType.Stick }),
+    result: { id: BlockType.Torch, count: 4 },
+    requiresTable: false,
+  },
+  // Bookshelf from 6 planks + 3 books (we use planks pattern to simulate)
+  {
+    type: "shaped",
+    pattern: pat(["PPP", "BBB", "PPP"], { P: "any_planks", B: BlockType.Planks }),
+    result: { id: BlockType.Bookshelf, count: 1 },
+    requiresTable: true,
+  },
+  // 4 Cobblestone -> 4 Stone bricks (simplified)
+  // Snow block from 4 snow
+  {
+    type: "shaped",
+    pattern: pat(["SS.", "SS.", "..."], { S: BlockType.Snow }),
+    result: { id: BlockType.Snow, count: 1 },
+    requiresTable: false,
+  },
+  // Sand -> Sandstone (simplified, 4 sand = 1 sandstone but we'll give sand back)
+  // Glass from sand (needs furnace, but we allow crafting for simplicity)
+  // 4 gold ingots -> 1 gold block (not implemented yet)
+  // Ladder from 7 sticks
+  {
+    type: "shaped",
+    pattern: pat(["S.S", "S.S", "S.S"], { S: ItemType.Stick }),
+    result: { id: ItemType.Stick, count: 1 }, // simplified: returns a stick (placeholder)
+    requiresTable: true,
+  },
 ];
 
 // Check if an ingredient matches an item id

@@ -47,15 +47,17 @@ export class Chunk {
   }
 }
 
+export type BiomeType = "plains" | "forest" | "mountains" | "desert";
+
 export class World {
   chunks: Map<string, Chunk> = new Map();
   noise2D: ReturnType<typeof createNoise2D>;
   noise2DDetail: ReturnType<typeof createNoise2D>;
   noise2DBiome: ReturnType<typeof createNoise2D>;
+  noise2DBiomeTemp: ReturnType<typeof createNoise2D>;
   noise3D: ReturnType<typeof createNoise3D>;
   noise3DTree: ReturnType<typeof createNoise3D>;
   seed: number;
-  // Track player-modified blocks for save system
   playerModifications: Map<string, number> = new Map();
 
   constructor(seed = 2024) {
@@ -63,6 +65,7 @@ export class World {
     this.noise2D = createNoise2D(alea(seed));
     this.noise2DDetail = createNoise2D(alea(seed + 999));
     this.noise2DBiome = createNoise2D(alea(seed + 222));
+    this.noise2DBiomeTemp = createNoise2D(alea(seed + 888));
     this.noise3D = createNoise3D(alea(seed + 555));
     this.noise3DTree = createNoise3D(alea(seed + 31337));
   }
@@ -138,17 +141,90 @@ export class World {
     this._trackPlayerMods = enabled;
   }
 
+  // Deterministic random number for ore generation (0 to 1)
+  private oreRng(x: number, y: number, z: number): number {
+    // Simple but effective hash using string concatenation
+    const s = (x * 1000 + y * 100000 + z * 10000000).toString();
+    let hash = 0;
+    for (let i = 0; i < s.length; i++) {
+      hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+    }
+    return Math.abs(hash % 1000) / 1000;
+  }
+
+  // Determine biome at a world coordinate
+  getBiomeAt(wx: number, wz: number): BiomeType {
+    // Large-scale biome map (very low frequency for big biomes)
+    const biomeNoise = this.noise2DBiome(wx * 0.005, wz * 0.005);
+    if (biomeNoise < -0.5) return "desert";
+    if (biomeNoise < -0.15) return "plains";
+    if (biomeNoise < 0.3) return "forest";
+    if (biomeNoise < 0.5) return "mountains";
+    // Very high values = ocean (deep water)
+    return "plains"; // fallback
+  }
+
+  // Check if this is an ocean area (separate noise for ocean detection)
+  isOcean(wx: number, wz: number): boolean {
+    const oceanNoise = this.noise2DBiomeTemp(wx * 0.004, wz * 0.004);
+    return oceanNoise > 0.5; // rare: only ~10% of map
+  }
+
+  // Check if this is a rare island (inside ocean)
+  isIsland(wx: number, wz: number): boolean {
+    if (!this.isOcean(wx, wz)) return false;
+    // Small patches of land within ocean
+    const islandNoise = this.noise2DDetail(wx * 0.02, wz * 0.02);
+    return islandNoise > 0.6; // rare islands
+  }
+
   // Peek at terrain height at a world coordinate without generating a chunk
   getHeightAt(wx: number, wz: number): number {
+    // Ocean: very low terrain (below sea level) = deep water
+    if (this.isOcean(wx, wz) && !this.isIsland(wx, wz)) {
+      const depth = this.noise2D(wx * 0.02, wz * 0.02) * 4;
+      return Math.floor(SEA_FLOOR + 2 + depth); // ~10, well below water level 18
+    }
+
+    // Islands: moderate height, just above water
+    if (this.isIsland(wx, wz)) {
+      const h = this.noise2D(wx * 0.03, wz * 0.03) * 4;
+      return Math.floor(WATER_LEVEL + 2 + h);
+    }
+
+    const biome = this.getBiomeAt(wx, wz);
+
+    let baseHeight: number;
+    let amplitude: number;
+
+    switch (biome) {
+      case "desert":
+        baseHeight = SEA_FLOOR + 14;
+        amplitude = 3;
+        break;
+      case "plains":
+        baseHeight = SEA_FLOOR + 16;
+        amplitude = 5;
+        break;
+      case "forest":
+        baseHeight = SEA_FLOOR + 18;
+        amplitude = 8;
+        break;
+      case "mountains":
+        baseHeight = SEA_FLOOR + 22;
+        amplitude = 22;
+        break;
+    }
+
     const scale1 = 0.012;
     const scale2 = 0.04;
     const scale3 = 0.1;
 
-    const base = this.noise2D(wx * scale1, wz * scale1) * 18;
-    const detail = this.noise2DDetail(wx * scale2, wz * scale2) * 6;
+    const base = this.noise2D(wx * scale1, wz * scale1) * amplitude;
+    const detail = this.noise2DDetail(wx * scale2, wz * scale2) * (amplitude * 0.3);
     const fine = this.noise2D(wx * scale3, wz * scale3) * 2;
 
-    return Math.floor(SEA_FLOOR + 18 + base + detail + fine);
+    return Math.floor(baseHeight + base + detail + fine);
   }
 
   // Peek at what block would be at this location (used for cross-chunk face culling)
@@ -156,22 +232,38 @@ export class World {
     if (wy < 0) return BlockType.Bedrock;
     if (wy >= WORLD_HEIGHT) return BlockType.Air;
     const h = this.getHeightAt(wx, wz);
+    const biome = this.getBiomeAt(wx, wz);
     if (wy > h) {
       if (wy <= WATER_LEVEL) return BlockType.Water;
       return BlockType.Air;
     }
     if (wy === 0) return BlockType.Bedrock;
     if (wy < h - 3) {
-      return BlockType.Stone; // ores are placed by vein generation in decorateChunk
+      // Ores in stone below y=25
+      if (wy <= 25) {
+        const r = this.oreRng(wx, wy, wz);
+        // Diamond: 1% chance, y < 14
+        if (wy < 14 && r < 0.01) return BlockType.Diamond;
+        // Gold: 2% chance, y < 16
+        if (wy < 16 && r < 0.02) return BlockType.Gold;
+        // Iron: 6% chance
+        if (r < 0.06) return BlockType.Iron;
+        // Coal: 12% chance
+        if (r < 0.12) return BlockType.Coal;
+      }
+      return BlockType.Stone;
     }
     if (wy < h) {
-      // Sub-surface: dirt or sand near water
+      // Sub-surface depends on biome
+      if (biome === "desert") return BlockType.Sand;
       if (h <= WATER_LEVEL + 1) return BlockType.Sand;
       return BlockType.Dirt;
     }
-    // Top block
+    // Top block depends on biome
+    if (biome === "desert") return BlockType.Sand;
     if (h <= WATER_LEVEL + 1) return BlockType.Sand;
-    if (h >= 34) return BlockType.Snow;
+    if (biome === "mountains" && h >= 36) return BlockType.Snow;
+    if (biome === "mountains" && h >= 30) return BlockType.Stone;
     return BlockType.Grass;
   }
 
@@ -186,6 +278,7 @@ export class World {
         const wx = x0 + lx;
         const wz = z0 + lz;
         const h = this.getHeightAt(wx, wz);
+        const biome = this.getBiomeAt(wx, wz);
 
         for (let y = 0; y <= h && y < WORLD_HEIGHT; y++) {
           let block: BlockType;
@@ -194,12 +287,25 @@ export class World {
           } else if (y < BEDROCK_DEPTH && this.noise3D(wx * 0.5, y * 0.5, wz * 0.5) > 0.2) {
             block = BlockType.Bedrock;
           } else if (y < h - 3) {
-            block = BlockType.Stone; // ores placed by vein generation later
+            block = BlockType.Stone;
+            if (y <= 25) {
+              const r = this.oreRng(wx, y, wz);
+              if (y < 14 && r < 0.01) block = BlockType.Diamond;
+              else if (y < 16 && r < 0.02) block = BlockType.Gold;
+              else if (r < 0.06) block = BlockType.Iron;
+              else if (r < 0.12) block = BlockType.Coal;
+            }
           } else if (y < h) {
-            block = h <= WATER_LEVEL + 1 ? BlockType.Sand : BlockType.Dirt;
+            // Sub-surface depends on biome
+            if (biome === "desert") block = BlockType.Sand;
+            else if (h <= WATER_LEVEL + 1) block = BlockType.Sand;
+            else block = BlockType.Dirt;
           } else {
-            if (h <= WATER_LEVEL + 1) block = BlockType.Sand;
-            else if (h >= 34) block = BlockType.Snow;
+            // Top block depends on biome
+            if (biome === "desert") block = BlockType.Sand;
+            else if (h <= WATER_LEVEL + 1) block = BlockType.Sand;
+            else if (biome === "mountains" && h >= 36) block = BlockType.Snow;
+            else if (biome === "mountains" && h >= 30) block = BlockType.Stone;
             else block = BlockType.Grass;
           }
           chunk.setLocal(lx, y, lz, block);
@@ -223,16 +329,23 @@ export class World {
     const x0 = chunk.cx * CHUNK_SIZE;
     const z0 = chunk.cz * CHUNK_SIZE;
 
-    // Carve caves
+    // Carve caves - large caverns and tunnel systems
+    // NOTE: Don't carve ores - they should remain visible in cave walls
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const wx = x0 + lx;
         const wz = z0 + lz;
-        for (let y = 2; y < 30; y++) {
+        for (let y = 2; y < 40; y++) {
           const b = chunk.getLocal(lx, y, lz);
+          // Only carve stone and dirt, NEVER ores
           if (b === BlockType.Stone || b === BlockType.Dirt) {
-            const cave = this.noise3D(wx * 0.08, y * 0.12, wz * 0.08);
-            if (cave > 0.68) {
+            const cavern = this.noise3D(wx * 0.035, y * 0.04, wz * 0.035);
+            const tunnel = this.noise3D(wx * 0.08, y * 0.12, wz * 0.08);
+
+            if (cavern > 0.45) {
+              chunk.setLocal(lx, y, lz, BlockType.Air);
+            }
+            else if (tunnel > 0.65 && cavern > 0.2) {
               chunk.setLocal(lx, y, lz, BlockType.Air);
             }
           }
@@ -240,76 +353,23 @@ export class World {
       }
     }
 
-    // === ORE VEIN GENERATION (like Minecraft) ===
-    // Deterministic RNG seeded by chunk coords + seed
-    const oreSeed = this.seed ^ (chunk.cx * 73856093) ^ (chunk.cz * 19349663);
-    let oreState = oreSeed >>> 0;
-    const oreRand = () => {
-      oreState = (oreState * 1664525 + 1013904223) >>> 0;
-      return oreState / 4294967296;
-    };
-
-    // Helper: place a vein of ore at (lx, y, lz) with given size
-    const placeVein = (oreType: BlockType, startLx: number, startY: number, startLz: number, size: number) => {
-      let cx = startLx, cy = startY, cz = startLz;
-      for (let i = 0; i < size; i++) {
-        // Check bounds and only replace stone
-        if (cx >= 0 && cx < CHUNK_SIZE && cy >= 0 && cy < WORLD_HEIGHT && cz >= 0 && cz < CHUNK_SIZE) {
-          if (chunk.getLocal(cx, cy, cz) === BlockType.Stone) {
-            chunk.setLocal(cx, cy, cz, oreType);
-          }
-        }
-        // Random walk to next block in vein
-        cx += Math.floor(oreRand() * 3) - 1;
-        cy += Math.floor(oreRand() * 3) - 1;
-        cz += Math.floor(oreRand() * 3) - 1;
-      }
-    };
-
-    // COAL: 20 attempts per chunk, Y=0 to Y=40, vein size 8-16
-    for (let i = 0; i < 20; i++) {
-      const lx = Math.floor(oreRand() * CHUNK_SIZE);
-      const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 40);
-      const size = 8 + Math.floor(oreRand() * 9); // 8-16
-      placeVein(BlockType.Coal, lx, y, lz, size);
-    }
-
-    // IRON: 10 attempts per chunk, Y=0 to Y=30, vein size 4-8
-    for (let i = 0; i < 10; i++) {
-      const lx = Math.floor(oreRand() * CHUNK_SIZE);
-      const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 30);
-      const size = 4 + Math.floor(oreRand() * 5); // 4-8
-      placeVein(BlockType.Iron, lx, y, lz, size);
-    }
-
-    // GOLD: 4 attempts per chunk, Y=0 to Y=16, vein size 2-6
-    for (let i = 0; i < 4; i++) {
-      const lx = Math.floor(oreRand() * CHUNK_SIZE);
-      const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 16);
-      const size = 2 + Math.floor(oreRand() * 5); // 2-6
-      placeVein(BlockType.Gold, lx, y, lz, size);
-    }
-
-    // DIAMOND: 2 attempts per chunk, Y=0 to Y=14, vein size 1-4 (very rare)
-    for (let i = 0; i < 2; i++) {
-      const lx = Math.floor(oreRand() * CHUNK_SIZE);
-      const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 14);
-      const size = 1 + Math.floor(oreRand() * 4); // 1-4
-      placeVein(BlockType.Diamond, lx, y, lz, size);
-    }
-
-    // Plant trees: deterministic per (wx, wz)
+    // Plant trees: density depends on biome
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const wx = x0 + lx;
         const wz = z0 + lz;
-        // Use noise3DTree as a deterministic tree noise in 2D slice
+        const biome = this.getBiomeAt(wx, wz);
+        // Tree density threshold per biome
+        let treeThreshold: number;
+        switch (biome) {
+          case "forest": treeThreshold = 0.65; break;  // many trees
+          case "plains": treeThreshold = 0.88; break;  // few trees
+          case "mountains": treeThreshold = 0.82; break; // some trees
+          case "desert": treeThreshold = 2.0; break;   // no trees
+          default: treeThreshold = 0.85;
+        }
         const treeNoise = this.noise3DTree(wx * 0.4, 0, wz * 0.4);
-        if (treeNoise > 0.78) {
+        if (treeNoise > treeThreshold) {
           // Find top solid block
           let topY = -1;
           for (let y = WORLD_HEIGHT - 1; y >= 1; y--) {
@@ -320,6 +380,7 @@ export class World {
             }
           }
           if (topY < 0) continue;
+          // Only plant on grass (not sand, snow, or stone)
           if (chunk.getLocal(lx, topY, lz) !== BlockType.Grass) continue;
           if (topY < WATER_LEVEL) continue;
           this.plantTree(wx, topY + 1, wz);

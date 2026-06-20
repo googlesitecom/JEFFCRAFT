@@ -33,6 +33,7 @@ export const TEXTURE_NAMES = [
   "furnace_top",
   "furnace_side",
   "furnace_front",
+  "torch",
   // Animals (skins - pig, cow, chicken - front view)
   "pig",
   "cow",
@@ -109,9 +110,8 @@ export function buildAtlas(
   canvas.height = ATLAS_H;
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingEnabled = false;
-  // Fill background magenta so missing textures are obvious
-  ctx.fillStyle = "#ff00ff";
-  ctx.fillRect(0, 0, ATLAS_W, ATLAS_H);
+  // Clear to transparent (NOT magenta - magenta bleeds through transparent textures)
+  ctx.clearRect(0, 0, ATLAS_W, ATLAS_H);
 
   const tiles: Record<string, AtlasTile> = {};
 

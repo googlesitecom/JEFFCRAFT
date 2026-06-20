@@ -1,5 +1,6 @@
-// Animals: pig, cow, chicken with 3D models and improved AI
+// Animals: pig, cow, chicken loaded from GLB models with improved AI
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
 import { ItemType } from "./items";
@@ -11,16 +12,16 @@ export interface AnimalDef {
   maxHealth: number;
   speed: number;
   drops: { id: number; min: number; max: number }[];
-  // Body dimensions
   width: number;
   height: number;
   depth: number;
-  // Colors
-  bodyColor: number;
-  headColor: number;
-  legColor: number;
-  // Behavior
-  fleeDistance: number; // distance at which animal flees from player
+  fleeDistance: number;
+  modelPath: string;
+  modelScale: number;
+  modelYOffset: number;
+  // Rotation offset to fix GLB model orientation (radians around Y axis)
+  // 0 = model faces -Z, PI/2 = faces +X, PI = faces +Z, -PI/2 = faces -X
+  modelRotationOffset: number;
 }
 
 export const ANIMALS: Record<AnimalType, AnimalDef> = {
@@ -29,87 +30,77 @@ export const ANIMALS: Record<AnimalType, AnimalDef> = {
     maxHealth: 10,
     speed: 1.2,
     drops: [{ id: ItemType.RawPorkchop, min: 1, max: 3 }],
-    width: 0.9,
+    width: 0.8,
     height: 0.8,
-    depth: 1.2,
-    bodyColor: 0xff9090, // bright pink
-    headColor: 0xffa0a0,
-    legColor: 0xc47878,
+    depth: 1.1,
     fleeDistance: 4,
+    modelPath: "/pig.glb",
+    modelScale: 0.09,
+    modelYOffset: 0,
+    modelRotationOffset: Math.PI,
   },
   cow: {
     type: "cow",
     maxHealth: 10,
     speed: 1.0,
     drops: [{ id: ItemType.RawBeef, min: 1, max: 3 }],
-    width: 0.9,
-    height: 1.1,
-    depth: 1.4,
-    bodyColor: 0x3a2010, // dark brown
-    headColor: 0x5a3520,
-    legColor: 0x2a1500,
+    width: 1.0,
+    height: 1.2,
+    depth: 1.5,
     fleeDistance: 4,
+    modelPath: "/cow.glb",
+    modelScale: 0.1275,
+    modelYOffset: 0,
+    modelRotationOffset: Math.PI,
   },
   chicken: {
     type: "chicken",
     maxHealth: 4,
     speed: 1.4,
     drops: [{ id: ItemType.RawChicken, min: 1, max: 1 }],
-    width: 0.5,
-    height: 0.6,
-    depth: 0.6,
-    bodyColor: 0xffffff, // pure white
-    headColor: 0xffffff,
-    legColor: 0xff8800,
+    width: 0.35,
+    height: 0.45,
+    depth: 0.4,
     fleeDistance: 3,
+    modelPath: "/chicken.glb",
+    modelScale: 0.0525,
+    modelYOffset: 0,
+    modelRotationOffset: Math.PI,
   },
 };
 
-// Build a 3D model for an animal using box geometries
-function buildAnimalModel(def: AnimalDef): THREE.Group {
-  const group = new THREE.Group();
-  const w = def.width;
-  const h = def.height;
-  const d = def.depth;
+// Cache for loaded GLB models
+const modelCache: Map<string, THREE.Group> = new Map();
+const gltfLoader = new GLTFLoader();
 
-  // Body (main box) - centered at origin, we'll position the group
-  const bodyGeo = new THREE.BoxGeometry(w, h * 0.6, d * 0.7);
-  const bodyMat = new THREE.MeshLambertMaterial({ color: def.bodyColor });
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  body.position.y = h * 0.45;
-  group.add(body);
-
-  // Head (smaller box at front)
-  const headSize = Math.min(w, h) * 0.7;
-  const headGeo = new THREE.BoxGeometry(headSize, headSize, headSize);
-  const headMat = new THREE.MeshLambertMaterial({ color: def.headColor });
-  const head = new THREE.Mesh(headGeo, headMat);
-  head.position.set(0, h * 0.6, d * 0.5);
-  group.add(head);
-
-  // Legs (4 boxes)
-  const legW = w * 0.2;
-  const legH = h * 0.4;
-  const legGeo = new THREE.BoxGeometry(legW, legH, legW);
-  const legMat = new THREE.MeshLambertMaterial({ color: def.legColor });
-  const legPositions = [
-    [-w * 0.3, h * 0.2, d * 0.25],
-    [w * 0.3, h * 0.2, d * 0.25],
-    [-w * 0.3, h * 0.2, -d * 0.25],
-    [w * 0.3, h * 0.2, -d * 0.25],
-  ];
-  const legs: THREE.Mesh[] = [];
-  for (const pos of legPositions) {
-    const leg = new THREE.Mesh(legGeo, legMat);
-    leg.position.set(pos[0], pos[1], pos[2]);
-    legs.push(leg);
-    group.add(leg);
+// Load a GLB model asynchronously
+export function loadAnimalModel(path: string): Promise<THREE.Group> {
+  if (modelCache.has(path)) {
+    return Promise.resolve(modelCache.get(path)!.clone());
   }
+  return new Promise((resolve, reject) => {
+    gltfLoader.load(
+      path,
+      (gltf) => {
+        const model = gltf.scene;
+        modelCache.set(path, model);
+        resolve(model.clone());
+      },
+      undefined,
+      (error) => reject(error)
+    );
+  });
+}
 
-  // Store legs for animation
-  (group as any).legs = legs;
-  (group as any).def = def;
-
+// Fallback: simple box model if GLB fails to load
+function buildFallbackModel(def: AnimalDef): THREE.Group {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({
+    color: def.type === "pig" ? 0xe89b9b : def.type === "cow" ? 0x5a3520 : 0xffffff,
+  });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(def.width, def.height * 0.6, def.depth * 0.7), mat);
+  body.position.y = def.height * 0.4;
+  group.add(body);
   return group;
 }
 
@@ -122,11 +113,12 @@ export class Animal {
   health: number;
   world: World;
   model: THREE.Group | null = null;
-  // AI state
   state: "wander" | "flee" | "idle" = "wander";
   stateTimer: number = 0;
   walkAnimTime: number = 0;
   isDead: boolean = false;
+  modelLoaded: boolean = false;
+  damageFlashTime: number = 0; // seconds of red tint remaining
 
   constructor(type: AnimalType, world: World, position: THREE.Vector3) {
     this.type = type;
@@ -139,13 +131,29 @@ export class Animal {
     this.stateTimer = 1 + Math.random() * 3;
   }
 
+  // Load the GLB model asynchronously
+  async loadModel() {
+    try {
+      const model = await loadAnimalModel(this.def.modelPath);
+      model.scale.set(this.def.modelScale, this.def.modelScale, this.def.modelScale);
+      model.position.y = this.def.modelYOffset;
+      // Models face -Z by convention; we rotate so they face their movement direction
+      // The yaw rotation is applied in update(), so we add an offset here if needed
+      this.model = model;
+      this.modelLoaded = true;
+    } catch (e) {
+      console.error("Failed to load animal model:", this.def.modelPath, e);
+      this.model = buildFallbackModel(this.def);
+      this.modelLoaded = true;
+    }
+  }
+
   takeDamage(amount: number, playerPos?: THREE.Vector3): boolean {
     this.health -= amount;
-    // Flee from player when hit
+    this.damageFlashTime = 0.4; // red tint for 0.4 seconds
     if (playerPos) {
       this.state = "flee";
       this.stateTimer = 3 + Math.random() * 2;
-      // Face away from player
       const dx = this.position.x - playerPos.x;
       const dz = this.position.z - playerPos.z;
       this.yaw = Math.atan2(-dx, -dz);
@@ -171,37 +179,30 @@ export class Animal {
   update(dt: number, playerX: number, playerZ: number) {
     if (this.isDead) return;
 
-    // Distance to player
     const distToPlayer = Math.sqrt(
       (this.position.x - playerX) ** 2 + (this.position.z - playerZ) ** 2
     );
 
-    // State machine
     this.stateTimer -= dt;
     if (this.stateTimer <= 0) {
       if (this.state === "flee") {
-        // After fleeing, go back to wandering
         this.state = "wander";
         this.stateTimer = 2 + Math.random() * 3;
       } else if (this.state === "wander") {
-        // Randomly switch between wander and idle
         if (Math.random() < 0.4) {
           this.state = "idle";
           this.stateTimer = 1 + Math.random() * 2;
         } else {
-          // Pick new direction
           this.yaw = Math.random() * Math.PI * 2;
           this.stateTimer = 2 + Math.random() * 3;
         }
       } else {
-        // idle -> wander
         this.state = "wander";
         this.yaw = Math.random() * Math.PI * 2;
         this.stateTimer = 2 + Math.random() * 3;
       }
     }
 
-    // Check if player is too close -> flee
     if (distToPlayer < this.def.fleeDistance && this.state !== "flee") {
       this.state = "flee";
       this.stateTimer = 2 + Math.random() * 2;
@@ -210,14 +211,11 @@ export class Animal {
       this.yaw = Math.atan2(-dx, -dz);
     }
 
-    // Movement based on state
     let moveSpeed = 0;
     if (this.state === "wander") {
       moveSpeed = this.def.speed * 0.5;
     } else if (this.state === "flee") {
       moveSpeed = this.def.speed * 1.8;
-    } else {
-      moveSpeed = 0; // idle
     }
 
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -227,95 +225,167 @@ export class Animal {
     // Gravity
     this.velocity.y -= 25 * dt;
 
-    // Try to move - check for obstacles and step up
-    const oldX = this.position.x;
-    const oldZ = this.position.z;
-    this.position.x += this.velocity.x * dt;
-    this.position.z += this.velocity.z * dt;
+    // === MOVEMENT WITH COLLISION (per-axis) ===
+    const halfW = this.def.width / 2;
+    const bodyHeight = this.def.height;
 
-    // Check if blocked - try to step up (jump)
-    const blockX = Math.floor(this.position.x);
-    const blockY = Math.floor(this.position.y);
-    const blockZ = Math.floor(this.position.z);
-    if (isSolid(this.world.getBlock(blockX, blockY, blockZ)) || isSolid(this.world.getBlock(blockX, blockY + 1, blockZ))) {
+    // --- X axis ---
+    const oldX = this.position.x;
+    this.position.x += this.velocity.x * dt;
+    if (this.checkBodyCollision(halfW, bodyHeight)) {
+      this.position.x = oldX;
+      this.velocity.x = 0;
       // Try to step up 1 block
-      if (!isSolid(this.world.getBlock(blockX, blockY + 1, blockZ)) && !isSolid(this.world.getBlock(blockX, blockY + 2, blockZ))) {
-        // Step up
-        this.velocity.y = 6; // jump
+      if (this.canStepUpFrom(halfW, bodyHeight)) {
+        this.velocity.y = 7;
       } else {
-        // Blocked - revert and change direction
-        this.position.x = oldX;
-        this.position.z = oldZ;
         this.yaw += Math.PI / 2 + Math.random() * Math.PI;
       }
     }
 
-    // Vertical movement
+    // --- Z axis ---
+    const oldZ = this.position.z;
+    this.position.z += this.velocity.z * dt;
+    if (this.checkBodyCollision(halfW, bodyHeight)) {
+      this.position.z = oldZ;
+      this.velocity.z = 0;
+      if (this.canStepUpFrom(halfW, bodyHeight)) {
+        this.velocity.y = 7;
+      } else {
+        this.yaw += Math.PI / 2 + Math.random() * Math.PI;
+      }
+    }
+
+    // --- Y axis (gravity + ground) ---
     this.position.y += this.velocity.y * dt;
 
-    // Ground collision - check the block at the animal's feet
-    const feetBlockY = Math.floor(this.position.y);
-    const feetBlockX = Math.floor(this.position.x);
-    const feetBlockZ = Math.floor(this.position.z);
-    // Force chunk generation to get accurate block data (peekBlock doesn't know about caves)
-    const cx = Math.floor(feetBlockX / CHUNK_SIZE);
-    const cz = Math.floor(feetBlockZ / CHUNK_SIZE);
+    // Ensure chunk is loaded
+    const cx = Math.floor(this.position.x / CHUNK_SIZE);
+    const cz = Math.floor(this.position.z / CHUNK_SIZE);
     this.world.getOrCreateChunk(cx, cz);
-    const feetBlock = this.world.getBlock(feetBlockX, feetBlockY, feetBlockZ);
-    const belowBlock = this.world.getBlock(feetBlockX, feetBlockY - 1, feetBlockZ);
-    if (isSolid(feetBlock)) {
-      // Inside a solid block - push up
-      this.position.y = feetBlockY + 1;
+
+    // Ground collision: find the highest solid block below the animal
+    // The animal's feet are at position.y. We check the block AT the feet
+    // and the block BELOW the feet.
+    const feetX = Math.floor(this.position.x);
+    const feetZ = Math.floor(this.position.z);
+    const feetY = Math.floor(this.position.y);
+
+    // Check if feet are inside a solid block
+    if (isSolid(this.world.getBlock(feetX, feetY, feetZ))) {
+      // Push up to stand on top
+      this.position.y = feetY + 1;
       this.velocity.y = 0;
-    } else if (isSolid(belowBlock)) {
-      // Standing on top of the block below
-      this.position.y = feetBlockY;
-      this.velocity.y = 0;
-    } else if (belowBlock === BlockType.Water) {
-      // Float on water
-      this.position.y = feetBlockY;
-      this.velocity.y = 0;
-    } else {
-      // Not on ground - keep falling but log if falling too far
-      if (this.position.y < -10) {
-        // Reset to a safe height
+    } else if (this.velocity.y <= 0) {
+      // Falling: check the block below feet
+      const belowY = feetY - 1;
+      if (isSolid(this.world.getBlock(feetX, belowY, feetZ))) {
+        // Land on top of the block below
+        this.position.y = feetY;
+        this.velocity.y = 0;
+      } else if (this.position.y < -10) {
+        // Fell out of world - respawn high
         this.position.y = 40;
         this.velocity.y = 0;
       }
     }
 
-    // Walk animation
     if (moveSpeed > 0) {
       this.walkAnimTime += dt * 8;
     }
 
-    // Update model
+    // Update model position and rotation
     if (this.model) {
       this.model.position.copy(this.position);
-      this.model.position.y += 0;
-      this.model.rotation.y = this.yaw + Math.PI / 2;
-      // Animate legs (swing back and forth)
-      const legs = (this.model as any).legs as THREE.Mesh[];
-      if (legs) {
-        const swing = Math.sin(this.walkAnimTime) * 0.3;
-        legs[0].rotation.x = swing;
-        legs[3].rotation.x = swing;
-        legs[1].rotation.x = -swing;
-        legs[2].rotation.x = -swing;
+      // Apply yaw + rotation offset to fix GLB orientation
+      this.model.rotation.y = this.yaw + this.def.modelRotationOffset;
+
+      // Walk animation: bob up and down slightly
+      if (moveSpeed > 0) {
+        const bob = Math.abs(Math.sin(this.walkAnimTime)) * 0.05;
+        this.model.position.y += bob;
+      }
+
+      // Damage flash: tint the model red for 0.4 seconds after taking damage
+      if (this.damageFlashTime > 0) {
+        this.damageFlashTime -= dt;
+        this.applyRedTint(0.8);
+      } else {
+        this.applyRedTint(0);
       }
     }
   }
 
-  distanceTo(x: number, y: number, z: number): number {
+  // Check if the animal's body collides with any solid block
+  private checkBodyCollision(halfW: number, bodyHeight: number): boolean {
+    // Use a small margin to prevent entities from getting stuck in walls
+    const margin = 0.01;
+    const minX = Math.floor(this.position.x - halfW - margin);
+    const maxX = Math.floor(this.position.x + halfW + margin);
+    const minY = Math.floor(this.position.y + margin);
+    const maxY = Math.floor(this.position.y + bodyHeight - margin);
+    const minZ = Math.floor(this.position.z - halfW - margin);
+    const maxZ = Math.floor(this.position.z + halfW + margin);
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          if (isSolid(this.world.getBlock(x, y, z))) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // Check if the animal can step up 1 block (jump)
+  private canStepUpFrom(halfW: number, bodyHeight: number): boolean {
+    // Check if there's space 1 block above current position
+    const minX = Math.floor(this.position.x - halfW);
+    const maxX = Math.floor(this.position.x + halfW);
+    const minY = Math.floor(this.position.y) + 1;
+    const maxY = Math.floor(this.position.y + bodyHeight) + 1;
+    const minZ = Math.floor(this.position.z - halfW);
+    const maxZ = Math.floor(this.position.z + halfW);
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          if (isSolid(this.world.getBlock(x, y, z))) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Apply red tint to the model (for damage flash)
+  private applyRedTint(intensity: number) {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.MeshLambertMaterial;
+        if (mat && mat.emissive !== undefined) {
+          mat.emissive.setRGB(intensity, 0, 0);
+        }
+      }
+    });
+  }
+
+  // 3D distance for despawn checks
+  distanceTo3D(x: number, y: number, z: number): number {
     return Math.sqrt(
       (this.position.x - x) ** 2 +
       (this.position.y - y) ** 2 +
       (this.position.z - z) ** 2
     );
   }
+
+  distanceTo(x: number, y: number, z: number): number {
+    // Use horizontal distance (XZ plane) for better hit detection
+    return Math.sqrt(
+      (this.position.x - x) ** 2 +
+      (this.position.z - z) ** 2
+    );
+  }
 }
 
-// Animal manager
 export class AnimalManager {
   animals: Animal[] = [];
   world: World;
@@ -345,7 +415,6 @@ export class AnimalManager {
     const x = Math.floor(centerX + Math.cos(angle) * dist);
     const z = Math.floor(centerZ + Math.sin(angle) * dist);
 
-    // Find surface - force chunk generation first
     const cx = Math.floor(x / CHUNK_SIZE);
     const cz = Math.floor(z / CHUNK_SIZE);
     this.world.getOrCreateChunk(cx, cz);
@@ -370,11 +439,13 @@ export class AnimalManager {
       new THREE.Vector3(x + 0.5, surfaceY + 1, z + 0.5)
     );
 
-    // Build 3D model and scale it up for visibility
-    const model = buildAnimalModel(animal.def);
-    model.scale.set(2.5, 2.5, 2.5);
-    animal.model = model;
-    this.scene.add(model);
+    // Load model asynchronously
+    animal.loadModel().then(() => {
+      if (!animal.isDead && this.scene) {
+        this.scene.add(animal.model!);
+      }
+    });
+
     this.animals.push(animal);
   }
 
@@ -397,28 +468,28 @@ export class AnimalManager {
       animal.update(dt, playerX, playerZ);
 
       if (animal.isDead) {
-        if (animal.model) {
-          this.scene.remove(animal.model);
-          animal.model.traverse((obj) => {
-            if (obj instanceof THREE.Mesh) {
-              obj.geometry.dispose();
-              (obj.material as THREE.Material).dispose();
-            }
-          });
-        }
+        this.disposeAnimal(animal);
         this.animals.splice(i, 1);
-      } else if (animal.distanceTo(playerX, animal.position.y, playerZ) > 60) {
-        if (animal.model) {
-          this.scene.remove(animal.model);
-          animal.model.traverse((obj) => {
-            if (obj instanceof THREE.Mesh) {
-              obj.geometry.dispose();
-              (obj.material as THREE.Material).dispose();
-            }
-          });
-        }
+      } else if (animal.distanceTo3D(playerX, animal.position.y, playerZ) > 60) {
+        this.disposeAnimal(animal);
         this.animals.splice(i, 1);
       }
+    }
+  }
+
+  private disposeAnimal(animal: Animal) {
+    if (animal.model) {
+      this.scene.remove(animal.model);
+      animal.model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else {
+            (obj.material as THREE.Material).dispose();
+          }
+        }
+      });
     }
   }
 
@@ -437,30 +508,14 @@ export class AnimalManager {
   }
 
   removeAnimal(animal: Animal) {
-    if (animal.model) {
-      this.scene.remove(animal.model);
-      animal.model.traverse((obj) => {
-        if (obj instanceof THREE.Mesh) {
-          obj.geometry.dispose();
-          (obj.material as THREE.Material).dispose();
-        }
-      });
-    }
+    this.disposeAnimal(animal);
     const idx = this.animals.indexOf(animal);
     if (idx >= 0) this.animals.splice(idx, 1);
   }
 
   dispose() {
     for (const animal of this.animals) {
-      if (animal.model) {
-        this.scene.remove(animal.model);
-        animal.model.traverse((obj) => {
-          if (obj instanceof THREE.Mesh) {
-            obj.geometry.dispose();
-            (obj.material as THREE.Material).dispose();
-          }
-        });
-      }
+      this.disposeAnimal(animal);
     }
     this.animals = [];
   }

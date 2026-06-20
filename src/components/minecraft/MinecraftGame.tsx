@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { World, CHUNK_SIZE, WORLD_HEIGHT } from "@/lib/minecraft/world";
 import { Player, GameMode } from "@/lib/minecraft/player";
 import { buildChunkGeometry, ChunkMeshes } from "@/lib/minecraft/mesher";
-import { buildTextureCanvases, buildIconDataURLs } from "@/lib/minecraft/textures";
+import { buildTextureCanvases, buildIconDataURLs, loadRealTextures } from "@/lib/minecraft/textures";
 import { getSharedAtlas, resetAtlas } from "@/lib/minecraft/atlas";
 import { BlockType, BLOCKS, HOTBAR_BLOCKS } from "@/lib/minecraft/blocks";
 import { ItemType, ITEMS, isItem, getDisplayName } from "@/lib/minecraft/items";
@@ -14,6 +14,10 @@ import { InventoryUI } from "./InventoryUI";
 import { FurnaceUI } from "./FurnaceUI";
 import { AnimalManager, Animal } from "@/lib/minecraft/animals";
 import { saveWorld, loadWorld, applySavedWorld, listSavedWorlds, deleteWorld, SavedWorld } from "@/lib/minecraft/save";
+import { HandView, HandAction } from "@/lib/minecraft/hand";
+import { DropManager } from "@/lib/minecraft/drops";
+import { getSound } from "@/lib/minecraft/sound";
+import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -142,12 +146,13 @@ export default function MinecraftGame() {
 
     const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    // Enable tone mapping for nicer colors
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.3;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.shadowMap.enabled = false;
     container.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.cursor = "none";
@@ -187,13 +192,17 @@ export default function MinecraftGame() {
     sky.frustumCulled = false;
     scene.add(sky);
 
-    // === Lighting ===
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+    // === Lighting (improved for better visuals) ===
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xffffff, 0.6);
+    const sun = new THREE.DirectionalLight(0xfff4e6, 0.7);
     sun.position.set(50, 100, 30);
     scene.add(sun);
-    const hemi = new THREE.HemisphereLight(0xbfdfff, 0x6b5a3a, 0.35);
+    // Fill light for softer shadows
+    const fill = new THREE.DirectionalLight(0xb0c4de, 0.2);
+    fill.position.set(-30, 50, -40);
+    scene.add(fill);
+    const hemi = new THREE.HemisphereLight(0xbfdfff, 0x6b5a3a, 0.4);
     scene.add(hemi);
 
     // === Build atlas and shared materials ===
@@ -226,15 +235,50 @@ export default function MinecraftGame() {
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    // Glass material: alpha blended but depthWrite ON so glass occludes things behind correctly
+    // Glass material: alpha blended, depthWrite OFF so you can see through
     const glassMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
       transparent: true,
-      opacity: 1.0, // texture has its own alpha
+      opacity: 1.0,
       side: THREE.DoubleSide,
-      depthWrite: true,
+      depthWrite: false,
     });
+
+    // === Load real textures asynchronously and rebuild atlas ===
+    loadRealTextures().then((realCanvases) => {
+      // Merge real textures into the canvases map
+      for (const [name, canvas] of Object.entries(realCanvases)) {
+        canvases[name] = canvas;
+      }
+      // Rebuild the atlas texture
+      resetAtlas();
+      const newAtlas = getSharedAtlas(canvases);
+      // Update the texture on all materials
+      opaqueMaterial.map = newAtlas.texture;
+      opaqueMaterial.needsUpdate = true;
+      cutoutMaterial.map = newAtlas.texture;
+      cutoutMaterial.needsUpdate = true;
+      transparentMaterial.map = newAtlas.texture;
+      transparentMaterial.needsUpdate = true;
+      glassMaterial.map = newAtlas.texture;
+      glassMaterial.needsUpdate = true;
+      // Update icon URLs for hotbar
+      const newIcons = buildIconDataURLs(canvases);
+      iconUrlsRef.current = newIcons;
+      setIconUrls(newIcons);
+      setInventoryVersion((v) => v + 1);
+      // Force chunk rebuild to use new textures
+      for (const [key, _] of chunkMeshes) {
+        const [cxStr, czStr] = key.split(",");
+        const cx = parseInt(cxStr);
+        const cz = parseInt(czStr);
+        chunksToBuild.push({ cx, cz });
+      }
+    });
+
+    // === Hand view (first-person) ===
+    const handView = new HandView(atlas);
 
     // === World & Player ===
     const world = new World(config.seed);
@@ -242,6 +286,9 @@ export default function MinecraftGame() {
     // Store refs for save system
     worldRef.current = world;
     playerRef.current = player;
+
+    // === Drop manager (item drops on the ground) ===
+    const dropManager = new DropManager(scene, world, atlas);
 
     // If loading a saved world, apply saved state
     if (pendingLoadRef.current) {
@@ -268,8 +315,15 @@ export default function MinecraftGame() {
     // === Animal Manager (3D models) ===
     const animalManager = new AnimalManager(world, scene);
 
+    // === Monster Manager (zombies & spiders at night) ===
+    const monsterManager = new MonsterManager(world, scene);
+
+    // Torch lights
+    const torchLights = new Map<string, THREE.PointLight>();
+
     // === Day/Night cycle ===
-    let dayTime = dayTimeRef.current; // restore from ref (in case of load)
+    let dayTime = dayTimeRef.current;
+    let isNight = false;
     const DAY_LENGTH = 240; // seconds for full cycle
     // Sun and moon meshes
     const sunMesh = new THREE.Mesh(
@@ -324,6 +378,7 @@ export default function MinecraftGame() {
       // Day: sunHeight > 0, Night: sunHeight < 0
       const dayFactor = Math.max(0, Math.min(1, (sunHeight + 0.2) / 0.4)); // smooth transition
       const nightFactor = 1 - dayFactor;
+      isNight = nightFactor > 0.5;
 
       // Sun light intensity
       sun.intensity = 0.6 * dayFactor;
@@ -491,6 +546,11 @@ export default function MinecraftGame() {
     initialLoad();
     setIsLoaded(true);
 
+    // Start background music
+    const sound = getSound();
+    sound.unlock();
+    sound.startMusic();
+
     function rebuildChunkAt(wx: number, wz: number) {
       const cx = Math.floor(wx / CHUNK_SIZE);
       const cz = Math.floor(wz / CHUNK_SIZE);
@@ -548,6 +608,14 @@ export default function MinecraftGame() {
       if (px % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(px + 1, pz);
       if (pz % CHUNK_SIZE === 0) rebuildChunkAt(px, pz - 1);
       if (pz % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(px, pz + 1);
+
+      // Add torch light
+      if (blockType === BlockType.Torch) {
+        const torchLight = new THREE.PointLight(0xffaa44, 1.5, 8, 1.5);
+        torchLight.position.set(px + 0.5, py + 0.5, pz + 0.5);
+        scene.add(torchLight);
+        torchLights.set(`${px},${py},${pz}`, torchLight);
+      }
       return true;
     }
 
@@ -568,11 +636,18 @@ export default function MinecraftGame() {
       if (x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x + 1, z);
       if (z % CHUNK_SIZE === 0) rebuildChunkAt(x, z - 1);
       if (z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x, z + 1);
-      // Drop in creative too (for inventory mode)
+      // Sound
+      sound.blockSound(blockType, "break");
+      // Remove torch light if breaking a torch
+      if (blockType === BlockType.Torch) {
+        const key = `${x},${y},${z}`;
+        const tl = torchLights.get(key);
+        if (tl) { scene.remove(tl); torchLights.delete(key); }
+      }
+      // Drop item on the ground (in survival)
       const drop = BLOCK_DROPS[blockType];
       if (drop && worldConfigRef.current?.mode === "survival") {
-        inventoryRef.current.addItem(drop.id, drop.count);
-        setInventoryVersion((v) => v + 1);
+        dropManager.spawnDrop(drop.id, drop.count, x + 0.5, y + 0.5, z + 0.5);
       }
       return true;
     }
@@ -628,11 +703,18 @@ export default function MinecraftGame() {
         if (z % CHUNK_SIZE === 0) rebuildChunkAt(x, z - 1);
         if (z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x, z + 1);
 
-        // Drop the item
+        // Drop item on the ground
         const drop = BLOCK_DROPS[blockType];
         if (drop) {
-          inventoryRef.current.addItem(drop.id, drop.count);
-          setInventoryVersion((v) => v + 1);
+          dropManager.spawnDrop(drop.id, drop.count, x + 0.5, y + 0.5, z + 0.5);
+        }
+        // Sound
+        sound.blockSound(blockType, "break");
+        // Remove torch light
+        if (blockType === BlockType.Torch) {
+          const key = `${x},${y},${z}`;
+          const tl = torchLights.get(key);
+          if (tl) { scene.remove(tl); torchLights.delete(key); }
         }
 
         miningProgress = 0;
@@ -735,7 +817,24 @@ export default function MinecraftGame() {
 
       if (e.code === "KeyF") player.toggleFly();
       if (e.code === "KeyM") {
-        // M: interact with block (open crafting table / furnace) or place block
+        // M: eat food if holding food, else interact with block, else place
+        const selected = inventoryRef.current.getSelected();
+        if (selected && selected.id >= 100) {
+          const itemDef = ITEMS[selected.id as ItemType];
+          if (itemDef?.food && itemDef.food > 0) {
+            // Eat the food
+            player.heal(itemDef.food); // restore health
+            if (player.hunger < player.maxHunger) {
+              player.hunger = Math.min(player.maxHunger, player.hunger + itemDef.food);
+            }
+            inventoryRef.current.removeSelected(1);
+            setInventoryVersion((v) => v + 1);
+            handView.triggerAction("eat");
+            sound.eat();
+            return;
+          }
+        }
+        // Otherwise: interact with block (open crafting table / furnace) or place block
         const hit = player.raycast(6);
         if (hit.hit && hit.block) {
           const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
@@ -751,7 +850,12 @@ export default function MinecraftGame() {
           }
         }
         // Otherwise, place block
-        placeBlock();
+        if (placeBlock()) {
+          handView.triggerAction("place");
+          const selected = inventoryRef.current.getSelected();
+          const placedId = selected ? selected.id : HOTBAR_BLOCKS[selectedSlotRef.current];
+          sound.blockSound(placedId, "place");
+        }
       }
       if (e.code === "Escape") document.exitPointerLock();
       if (e.code === "Space" || e.code === "ArrowUp" || e.code === "ArrowDown") {
@@ -774,6 +878,7 @@ export default function MinecraftGame() {
       if (document.pointerLockElement !== renderer.domElement) return;
       if (e.button === 0) {
         leftMouseDown = true;
+        handView.triggerAction("swing");
         // In creative, break immediately. In survival, mining happens in render loop.
         if (worldConfigRef.current?.mode === "creative") {
           breakBlock();
@@ -787,6 +892,7 @@ export default function MinecraftGame() {
         }
       } else if (e.button === 2) {
         rightMouseDown = true;
+        handView.triggerAction("place");
         // Check if we're right-clicking a crafting table or furnace
         const hit = player.raycast(6);
         if (hit.hit && hit.block) {
@@ -878,6 +984,26 @@ export default function MinecraftGame() {
       // Update animals (always, even when paused)
       animalManager.update(dt, player.position.x, player.position.z);
 
+      // Update item drops and pick up nearby ones
+      const pickedUp = dropManager.update(dt, player.position.x, player.position.y + 0.8, player.position.z);
+      if (pickedUp.length > 0) {
+        for (const p of pickedUp) {
+          inventoryRef.current.addItem(p.id, p.count);
+        }
+        setInventoryVersion((v) => v + 1);
+        sound.pickup();
+      }
+
+      // Update monsters (spawn at night in survival, attack player)
+      const isSurvival = worldConfigRef.current?.mode === "survival";
+      const monsterDamages = isSurvival ? monsterManager.update(dt, player.position.x, player.position.y, player.position.z, isNight) : [];
+      if (monsterDamages.length > 0) {
+        for (const md of monsterDamages) {
+          player.damage(md.damage);
+          sound.hurt();
+        }
+      }
+
       if (player.isDead()) {
         setIsDead(true);
       }
@@ -890,27 +1016,41 @@ export default function MinecraftGame() {
         const eyeY = player.position.y + 1.5;
         const eyeZ = player.position.z;
         const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
-        if (animal) {
-          // Attack the animal - damage based on selected item
+        const monster = monsterManager.findClosest(eyeX, eyeY, eyeZ, 4);
+        if (animal || monster) {
+          // Attack - damage based on selected item (balanced for 3-4 hits to kill)
           let damage = 1; // bare hands
           const selected = inventoryRef.current.getSelected();
           if (selected && selected.id >= 100) {
             const itemDef = ITEMS[selected.id as ItemType];
             if (itemDef?.toolType === "sword") {
-              damage = 4 + (itemDef.toolTier === "diamond" ? 3 : itemDef.toolTier === "iron" ? 2 : itemDef.toolTier === "stone" ? 1 : 0);
+              // Wood=6 (4 hits), Stone=7 (3 hits), Iron=8 (3 hits), Gold=6 (4 hits), Diamond=10 (2 hits)
+              const tierDmg: Record<string, number> = { wood: 6, stone: 7, iron: 8, gold: 6, diamond: 10 };
+              damage = tierDmg[itemDef.toolTier] || 6;
             } else if (itemDef?.toolType === "axe") {
-              damage = 3;
+              damage = 4;
             }
           }
-          const died = animal.takeDamage(damage, player.position);
-          if (died) {
-            // Drop loot
-            const drops = animal.getDrops();
-            for (const drop of drops) {
-              inventoryRef.current.addItem(drop.id, drop.count);
+          sound.hit();
+          // Attack monster first (closer threat)
+          if (monster) {
+            const died = monster.takeDamage(damage);
+            if (died) {
+              const drops = monster.getDrops();
+              for (const drop of drops) {
+                dropManager.spawnDrop(drop.id, drop.count, monster.position.x, monster.position.y + 0.5, monster.position.z);
+              }
+              monsterManager.removeMonster(monster);
             }
-            setInventoryVersion((v) => v + 1);
-            animalManager.removeAnimal(animal);
+          } else if (animal) {
+            const died = animal.takeDamage(damage, player.position);
+            if (died) {
+              const drops = animal.getDrops();
+              for (const drop of drops) {
+                dropManager.spawnDrop(drop.id, drop.count, animal.position.x, animal.position.y + 0.5, animal.position.z);
+              }
+              animalManager.removeAnimal(animal);
+            }
           }
           // Reset mining when attacking
           miningProgress = 0;
@@ -966,6 +1106,19 @@ export default function MinecraftGame() {
 
       renderer.render(scene, camera);
 
+      // Render first-person hand on top
+      handView.update(dt);
+      // Update held item based on selected slot
+      let heldItemId: number | null = null;
+      if (worldConfigRef.current?.mode === "survival") {
+        const sel = inventoryRef.current.getSelected();
+        heldItemId = sel ? sel.id : null;
+      } else {
+        heldItemId = HOTBAR_BLOCKS[selectedSlotRef.current];
+      }
+      handView.updateItem(heldItemId);
+      handView.render(renderer);
+
       frameCount++;
       if (now - fpsTime > 500) {
         const newFps = Math.round((frameCount * 1000) / (now - fpsTime));
@@ -1015,6 +1168,13 @@ export default function MinecraftGame() {
       });
       // Dispose animals
       animalManager.dispose();
+      monsterManager.dispose();
+      dropManager.dispose();
+      // Stop music
+      getSound().stopMusic();
+      // Dispose torch lights
+      torchLights.forEach((l) => scene.remove(l));
+      torchLights.clear();
       // Dispose day/night objects
       sunMesh.geometry.dispose();
       (sunMesh.material as THREE.Material).dispose();
@@ -1036,6 +1196,7 @@ export default function MinecraftGame() {
       cutoutMaterial.dispose();
       transparentMaterial.dispose();
       glassMaterial.dispose();
+      handView.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === container) {
         container.removeChild(renderer.domElement);
@@ -1170,22 +1331,28 @@ export default function MinecraftGame() {
         )}
       </div>
 
-      {/* Survival stats */}
+      {/* Survival stats - centered above hotbar like Minecraft */}
       {mode === "survival" && (
         <>
-          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 flex gap-0.5">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <Heart key={i} filled={Math.min(2, Math.max(0, stats.health - i * 2))} />
-            ))}
+          <div className="absolute bottom-[76px] left-1/2 -translate-x-1/2 z-20 flex flex-row items-end" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
+            {/* Hearts (left of center) */}
+            <div className="flex gap-px">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <Heart key={i} filled={Math.min(2, Math.max(0, stats.health - i * 2))} />
+              ))}
+            </div>
+            {/* Gap between hearts and hunger */}
+            <div className="w-4" />
+            {/* Hunger (right side, reversed like Minecraft) */}
+            <div className="flex gap-px flex-row-reverse">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <Drumstick key={i} filled={Math.min(2, Math.max(0, stats.hunger - i * 2))} />
+              ))}
+            </div>
           </div>
-          <div className="absolute bottom-20 left-1/2 translate-x-[180px] z-20 flex gap-0.5">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <Drumstick key={i} filled={Math.min(2, Math.max(0, stats.hunger - i * 2))} />
-            ))}
-          </div>
-          {/* Air bubbles */}
+          {/* Air bubbles above hearts */}
           {stats.air < 10 && (
-            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 translate-y-[-30px] z-20 flex gap-0.5">
+            <div className="absolute bottom-[100px] left-1/2 -translate-x-1/2 z-20 flex gap-px" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
               {Array.from({ length: 10 }).map((_, i) => (
                 <Bubble key={i} filled={stats.air > i} />
               ))}
@@ -1262,7 +1429,7 @@ export default function MinecraftGame() {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-stone-800/95 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
             <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-wide" style={{ fontFamily: "monospace" }}>
-              {currentWorld?.name || "MINICRAFT"}
+              {currentWorld?.name || "JEFFCRAFT"}
             </h1>
             <p className="mb-3 text-stone-300 text-sm">
               Modo: <span className="text-yellow-400 font-bold">{mode === "creative" ? "Creativo" : "Survival"}</span>
@@ -1273,7 +1440,7 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
               <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque / Atacar animal" : "Romper bloque"}</div>
-              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque / Abrir mesa-horno</div>
+              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque / Abrir mesa-horno / Comer</div>
               <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
@@ -1376,11 +1543,15 @@ export default function MinecraftGame() {
   );
 }
 
-// =============== MAIN MENU (Minecraft-style) ===============
+// =============== MAIN MENU (Minecraft Java style) ===============
+const SPLASH_TEXTS = [
+  "¡Hecho con amor!", "100% voxel puro!", "¡Cava profundamente!", "¡Cuidado con los creepers!",
+  "¡Construye algo épico!", "¡Explora el infinito!", "¡Sobrevive!", "¡Craftea hasta el amanecer!",
+  "¡Los diamantes brillan!", "¡V2.0!", "¡Bienvenido a Jeffcraft!", "¡Construye. Sobrevive. Prospera!",
+];
+
 function MainMenu({
-  iconUrls,
-  onCreateWorld,
-  onLoadWorld,
+  iconUrls, onCreateWorld, onLoadWorld,
 }: {
   iconUrls: Record<string, string>;
   onCreateWorld: () => void;
@@ -1388,147 +1559,93 @@ function MainMenu({
 }) {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
+  const [splashIndex] = useState(() => Math.floor(Math.random() * SPLASH_TEXTS.length));
+  const [panOffset, setPanOffset] = useState(0);
 
-  const refreshSavedWorlds = () => {
-    setSavedWorlds(listSavedWorlds());
-  };
+  const refreshSavedWorlds = () => setSavedWorlds(listSavedWorlds());
+
+  useEffect(() => {
+    const interval = setInterval(() => setPanOffset((p) => (p + 0.3) % 100), 50);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-gradient-to-b from-sky-400 via-sky-500 to-emerald-800 select-none">
-      {/* Animated dirt background pattern */}
-      <div className="absolute inset-0 opacity-20 pointer-events-none" style={{
-        backgroundImage: "repeating-linear-gradient(0deg, #5e3f29 0px, #79553a 16px, #5e3f29 32px), repeating-linear-gradient(90deg, transparent 0px, transparent 16px, rgba(0,0,0,0.2) 16px, rgba(0,0,0,0.2) 32px)"
+    <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#2a2a2a" }}>
+      {/* Panorama background */}
+      <div className="absolute inset-0" style={{
+        backgroundImage: `url(${iconUrls["dirt"] || ""})`,
+        backgroundSize: "64px 64px", backgroundRepeat: "repeat",
+        backgroundPosition: `${panOffset}px 0`, opacity: 0.12, filter: "blur(3px)",
       }} />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black/70" />
 
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
-        {/* Logo */}
-        <div className="mb-12 text-center transform -rotate-3">
-          <h1
-            className="text-6xl sm:text-8xl font-black tracking-wider text-white"
-            style={{
-              fontFamily: "monospace",
-              textShadow: "4px 4px 0 #2a2a2a, 8px 8px 0 rgba(0,0,0,0.3)",
-              WebkitTextStroke: "2px #2a2a2a",
-            }}
-          >
-            MINICRAFT
-          </h1>
-          <p className="text-white/90 mt-2 text-sm font-mono drop-shadow-lg">
-            Edición voxel · Java-inspired
-          </p>
+        {/* Logo + splash */}
+        <div className="mb-8 text-center relative">
+          <h1 className="text-6xl sm:text-8xl font-black tracking-wider text-white" style={{
+            fontFamily: "monospace", textShadow: "4px 4px 0 #1a1a1a, 6px 6px 0 rgba(0,0,0,0.4)",
+            WebkitTextStroke: "2px #1a1a1a", transform: "rotate(-3deg)",
+          }}>JEFFCRAFT</h1>
+          <span className="absolute top-1/2 -right-4 sm:right-12 text-yellow-300 font-bold text-sm sm:text-lg font-mono"
+            style={{ transform: "rotate(-15deg)", textShadow: "2px 2px 0 #1a1a1a" }}>
+            {SPLASH_TEXTS[splashIndex]}
+          </span>
         </div>
 
         {!showLoadMenu ? (
-          /* Main menu buttons */
-          <div className="flex flex-col gap-3 w-full max-w-md">
-            <MenuButton primary onClick={onCreateWorld}>
-              Crear nuevo mundo
-            </MenuButton>
-            <MenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }}>
-              Cargar mundo
-            </MenuButton>
-            <MenuButton disabled>
-              Opciones
-            </MenuButton>
-            <MenuButton disabled>
-              Salir del juego
-            </MenuButton>
+          <div className="flex flex-col gap-2 w-full max-w-sm">
+            <MCButton onClick={onCreateWorld} primary>Crear nuevo mundo</MCButton>
+            <MCButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }}>Cargar mundo</MCButton>
+            <MCButton disabled>Opciones</MCButton>
+            <MCButton disabled>Salir del juego</MCButton>
           </div>
         ) : (
-          /* Load world menu */
-          <div className="w-full max-w-md">
-            <h2 className="text-2xl font-bold text-white font-mono mb-4 text-center">Mundos guardados</h2>
-            <div className="bg-stone-900/80 border-4 border-stone-700 rounded-lg p-4 max-h-80 overflow-y-auto">
+          <div className="w-full max-w-sm">
+            <h2 className="text-xl font-bold text-white font-mono mb-3 text-center" style={{ textShadow: "2px 2px 0 #1a1a1a" }}>
+              Selecciona un mundo
+            </h2>
+            <div className="bg-stone-900/90 border-2 border-stone-700 p-3 max-h-72 overflow-y-auto" style={{ imageRendering: "pixelated" }}>
               {savedWorlds.length === 0 ? (
-                <p className="text-stone-400 text-center font-mono py-8">
-                  No hay mundos guardados.
-                  <br />
-                  Crea un mundo y guárdalo desde el menú de pausa.
+                <p className="text-stone-400 text-center font-mono py-6 text-sm">
+                  No hay mundos guardados.<br />Crea un mundo y guárdalo desde el menú de pausa.
                 </p>
               ) : (
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
                   {savedWorlds.map((w) => (
-                    <div key={w.name} className="flex gap-2 items-center bg-stone-800/80 border-2 border-stone-600 rounded p-2">
+                    <div key={w.name} className="flex gap-2 items-center bg-stone-800/80 border-2 border-stone-700 p-2 hover:border-stone-500">
                       <div className="flex-1">
-                        <div className="text-white font-mono font-bold">{w.name}</div>
+                        <div className="text-white font-mono font-bold text-sm">{w.name}</div>
                         <div className="text-stone-400 text-xs font-mono">
-                          {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleString()}
+                          {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
                         </div>
                       </div>
-                      <button
-                        onClick={() => onLoadWorld(w.name)}
-                        className="px-3 py-2 bg-green-700 hover:bg-green-600 border-2 border-green-500 text-white text-sm font-mono font-bold rounded"
-                      >
-                        ▶ Cargar
-                      </button>
-                      <button
-                        onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }}
-                        className="px-2 py-2 bg-red-800 hover:bg-red-700 border-2 border-red-500 text-white text-sm font-mono rounded"
-                      >
-                        ✕
-                      </button>
+                      <button onClick={() => onLoadWorld(w.name)} className="px-3 py-1 bg-green-800 hover:bg-green-700 border-2 border-green-600 text-white text-xs font-mono font-bold" style={{ imageRendering: "pixelated" }}>▶ Cargar</button>
+                      <button onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }} className="px-2 py-1 bg-red-900 hover:bg-red-800 border-2 border-red-700 text-white text-xs font-mono" style={{ imageRendering: "pixelated" }}>✕</button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            <button
-              onClick={() => setShowLoadMenu(false)}
-              className="w-full mt-4 py-2 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white font-mono rounded"
-            >
-              ← Volver
-            </button>
+            <MCButton onClick={() => setShowLoadMenu(false)} className="mt-3">← Volver</MCButton>
           </div>
         )}
 
-        <p className="mt-12 text-white/60 text-xs font-mono">
-          Minicraft no está afiliado con Mojang o Microsoft.
-        </p>
-      </div>
-
-      {/* Decorative blocks at bottom */}
-      <div className="absolute bottom-0 left-0 right-0 h-16 flex">
-        {Array.from({ length: 32 }).map((_, i) => {
-          const blocks = ["grass_top", "dirt", "stone", "sand", "wood_top", "leaves"];
-          const name = blocks[i % blocks.length];
-          const url = iconUrls[name];
-          return (
-            <div key={i} className="flex-1 h-full" style={{ imageRendering: "pixelated" }}>
-              {url && <img src={url} alt="" className="w-full h-full" style={{ imageRendering: "pixelated" }} />}
-            </div>
-          );
-        })}
+        <p className="mt-8 text-white/40 text-xs font-mono">Jeffcraft v2.0 · No afiliado con Mojang o Microsoft</p>
       </div>
     </div>
   );
 }
 
-function MenuButton({
-  children,
-  onClick,
-  primary,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  primary?: boolean;
-  disabled?: boolean;
+function MCButton({ children, onClick, primary, disabled, className = "" }: {
+  children: React.ReactNode; onClick?: () => void; primary?: boolean; disabled?: boolean; className?: string;
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`
-        relative py-3 px-6 text-lg font-bold font-mono tracking-wide transition-all
-        ${disabled
-          ? "bg-stone-700/50 text-stone-500 cursor-not-allowed border-2 border-stone-800"
-          : primary
-            ? "bg-stone-800 hover:bg-stone-700 text-white border-2 border-stone-900 hover:border-green-400 hover:scale-[1.02] active:scale-95 shadow-lg"
-            : "bg-stone-800/80 hover:bg-stone-700 text-white border-2 border-stone-900 hover:border-stone-400 hover:scale-[1.02] active:scale-95 shadow-lg"
-        }
-      `}
-      style={{ imageRendering: "pixelated" }}
-    >
+    <button onClick={onClick} disabled={disabled} className={`
+      relative py-2.5 px-4 text-base font-bold font-mono tracking-wide transition-all
+      ${disabled ? "bg-stone-800/50 text-stone-600 cursor-not-allowed border-2 border-stone-900"
+        : "bg-stone-800 hover:bg-stone-700 active:bg-stone-900 text-white border-2 border-stone-900 hover:border-white/50 hover:scale-[1.02] active:scale-95 shadow-md"}
+      ${primary ? "border-green-600 hover:border-green-400" : ""} ${className}
+    `} style={{ imageRendering: "pixelated", textShadow: "1px 1px 0 #1a1a1a" }}>
       {children}
     </button>
   );

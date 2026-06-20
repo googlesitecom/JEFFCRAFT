@@ -319,21 +319,18 @@ function texPlanks(): ImageData {
 }
 
 function texGlass(): ImageData {
-  // Glass: visible frame + transparent interior (like real Minecraft glass)
-  // The interior is FULLY transparent (alpha 0) so you can see through completely.
-  // Only the border/frame is opaque so the glass block edges are visible.
+  // Glass: mostly transparent with a thin visible border
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
   const border = [180, 220, 240] as [number, number, number];
-  const highlight = [255, 255, 255] as [number, number, number];
 
-  // Start fully transparent (alpha 0) - interior is see-through
+  // All pixels start fully transparent (alpha 0) - you can see through
   for (let y = 0; y < TEX_SIZE; y++) {
     for (let x = 0; x < TEX_SIZE; x++) {
-      setPixel(img, x, y, [255, 255, 255], 0);
+      setPixel(img, x, y, [200, 220, 240], 0);
     }
   }
 
-  // Solid border (frame) - opaque so edges are visible
+  // Thin border (just the outer edge) - opaque so the block edges are visible
   for (let i = 0; i < TEX_SIZE; i++) {
     setPixel(img, i, 0, border, 255);
     setPixel(img, i, TEX_SIZE - 1, border, 255);
@@ -341,18 +338,10 @@ function texGlass(): ImageData {
     setPixel(img, TEX_SIZE - 1, i, border, 255);
   }
 
-  // Diagonal highlight (reflection) in top-left - opaque white pixels
-  for (let i = 2; i < 6; i++) {
-    setPixel(img, i, i, highlight, 220);
-  }
-  setPixel(img, 3, 2, highlight, 200);
-  setPixel(img, 2, 3, highlight, 200);
-  setPixel(img, 4, 3, highlight, 180);
-  setPixel(img, 3, 4, highlight, 180);
-
-  // Small highlight in bottom-right
-  setPixel(img, 12, 12, highlight, 150);
-  setPixel(img, 13, 11, highlight, 120);
+  // Small highlight in top-left corner (3 pixels)
+  setPixel(img, 2, 2, [255, 255, 255], 180);
+  setPixel(img, 3, 2, [255, 255, 255], 150);
+  setPixel(img, 2, 3, [255, 255, 255], 150);
 
   return img;
 }
@@ -577,8 +566,30 @@ function texFurnaceSide(): ImageData {
 }
 
 function texFurnaceFront(): ImageData {
-  // Same as side for now (front shows the opening)
   return texFurnaceSide();
+}
+
+function texTorch(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  clearTransparent(img);
+  // Stick (brown)
+  const stick = hexToRgb("#6e4d28");
+  const stickLight = hexToRgb("#8a6536");
+  fillRect(img, 7, 7, 2, 7, stick);
+  setPixel(img, 7, 7, stickLight);
+  setPixel(img, 8, 8, stickLight);
+  // Flame (orange/yellow)
+  const flameOrange = hexToRgb("#ff6600");
+  const flameYellow = hexToRgb("#ffaa00");
+  const flameLight = hexToRgb("#ffdd44");
+  fillRect(img, 6, 4, 4, 3, flameOrange);
+  fillRect(img, 7, 3, 2, 2, flameYellow);
+  setPixel(img, 7, 2, flameLight);
+  setPixel(img, 8, 2, flameLight);
+  // Glow
+  setPixel(img, 5, 5, flameOrange);
+  setPixel(img, 10, 5, flameOrange);
+  return img;
 }
 
 // === ANIMAL TEXTURES (top-down view for sprites) ===
@@ -675,7 +686,9 @@ function texChicken(): ImageData {
 // ============================================================
 
 import { buildItemCanvases } from "./item-textures";
+import { loadTextureImage } from "./texture-loader";
 
+// Build procedural textures (synchronous)
 export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
   const blocks: Record<string, HTMLCanvasElement> = {
     dirt: imageDataToCanvas(texDirt()),
@@ -706,6 +719,7 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
     furnace_top: imageDataToCanvas(texFurnaceTop()),
     furnace_side: imageDataToCanvas(texFurnaceSide()),
     furnace_front: imageDataToCanvas(texFurnaceFront()),
+    torch: imageDataToCanvas(texTorch()),
     pig: imageDataToCanvas(texPig()),
     cow: imageDataToCanvas(texCow()),
     chicken: imageDataToCanvas(texChicken()),
@@ -713,6 +727,41 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
   // Merge in item textures
   const items = buildItemCanvases();
   return { ...blocks, ...items };
+}
+
+// Load real texture images from /public and replace procedural ones
+// This is called asynchronously after the game starts
+export async function loadRealTextures(): Promise<Record<string, HTMLCanvasElement>> {
+  const replacements: Record<string, HTMLCanvasElement> = {};
+  try {
+    const [grassSide, grassTop, dirt, stone, sand, woodSide, woodTop, planks, coalOre, ironOre, diamondOre] = await Promise.all([
+      loadTextureImage("/tex_grass_side.jpeg"),
+      loadTextureImage("/tex_grass_top.jpeg"),
+      loadTextureImage("/tex_dirt.jpeg"),
+      loadTextureImage("/tex_stone.png"),
+      loadTextureImage("/tex_sand.jpeg"),
+      loadTextureImage("/tex_wood_side.png"),
+      loadTextureImage("/tex_wood_top.jpeg"),
+      loadTextureImage("/tex_planks.jpeg"),
+      loadTextureImage("/tex_coal_ore.jpeg"),
+      loadTextureImage("/tex_iron_ore.jpeg"),
+      loadTextureImage("/tex_diamond_ore.jpeg"),
+    ]);
+    replacements["grass_side"] = grassSide;
+    replacements["grass_top"] = grassTop;
+    replacements["dirt"] = dirt;
+    replacements["stone"] = stone;
+    replacements["sand"] = sand;
+    replacements["wood_side"] = woodSide;
+    replacements["wood_top"] = woodTop;
+    replacements["planks"] = planks;
+    replacements["coal_ore"] = coalOre;
+    replacements["iron_ore"] = ironOre;
+    replacements["diamond_ore"] = diamondOre;
+  } catch (e) {
+    console.error("Failed to load real textures:", e);
+  }
+  return replacements;
 }
 
 export function buildIconDataURLs(canvases: Record<string, HTMLCanvasElement>): Record<string, string> {

@@ -23,6 +23,7 @@ export enum BlockType {
   CraftingTable = 20,
   Bookshelf = 21,
   Furnace = 22,
+  Torch = 23,
 }
 
 export type RenderLayer = "opaque" | "cutout" | "translucent";
@@ -95,7 +96,7 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
   [BlockType.Glass]: {
     id: BlockType.Glass, name: "Glass",
     textures: { top: "glass", bottom: "glass", side: "glass" },
-    layer: "cutout", solid: true,
+    layer: "translucent", solid: true,
   },
   [BlockType.Brick]: {
     id: BlockType.Brick, name: "Bricks",
@@ -151,6 +152,11 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
     id: BlockType.Furnace, name: "Furnace",
     textures: { top: "furnace_top", bottom: "furnace_top", side: "furnace_side" },
     layer: "opaque", solid: true,
+  },
+  [BlockType.Torch]: {
+    id: BlockType.Torch, name: "Torch",
+    textures: { top: "torch", bottom: "torch", side: "torch" },
+    layer: "cutout", solid: false,
   },
 };
 
