@@ -41,24 +41,44 @@ export enum ItemType {
   IronShovel = 332,
   DiamondShovel = 333,
   GoldShovel = 334,
+  // Materials - Armor
+  CopperIngot = 206,
+  // Armor - Helmet
+  CopperHelmet = 340,
+  IronHelmet = 341,
+  DiamondHelmet = 342,
+  // Armor - Chestplate
+  CopperChestplate = 350,
+  IronChestplate = 351,
+  DiamondChestplate = 352,
+  // Armor - Leggings
+  CopperLeggings = 360,
+  IronLeggings = 361,
+  DiamondLeggings = 362,
+  // Armor - Boots
+  CopperBoots = 370,
+  IronBoots = 371,
+  DiamondBoots = 372,
 }
 
 export type ToolTier = "wood" | "stone" | "iron" | "diamond" | "gold";
 export type ToolType = "pickaxe" | "axe" | "sword" | "shovel";
+export type ArmorType = "helmet" | "chestplate" | "leggings" | "boots";
+export type ArmorTier = "copper" | "iron" | "diamond";
 
 export interface ItemDef {
   id: ItemType;
   name: string;
-  icon: string; // texture name
-  food?: number; // hunger restored
+  icon: string;
+  food?: number;
   maxStack: number;
-  // Tool properties
   toolType?: ToolType;
   toolTier?: ToolTier;
-  // Mining speed multiplier (1.0 = bare hand)
   miningSpeed?: number;
-  // Whether this item can break blocks requiring tools (stone, ores)
   canMineHard?: boolean;
+  armorType?: ArmorType;
+  armorTier?: ArmorTier;
+  defense?: number;
 }
 
 export const ITEMS: Record<ItemType, ItemDef> = {
@@ -101,6 +121,24 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   [ItemType.IronShovel]: { id: ItemType.IronShovel, name: "Iron Shovel", icon: "iron_shovel", maxStack: 1, toolType: "shovel", toolTier: "iron", miningSpeed: 6.0, canMineHard: false },
   [ItemType.DiamondShovel]: { id: ItemType.DiamondShovel, name: "Diamond Shovel", icon: "diamond_shovel", maxStack: 1, toolType: "shovel", toolTier: "diamond", miningSpeed: 8.0, canMineHard: false },
   [ItemType.GoldShovel]: { id: ItemType.GoldShovel, name: "Golden Shovel", icon: "gold_shovel", maxStack: 1, toolType: "shovel", toolTier: "gold", miningSpeed: 12.0, canMineHard: false },
+  // Copper Ingot
+  [ItemType.CopperIngot]: { id: ItemType.CopperIngot, name: "Copper Ingot", icon: "copper_ingot", maxStack: 64 },
+  // Armor - Helmets
+  [ItemType.CopperHelmet]: { id: ItemType.CopperHelmet, name: "Copper Helmet", icon: "copper_helmet", maxStack: 1, armorType: "helmet", armorTier: "copper", defense: 2 },
+  [ItemType.IronHelmet]: { id: ItemType.IronHelmet, name: "Iron Helmet", icon: "iron_helmet", maxStack: 1, armorType: "helmet", armorTier: "iron", defense: 3 },
+  [ItemType.DiamondHelmet]: { id: ItemType.DiamondHelmet, name: "Diamond Helmet", icon: "diamond_helmet", maxStack: 1, armorType: "helmet", armorTier: "diamond", defense: 5 },
+  // Armor - Chestplates
+  [ItemType.CopperChestplate]: { id: ItemType.CopperChestplate, name: "Copper Chestplate", icon: "copper_chestplate", maxStack: 1, armorType: "chestplate", armorTier: "copper", defense: 4 },
+  [ItemType.IronChestplate]: { id: ItemType.IronChestplate, name: "Iron Chestplate", icon: "iron_chestplate", maxStack: 1, armorType: "chestplate", armorTier: "iron", defense: 6 },
+  [ItemType.DiamondChestplate]: { id: ItemType.DiamondChestplate, name: "Diamond Chestplate", icon: "diamond_chestplate", maxStack: 1, armorType: "chestplate", armorTier: "diamond", defense: 9 },
+  // Armor - Leggings
+  [ItemType.CopperLeggings]: { id: ItemType.CopperLeggings, name: "Copper Leggings", icon: "copper_leggings", maxStack: 1, armorType: "leggings", armorTier: "copper", defense: 3 },
+  [ItemType.IronLeggings]: { id: ItemType.IronLeggings, name: "Iron Leggings", icon: "iron_leggings", maxStack: 1, armorType: "leggings", armorTier: "iron", defense: 5 },
+  [ItemType.DiamondLeggings]: { id: ItemType.DiamondLeggings, name: "Diamond Leggings", icon: "diamond_leggings", maxStack: 1, armorType: "leggings", armorTier: "diamond", defense: 7 },
+  // Armor - Boots
+  [ItemType.CopperBoots]: { id: ItemType.CopperBoots, name: "Copper Boots", icon: "copper_boots", maxStack: 1, armorType: "boots", armorTier: "copper", defense: 2 },
+  [ItemType.IronBoots]: { id: ItemType.IronBoots, name: "Iron Boots", icon: "iron_boots", maxStack: 1, armorType: "boots", armorTier: "iron", defense: 3 },
+  [ItemType.DiamondBoots]: { id: ItemType.DiamondBoots, name: "Diamond Boots", icon: "diamond_boots", maxStack: 1, armorType: "boots", armorTier: "diamond", defense: 5 },
 };
 
 // Check if an ID is an item (not a block)

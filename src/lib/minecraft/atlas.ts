@@ -70,6 +70,10 @@ export const TEXTURE_NAMES = [
   "diamond_axe",
   "diamond_sword",
   "diamond_shovel",
+  "copper_ingot",
+  "copper_helmet", "copper_chestplate", "copper_leggings", "copper_boots",
+  "iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots",
+  "diamond_helmet", "diamond_chestplate", "diamond_leggings", "diamond_boots",
   "gold_pickaxe",
   "gold_axe",
   "gold_sword",
@@ -84,7 +88,7 @@ const TILE_SIZE = 16;
 const PADDING = 8;
 const SLOT = TILE_SIZE + PADDING * 2; // 32 pixels per slot
 const COLS = 8;
-const ROWS = 10; // 8x10 = 80 slots, enough for 64 textures
+const ROWS = 12; // 8x12 = 96 slots for all textures including armor
 const ATLAS_W = SLOT * COLS; // 256
 const ATLAS_H = SLOT * ROWS; // 320
 

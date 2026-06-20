@@ -537,5 +537,61 @@ export function buildItemCanvases(): Record<string, HTMLCanvasElement> {
     gold_axe: imageDataToCanvas(texGoldAxe()),
     gold_sword: imageDataToCanvas(texGoldSword()),
     gold_shovel: imageDataToCanvas(texGoldShovel()),
+    // Copper ingot
+    copper_ingot: imageDataToCanvas(makeIngot(0xc87533, 0xe89a55, 0x8a4a1a)),
+    // Armor - simple colored shapes
+    copper_helmet: imageDataToCanvas(makeArmor(0xc87533, "helmet")),
+    copper_chestplate: imageDataToCanvas(makeArmor(0xc87533, "chestplate")),
+    copper_leggings: imageDataToCanvas(makeArmor(0xc87533, "leggings")),
+    copper_boots: imageDataToCanvas(makeArmor(0xc87533, "boots")),
+    iron_helmet: imageDataToCanvas(makeArmor(0xd8d8d8, "helmet")),
+    iron_chestplate: imageDataToCanvas(makeArmor(0xd8d8d8, "chestplate")),
+    iron_leggings: imageDataToCanvas(makeArmor(0xd8d8d8, "leggings")),
+    iron_boots: imageDataToCanvas(makeArmor(0xd8d8d8, "boots")),
+    diamond_helmet: imageDataToCanvas(makeArmor(0x5edcdc, "helmet")),
+    diamond_chestplate: imageDataToCanvas(makeArmor(0x5edcdc, "chestplate")),
+    diamond_leggings: imageDataToCanvas(makeArmor(0x5edcdc, "leggings")),
+    diamond_boots: imageDataToCanvas(makeArmor(0x5edcdc, "boots")),
   };
+}
+
+// Helper: make ingot texture
+function makeIngot(color: number, lightColor: number, darkColor: number): ImageData {
+  const img = new ImageData(16, 16);
+  clearTransparent(img);
+  const c = [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff] as [number, number, number];
+  const l = [(lightColor >> 16) & 0xff, (lightColor >> 8) & 0xff, lightColor & 0xff] as [number, number, number];
+  const d = [(darkColor >> 16) & 0xff, (darkColor >> 8) & 0xff, darkColor & 0xff] as [number, number, number];
+  // Ingot shape (trapezoid)
+  fillRect(img, 5, 5, 6, 1, c);
+  fillRect(img, 4, 6, 8, 1, c);
+  fillRect(img, 4, 7, 8, 3, c);
+  fillRect(img, 4, 10, 8, 1, c);
+  fillRect(img, 5, 11, 6, 1, c);
+  fillRect(img, 5, 5, 6, 1, l);
+  fillRect(img, 4, 11, 8, 1, d);
+  return img;
+}
+
+// Helper: make armor texture (simple shape per type)
+function makeArmor(color: number, type: string): ImageData {
+  const img = new ImageData(16, 16);
+  clearTransparent(img);
+  const c = [(color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff] as [number, number, number];
+  const d = [Math.max(0, c[0] - 40), Math.max(0, c[1] - 40), Math.max(0, c[2] - 40)] as [number, number, number];
+  const l = [Math.min(255, c[0] + 30), Math.min(255, c[1] + 30), Math.min(255, c[2] + 30)] as [number, number, number];
+  if (type === "helmet") {
+    fillRect(img, 4, 3, 8, 1, c); fillRect(img, 3, 4, 10, 4, c); fillRect(img, 3, 8, 2, 2, c); fillRect(img, 11, 8, 2, 2, c);
+    fillRect(img, 4, 3, 8, 1, l); fillRect(img, 3, 8, 2, 2, d); fillRect(img, 11, 8, 2, 2, d);
+  } else if (type === "chestplate") {
+    fillRect(img, 3, 3, 10, 1, c); fillRect(img, 2, 4, 12, 6, c); fillRect(img, 3, 10, 10, 2, c);
+    fillRect(img, 3, 3, 10, 1, l); fillRect(img, 3, 11, 10, 1, d);
+  } else if (type === "leggings") {
+    fillRect(img, 3, 3, 10, 2, c); fillRect(img, 3, 5, 4, 8, c); fillRect(img, 9, 5, 4, 8, c);
+    fillRect(img, 3, 3, 10, 1, l); fillRect(img, 3, 12, 4, 1, d); fillRect(img, 9, 12, 4, 1, d);
+  } else if (type === "boots") {
+    fillRect(img, 3, 8, 4, 2, c); fillRect(img, 3, 10, 5, 3, c); fillRect(img, 9, 8, 4, 2, c); fillRect(img, 8, 10, 5, 3, c);
+    fillRect(img, 3, 8, 4, 1, l); fillRect(img, 3, 12, 5, 1, d); fillRect(img, 8, 12, 5, 1, d);
+  }
+  return img;
 }

@@ -43,7 +43,7 @@ export const ANIMALS: Record<AnimalType, AnimalDef> = {
     type: "cow",
     maxHealth: 10,
     speed: 1.0,
-    drops: [{ id: ItemType.RawBeef, min: 1, max: 3 }],
+    drops: [{ id: ItemType.RawBeef, min: 1, max: 3 }, { id: ItemType.CopperIngot, min: 0, max: 2 }],
     width: 1.0,
     height: 1.2,
     depth: 1.5,

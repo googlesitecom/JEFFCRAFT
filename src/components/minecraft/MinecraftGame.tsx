@@ -353,6 +353,23 @@ export default function MinecraftGame() {
     stars.frustumCulled = false;
     scene.add(stars);
 
+    // === Clouds (simple white planes high in the sky) ===
+    const cloudGroup = new THREE.Group();
+    const cloudMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, fog: false, side: THREE.DoubleSide });
+    for (let i = 0; i < 30; i++) {
+      const cloudGeo = new THREE.PlaneGeometry(20 + Math.random() * 30, 8 + Math.random() * 10);
+      const cloud = new THREE.Mesh(cloudGeo, cloudMat);
+      cloud.position.set(
+        (Math.random() - 0.5) * 400,
+        80 + Math.random() * 20,
+        (Math.random() - 0.5) * 400
+      );
+      cloud.rotation.x = -Math.PI / 2;
+      cloudGroup.add(cloud);
+    }
+    cloudGroup.frustumCulled = false;
+    scene.add(cloudGroup);
+
     function updateDayNight(dt: number) {
       dayTime = (dayTime + dt / DAY_LENGTH) % 1;
       dayTimeRef.current = dayTime;
@@ -372,6 +389,10 @@ export default function MinecraftGame() {
       );
       // Stars follow player
       stars.position.copy(player.position);
+      // Clouds follow player and drift slowly
+      cloudGroup.position.x = player.position.x + Math.sin(performance.now() * 0.00001) * 10;
+      cloudGroup.position.y = player.position.y;
+      cloudGroup.position.z = player.position.z + Math.cos(performance.now() * 0.00001) * 10;
 
       // Calculate light intensity based on sun height
       const sunHeight = Math.sin(sunAngle); // -1 to 1

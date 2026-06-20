@@ -182,7 +182,16 @@ export class World {
       return BlockType.Air;
     }
     if (wy < BEDROCK_DEPTH) return BlockType.Bedrock;
-    if (wy < h - 3) return BlockType.Stone; // ores placed by vein generation
+    if (wy < h - 3) {
+      // Ores: use same vein logic as decorateChunk for consistency
+      // Use the same LCG seeded by chunk coords
+      const chunkCx = Math.floor(wx / CHUNK_SIZE);
+      const chunkCz = Math.floor(wz / CHUNK_SIZE);
+      const oreSeed = (this.seed ^ (chunkCx * 73856093) ^ (chunkCz * 19349663)) >>> 0;
+      // We can't replay the full vein generation, so just return Stone
+      // The actual ores are placed in decorateChunk and stored in the chunk
+      return BlockType.Stone;
+    }
     if (wy < h) {
       if (biome === "desert") return BlockType.Sand;
       if (h <= WATER_LEVEL + 1) return BlockType.Sand;
@@ -293,38 +302,38 @@ export class World {
       }
     };
 
-    // CARBÓN: 20 attempts, Y=0 to Y=100, vein 8-16 blocks (VERY COMMON)
-    for (let i = 0; i < 20; i++) {
+    // CARBÓN: 30 attempts, Y=0 to Y=110, vein 8-16 blocks (VERY COMMON)
+    for (let i = 0; i < 30; i++) {
       const lx = Math.floor(oreRand() * CHUNK_SIZE);
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 100);
+      const y = Math.floor(oreRand() * 110);
       const size = 8 + Math.floor(oreRand() * 9); // 8-16
       placeVein(BlockType.Coal, lx, y, lz, size);
     }
 
-    // HIERRO: 10 attempts, Y=0 to Y=64, vein 4-8 blocks (COMMON)
-    for (let i = 0; i < 10; i++) {
+    // HIERRO: 15 attempts, Y=0 to Y=80, vein 4-8 blocks (COMMON)
+    for (let i = 0; i < 15; i++) {
       const lx = Math.floor(oreRand() * CHUNK_SIZE);
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 64);
+      const y = Math.floor(oreRand() * 80);
       const size = 4 + Math.floor(oreRand() * 5); // 4-8
       placeVein(BlockType.Iron, lx, y, lz, size);
     }
 
-    // ORO: 4 attempts, Y=0 to Y=32, vein 2-6 blocks (RARE)
-    for (let i = 0; i < 4; i++) {
+    // ORO: 6 attempts, Y=0 to Y=40, vein 2-6 blocks (RARE)
+    for (let i = 0; i < 6; i++) {
       const lx = Math.floor(oreRand() * CHUNK_SIZE);
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 32);
+      const y = Math.floor(oreRand() * 40);
       const size = 2 + Math.floor(oreRand() * 5); // 2-6
       placeVein(BlockType.Gold, lx, y, lz, size);
     }
 
-    // DIAMANTE: 2 attempts, Y=0 to Y=16, vein 1-4 blocks (VERY RARE)
-    for (let i = 0; i < 2; i++) {
+    // DIAMANTE: 3 attempts, Y=0 to Y=20, vein 1-4 blocks (VERY RARE)
+    for (let i = 0; i < 3; i++) {
       const lx = Math.floor(oreRand() * CHUNK_SIZE);
       const lz = Math.floor(oreRand() * CHUNK_SIZE);
-      const y = Math.floor(oreRand() * 16);
+      const y = Math.floor(oreRand() * 20);
       const size = 1 + Math.floor(oreRand() * 4); // 1-4
       placeVein(BlockType.Diamond, lx, y, lz, size);
     }

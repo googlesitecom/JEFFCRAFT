@@ -248,6 +248,59 @@ export const RECIPES: Recipe[] = [
     result: { id: ItemType.Stick, count: 1 }, // simplified: returns a stick (placeholder)
     requiresTable: true,
   },
+
+  // === ARMOR RECIPES ===
+  // Copper armor (made from copper ingots dropped by cows)
+  {
+    type: "shaped", pattern: pat(["CCC", "C.C", "..."], { C: ItemType.CopperIngot }),
+    result: { id: ItemType.CopperHelmet, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["C.C", "CCC", "CCC"], { C: ItemType.CopperIngot }),
+    result: { id: ItemType.CopperChestplate, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["CCC", "C.C", "C.C"], { C: ItemType.CopperIngot }),
+    result: { id: ItemType.CopperLeggings, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["...", "C.C", "C.C"], { C: ItemType.CopperIngot }),
+    result: { id: ItemType.CopperBoots, count: 1 }, requiresTable: true,
+  },
+  // Iron armor
+  {
+    type: "shaped", pattern: pat(["III", "I.I", "..."], { I: ItemType.IronIngot }),
+    result: { id: ItemType.IronHelmet, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["I.I", "III", "III"], { I: ItemType.IronIngot }),
+    result: { id: ItemType.IronChestplate, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["III", "I.I", "I.I"], { I: ItemType.IronIngot }),
+    result: { id: ItemType.IronLeggings, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["...", "I.I", "I.I"], { I: ItemType.IronIngot }),
+    result: { id: ItemType.IronBoots, count: 1 }, requiresTable: true,
+  },
+  // Diamond armor
+  {
+    type: "shaped", pattern: pat(["DDD", "D.D", "..."], { D: ItemType.Diamond }),
+    result: { id: ItemType.DiamondHelmet, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["D.D", "DDD", "DDD"], { D: ItemType.Diamond }),
+    result: { id: ItemType.DiamondChestplate, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["DDD", "D.D", "D.D"], { D: ItemType.Diamond }),
+    result: { id: ItemType.DiamondLeggings, count: 1 }, requiresTable: true,
+  },
+  {
+    type: "shaped", pattern: pat(["...", "D.D", "D.D"], { D: ItemType.Diamond }),
+    result: { id: ItemType.DiamondBoots, count: 1 }, requiresTable: true,
+  },
 ];
 
 // Check if an ingredient matches an item id
