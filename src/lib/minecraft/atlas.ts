@@ -78,6 +78,7 @@ export const TEXTURE_NAMES = [
   "gold_axe",
   "gold_sword",
   "gold_shovel",
+  "dragon_egg",
 ] as const;
 
 export type TextureName = (typeof TEXTURE_NAMES)[number];

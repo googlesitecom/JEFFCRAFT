@@ -19,6 +19,7 @@ import { DropManager } from "@/lib/minecraft/drops";
 import { getSound } from "@/lib/minecraft/sound";
 import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 import { XpState } from "@/lib/minecraft/xp";
+import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -141,6 +142,15 @@ export default function MinecraftGame() {
   const xpStateRef = useRef<XpState>(new XpState());
   const pendingXpLoadRef = useRef<{ level: number; progress: number } | null>(null);
   const [saveMessage, setSaveMessage] = useState<string>("");
+  // Track if the player has already received the level-10 dragon egg reward (per world)
+  const dragonEggAwardedRef = useRef<boolean>(false);
+  const [dragonNotification, setDragonNotification] = useState<string>("");
+  // Track previous XP level to detect level-ups to 10
+  const prevXpLevelRef = useRef<number>(0);
+  // Ref to dragon manager for HUD access
+  const dragonManagerRef = useRef<DragonManager | null>(null);
+  // Force HUD re-render periodically so the dragon mount indicator updates
+  const [, setHudTick] = useState(0);
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -342,10 +352,13 @@ export default function MinecraftGame() {
       // Respawn case: no saved world to apply, but preserve XP from before respawn
       xpStateRef.current.deserialize(pendingXpLoadRef.current);
       pendingXpLoadRef.current = null;
+      // Keep dragonEggAwardedRef state across respawn (already awarded)
     } else {
       // Fresh new world - reset XP
       xpStateRef.current.reset();
+      dragonEggAwardedRef.current = false;
     }
+    prevXpLevelRef.current = xpStateRef.current.level;
     // Enable tracking of player modifications (for save system)
     world.enablePlayerModificationTracking(true);
 
@@ -354,6 +367,11 @@ export default function MinecraftGame() {
 
     // === Monster Manager (zombies & spiders at night) ===
     const monsterManager = new MonsterManager(world, scene);
+
+    // === Dragon Manager (player's pet dragon) ===
+    const dragonManager = new DragonManager(world, scene);
+    dragonManagerRef.current = dragonManager;
+    let dragonMountedCamera: { eyeX: number; eyeY: number; eyeZ: number; yaw: number; pitch: number } | null = null;
 
     // Torch lights
     const torchLights = new Map<string, THREE.PointLight>();
@@ -624,13 +642,39 @@ export default function MinecraftGame() {
       const py = result.block.y + result.normal.y;
       const pz = result.block.z + result.normal.z;
       if (py < 0 || py >= WORLD_HEIGHT) return false;
+
+      // === Special case: Dragon Egg - spawn a dragon instead of placing a block ===
+      const mode = worldConfigRef.current?.mode;
+      if (mode === "survival") {
+        const selected = inventoryRef.current.getSelected();
+        if (selected && selected.id === ItemType.DragonEgg) {
+          // Don't place if dragon already exists
+          if (dragonManager.getActiveDragon()) {
+            setDragonNotification("Ya tienes un dragón");
+            setTimeout(() => setDragonNotification(""), 2500);
+            return false;
+          }
+          // Spawn dragon above the targeted block
+          const spawnX = px + 0.5;
+          const spawnY = py + 2;
+          const spawnZ = pz + 0.5;
+          dragonManager.spawn(spawnX, spawnY, spawnZ);
+          // Consume the egg
+          inventoryRef.current.removeSelected(1);
+          setInventoryVersion((v) => v + 1);
+          sound.levelUp();
+          setDragonNotification("¡Dragón invocado! Pulsa M para montarlo");
+          setTimeout(() => setDragonNotification(""), 4000);
+          return true;
+        }
+      }
+
       const existing = world.getBlock(px, py, pz);
       if (existing !== BlockType.Air && existing !== BlockType.Water) return false;
 
       // In survival: use the selected hotbar item (must be a placeable block)
       // In creative: use HOTBAR_BLOCKS
       let blockType: BlockType;
-      const mode = worldConfigRef.current?.mode;
       if (mode === "survival") {
         const selected = inventoryRef.current.getSelected();
         if (!selected || selected.id >= 100) return false; // no selected item or it's a tool/food
@@ -887,44 +931,35 @@ export default function MinecraftGame() {
 
       if (e.code === "KeyF") player.toggleFly();
       if (e.code === "KeyM") {
-        // M: eat food if holding food, else interact with block, else place
-        const selected = inventoryRef.current.getSelected();
-        if (selected && selected.id >= 100) {
-          const itemDef = ITEMS[selected.id as ItemType];
-          if (itemDef?.food && itemDef.food > 0) {
-            // Eat the food
-            player.heal(itemDef.food); // restore health
-            if (player.hunger < player.maxHunger) {
-              player.hunger = Math.min(player.maxHunger, player.hunger + itemDef.food);
-            }
-            inventoryRef.current.removeSelected(1);
-            setInventoryVersion((v) => v + 1);
-            handView.triggerAction("eat");
-            sound.eat();
-            return;
-          }
+        // M: mount/dismount dragon pet (if one exists)
+        const dragon = dragonManager.getActiveDragon();
+        if (!dragon) {
+          setDragonNotification("No tienes dragón. Alcanza nivel 10 de XP para recibir un huevo.");
+          setTimeout(() => setDragonNotification(""), 3500);
+          return;
         }
-        // Otherwise: interact with block (open crafting table / furnace) or place block
-        const hit = player.raycast(6);
-        if (hit.hit && hit.block) {
-          const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
-          if (block === BlockType.CraftingTable) {
-            document.exitPointerLock();
-            setShowCraftingTable(true);
+        // If currently mounted, dismount; otherwise mount
+        if (dragon.isMounted) {
+          const nowMounted = dragon.toggleMount(player.position);
+          // dismount: drop player next to dragon
+          player.position.set(dragon.position.x + 1, dragon.position.y, dragon.position.z);
+          player.velocity.set(0, 0, 0);
+          setDragonNotification("Has desmontado");
+          setTimeout(() => setDragonNotification(""), 1500);
+        } else {
+          // Only mount if dragon is close enough
+          const dx = dragon.position.x - player.position.x;
+          const dy = dragon.position.y - player.position.y;
+          const dz = dragon.position.z - player.position.z;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+          if (dist > 6) {
+            setDragonNotification("Acércate al dragón para montarlo");
+            setTimeout(() => setDragonNotification(""), 2500);
             return;
           }
-          if (block === BlockType.Furnace) {
-            document.exitPointerLock();
-            setShowFurnace(true);
-            return;
-          }
-        }
-        // Otherwise, place block
-        if (placeBlock()) {
-          handView.triggerAction("place");
-          const selected = inventoryRef.current.getSelected();
-          const placedId = selected ? selected.id : HOTBAR_BLOCKS[selectedSlotRef.current];
-          sound.blockSound(placedId, "place");
+          dragon.toggleMount(player.position);
+          setDragonNotification("¡Montado! WASD para volar, Espacio subir, Ctrl/Shift bajar");
+          setTimeout(() => setDragonNotification(""), 3500);
         }
       }
       if (e.code === "Escape") document.exitPointerLock();
@@ -1047,8 +1082,49 @@ export default function MinecraftGame() {
       // Day/night cycle (always runs)
       updateDayNight(dt);
 
+      // === Dragon update (mount or follow player) ===
+      const dragon = dragonManager.getActiveDragon();
+      const isDragonMounted = dragon?.isMounted ?? false;
+      // Apply mouse look to player even when mounted (so yaw/pitch sync with camera)
       if (document.pointerLockElement === renderer.domElement && !player.isDead()) {
-        player.update(dt);
+        // When dragon is mounted, skip normal player movement - the dragon controls position.
+        // But still update player's yaw/pitch from mouse (used for dragon camera direction).
+        if (isDragonMounted) {
+          // Apply mouse-look only (no physics/movement)
+          const sensitivity = 0.0022;
+          player.yaw -= player.mouseDeltaX * sensitivity;
+          player.pitch -= player.mouseDeltaY * sensitivity;
+          const maxPitch = Math.PI / 2 - 0.01;
+          player.pitch = Math.max(-maxPitch, Math.min(maxPitch, player.pitch));
+          player.mouseDeltaX = 0;
+          player.mouseDeltaY = 0;
+        } else {
+          player.update(dt);
+        }
+      }
+
+      // Update the dragon (returns camera position when mounted)
+      dragonMountedCamera = dragonManager.update(
+        dt,
+        player.position,
+        player.keys,
+        player.yaw,
+        player.pitch
+      );
+
+      // When mounted, sync player position to dragon (so player.update camera and other systems work)
+      if (isDragonMounted && dragon) {
+        player.position.set(dragon.position.x, dragon.position.y + 1, dragon.position.z);
+        player.velocity.set(0, 0, 0);
+        player.onGround = false;
+        // Apply camera override after player.update (which is skipped when mounted)
+        if (dragonMountedCamera) {
+          camera.position.set(dragonMountedCamera.eyeX, dragonMountedCamera.eyeY, dragonMountedCamera.eyeZ);
+          camera.rotation.order = "YXZ";
+          camera.rotation.y = dragonMountedCamera.yaw;
+          camera.rotation.x = dragonMountedCamera.pitch;
+          camera.rotation.z = 0;
+        }
       }
 
       // Update animals (always, even when paused)
@@ -1071,6 +1147,23 @@ export default function MinecraftGame() {
           const levelsGained = xpStateRef.current.addXp(pickedXp);
           if (levelsGained > 0) {
             sound.levelUp();
+            // Award dragon egg when player FIRST reaches level 10 (or higher)
+            if (
+              !dragonEggAwardedRef.current &&
+              xpStateRef.current.level >= 10
+            ) {
+              dragonEggAwardedRef.current = true;
+              const leftover = inventoryRef.current.addItem(ItemType.DragonEgg, 1);
+              if (leftover === 0) {
+                setDragonNotification("¡Has alcanzado el nivel 10! Recibiste un Huevo de Dragón. Colócalo para invocar a tu mascota.");
+              } else {
+                // Inventory full - drop the egg on the ground at the player's position
+                dropManager.spawnDrop(ItemType.DragonEgg, 1, player.position.x, player.position.y + 1, player.position.z);
+                setDragonNotification("¡Nivel 10! Huevo de Dragón dejado en el suelo (inventario lleno).");
+              }
+              setTimeout(() => setDragonNotification(""), 6000);
+              sound.craftSuccess();
+            }
           } else {
             sound.orbPickup();
           }
@@ -1239,6 +1332,8 @@ export default function MinecraftGame() {
           xpLevel: xpStateRef.current.level,
           xpProgress: xpStateRef.current.progressFraction,
         }));
+        // Tick HUD to refresh dragon mount indicator
+        setHudTick((t) => (t + 1) & 0xffff);
         posUpdateCounter = 0;
       }
     };
@@ -1265,6 +1360,8 @@ export default function MinecraftGame() {
       animalManager.dispose();
       monsterManager.dispose();
       dropManager.dispose();
+      dragonManager.dispose();
+      dragonManagerRef.current = null;
       // Stop music
       getSound().stopMusic();
       // Dispose torch lights
@@ -1567,11 +1664,12 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
               <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque / Atacar animal" : "Romper bloque"}</div>
-              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Colocar bloque / Abrir mesa-horno / Comer</div>
+              <div><span className="text-yellow-400 font-bold">Click der</span> — Colocar bloque / Abrir mesa-horno / Comer</div>
               <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en horno</span> — Cocer comida</div>}
+              {mode === "survival" && <div><span className="text-yellow-400 font-bold">M</span> — Montar/desmontar dragón 🐉</div>}
               {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
@@ -1626,6 +1724,25 @@ export default function MinecraftGame() {
       )}
 
       {/* Mining cracks are now shown as 3D overlay on the block (like Minecraft) */}
+
+      {/* Dragon notification banner (center top) */}
+      {dragonNotification && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-purple-900/90 border-2 border-purple-500 rounded text-white font-mono text-sm text-center shadow-xl" style={{ textShadow: "1px 1px 0 #000" }}>
+          🐉 {dragonNotification}
+        </div>
+      )}
+
+      {/* Dragon mount indicator (top-right corner) */}
+      {(() => {
+        const dragon = dragonManagerRef.current?.getActiveDragon?.();
+        if (!dragon) return null;
+        return (
+          <div className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-black/50 rounded text-white font-mono text-xs">
+            <div className="text-purple-300 font-bold">🐉 Dragón {dragon.isMounted ? "[MONTADO]" : "[Libre]"}</div>
+            <div className="text-white/70">Pulsa M para {dragon.isMounted ? "desmontar" : "montar"}</div>
+          </div>
+        );
+      })()}
 
       {/* Inventory UI */}
       {showInventory && (

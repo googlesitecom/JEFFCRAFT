@@ -38,3 +38,42 @@ Stage Summary:
 - New world creation now uses a random 32-bit seed by default (like Minecraft); each "Crear nuevo mundo" produces a unique world; a 🎲 button is provided to roll a specific random seed
 - XP state is saved/loaded with the world; preserved across respawns; reset when leaving to menu without saving
 - Files modified: `world.ts`, `xp.ts` (new), `drops.ts`, `sound.ts`, `save.ts`, `MinecraftGame.tsx`
+
+---
+Task ID: jeffcraft-v2-dragon
+Agent: main (Super Z)
+Task: Add dragon pet (mountable, flyable, third-person), award dragon egg at XP level 10, fix floating torches
+
+Work Log:
+- Downloaded Dragon.glb (340KB, glTF v2) from the repo root at https://github.com/googlesitecom/JEFFCRAFT/raw/main/Dragon.glb into /public/Dragon.glb. Model is "Devil dragon - Minecraft" by geni_o_o on Sketchfab (CC-BY-4.0). Has one animation named "fly" with 25 channels (body, wings, tail, legs).
+- Fixed floating torch: in mesher.ts the torch mesh started at y+0.2 (floating 0.2 above the surface). Changed to y+0.01 so the torch base sits exactly on top of the block below. Also reduced width 0.15→0.13 and height 0.5→0.45 for a more proportional Minecraft-style torch.
+- Added DragonEgg item (ItemType.DragonEgg = 400) to items.ts with maxStack 1
+- Added "dragon_egg" texture name to atlas.ts TEXTURE_NAMES list (79 textures total, fits in 8x12=96 slots)
+- Created procedural dragon_egg icon texture in item-textures.ts: dark purple/black oval egg with magenta spots (like Minecraft's dragon egg block)
+- Created new src/lib/minecraft/dragon.ts module:
+  - DragonPet class loads /Dragon.glb via GLTFLoader, plays the "fly" animation via AnimationMixer
+  - Position/velocity/yaw/pitch state; third-person camera computed from yaw+pitch (behind + above dragon, 7 blocks back, 2.5 up)
+  - When mounted: WASD moves dragon in camera direction (relative to yaw), Space/Ctrl up/down, smooth velocity interpolation, banking/pitch visual tilt for satisfying flight feel, subtle wing bob
+  - When not mounted: dragon flies toward player to follow them, hovers near player when close
+  - DragonManager holds the single player dragon; spawn(x,y,z) creates new pet; getActiveDragon() returns first dragon; update() returns camera info when mounted
+- Integrated dragon into MinecraftGame.tsx:
+  - Imported DragonManager + DragonPet
+  - Added refs: dragonEggAwardedRef (one-time reward gate), dragonNotification state, prevXpLevelRef, dragonManagerRef (for HUD access), setHudTick (force re-render for HUD indicator)
+  - In game effect: create DragonManager, link to ref; reset dragonEggAwarded on new world
+  - placeBlock() now has special case: if player is holding DragonEgg and right-clicks, spawn a dragon at the targeted block + 2 above, consume the egg, play level-up sound, show notification. Refuses to spawn if a dragon already exists.
+  - KeyM handler replaced: now toggles mount/dismount on the active dragon. Dismount drops player next to dragon. Mount requires dragon within 6 blocks. Notifications for each state.
+  - In animate loop: detect isDragonMounted; when mounted, skip player.update() (player position syncs to dragon, only mouse-look applied to player.yaw/pitch); call dragonManager.update() which returns camera info; apply camera override (third-person behind+above dragon)
+  - XP pickup logic: when addXp causes level gain AND current level >= 10 AND not yet awarded, give player a DragonEgg (or drop it on the ground if inventory full), set dragonNotification, play craftSuccess sound
+  - HUD: added dragon notification banner (top center, purple); added dragon mount indicator (top right showing mount state and M key hint)
+  - Cleanup: dispose dragonManager, clear dragonManagerRef
+  - Pause menu help text updated: M is now "Montar/desmontar dragón"
+- TypeScript: clean (no errors in any of our project files)
+- Dev server: compiles cleanly, page returns HTTP 200
+
+Stage Summary:
+- Torch no longer floats: mesh base moved from y+0.2 to y+0.01
+- Dragon pet fully implemented: rideable, flyable, third-person camera; mount/dismount with M; Dragon.glb model with fly animation from the GitHub repo; banking/pitch tilt for satisfying flight; follows player when not mounted
+- Dragon Egg reward: granted once when XP first reaches level 10; appears in inventory (or drops on ground if full); player places it to spawn their dragon
+- All systems typecheck and the dev server compiles without errors
+- Files modified: mesher.ts, items.ts, atlas.ts, item-textures.ts, MinecraftGame.tsx
+- Files added: dragon.ts, public/Dragon.glb

@@ -552,7 +552,44 @@ export function buildItemCanvases(): Record<string, HTMLCanvasElement> {
     diamond_chestplate: imageDataToCanvas(makeArmor(0x5edcdc, "chestplate")),
     diamond_leggings: imageDataToCanvas(makeArmor(0x5edcdc, "leggings")),
     diamond_boots: imageDataToCanvas(makeArmor(0x5edcdc, "boots")),
+    // Dragon egg (special item)
+    dragon_egg: imageDataToCanvas(texDragonEgg()),
   };
+}
+
+// Dragon egg texture: dark purple/black egg with magenta spots
+function texDragonEgg(): ImageData {
+  const img = new ImageData(16, 16);
+  clearTransparent(img);
+  const black = hexToRgb("#0a0014");
+  const purple = hexToRgb("#3a0a4a");
+  const magenta = hexToRgb("#cc44cc");
+  const lightMagenta = hexToRgb("#ff88ff");
+  // Egg shape (oval, narrowing at top)
+  // Bottom row (widest)
+  fillRect(img, 4, 11, 8, 1, black);
+  fillRect(img, 3, 10, 10, 1, black);
+  fillRect(img, 3, 9, 10, 1, purple);
+  fillRect(img, 3, 8, 10, 1, black);
+  fillRect(img, 4, 7, 8, 1, purple);
+  fillRect(img, 4, 6, 8, 1, black);
+  fillRect(img, 4, 5, 8, 1, purple);
+  fillRect(img, 5, 4, 6, 1, black);
+  fillRect(img, 5, 3, 6, 1, purple);
+  fillRect(img, 6, 2, 4, 1, black);
+  // Magenta spots (scattered)
+  setPixel(img, 5, 9, magenta);
+  setPixel(img, 9, 8, magenta);
+  setPixel(img, 7, 7, lightMagenta);
+  setPixel(img, 4, 6, magenta);
+  setPixel(img, 10, 6, magenta);
+  setPixel(img, 6, 5, lightMagenta);
+  setPixel(img, 8, 4, magenta);
+  setPixel(img, 7, 3, lightMagenta);
+  // Highlight (top-left)
+  setPixel(img, 4, 8, purple);
+  setPixel(img, 5, 7, purple);
+  return img;
 }
 
 // Helper: make ingot texture

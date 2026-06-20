@@ -169,10 +169,11 @@ export function buildChunkGeometry(
           const tile = atlas.tiles["torch"];
           if (tile) {
             const target = cutout;
-            // Small torch: 2 crossed planes at center of block
-            // Plane 1 (X-aligned)
-            const cx = wx + 0.5, cy = y + 0.2, cz = wz + 0.5;
-            const w = 0.15, h = 0.5;
+            // Small torch: 2 crossed planes at center of block, sitting on the floor.
+            // Block Y is the floor of this block (== top of the block below).
+            // Torch base sits exactly at y so it doesn't float.
+            const cx = wx + 0.5, cy = y + 0.01, cz = wz + 0.5;
+            const w = 0.13, h = 0.45;
             // Front face (+Z side)
             const si = target.positions.length / 3;
             target.positions.push(cx - w, cy, cz, cx + w, cy, cz, cx + w, cy + h, cz, cx - w, cy + h, cz);

@@ -59,6 +59,8 @@ export enum ItemType {
   LeatherBoots = 370,
   IronBoots = 371,
   DiamondBoots = 372,
+  // Special
+  DragonEgg = 400,
 }
 
 export type ToolTier = "wood" | "stone" | "iron" | "diamond" | "gold";
@@ -139,6 +141,8 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   [ItemType.LeatherBoots]: { id: ItemType.LeatherBoots, name: "Leather Boots", icon: "leather_boots", maxStack: 1, armorType: "boots", armorTier: "leather", defense: 1 },
   [ItemType.IronBoots]: { id: ItemType.IronBoots, name: "Iron Boots", icon: "iron_boots", maxStack: 1, armorType: "boots", armorTier: "iron", defense: 3 },
   [ItemType.DiamondBoots]: { id: ItemType.DiamondBoots, name: "Diamond Boots", icon: "diamond_boots", maxStack: 1, armorType: "boots", armorTier: "diamond", defense: 5 },
+  // Special
+  [ItemType.DragonEgg]: { id: ItemType.DragonEgg, name: "Dragon Egg", icon: "dragon_egg", maxStack: 1 },
 };
 
 // Check if an ID is an item (not a block)
