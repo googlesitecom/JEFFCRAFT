@@ -252,20 +252,20 @@ export const RECIPES: Recipe[] = [
   // === ARMOR RECIPES ===
   // Copper armor (made from copper ingots dropped by cows)
   {
-    type: "shaped", pattern: pat(["CCC", "C.C", "..."], { C: ItemType.CopperIngot }),
-    result: { id: ItemType.CopperHelmet, count: 1 }, requiresTable: true,
+    type: "shaped", pattern: pat(["CCC", "C.C", "..."], { C: ItemType.Leather }),
+    result: { id: ItemType.LeatherHelmet, count: 1 }, requiresTable: true,
   },
   {
-    type: "shaped", pattern: pat(["C.C", "CCC", "CCC"], { C: ItemType.CopperIngot }),
-    result: { id: ItemType.CopperChestplate, count: 1 }, requiresTable: true,
+    type: "shaped", pattern: pat(["C.C", "CCC", "CCC"], { C: ItemType.Leather }),
+    result: { id: ItemType.LeatherChestplate, count: 1 }, requiresTable: true,
   },
   {
-    type: "shaped", pattern: pat(["CCC", "C.C", "C.C"], { C: ItemType.CopperIngot }),
-    result: { id: ItemType.CopperLeggings, count: 1 }, requiresTable: true,
+    type: "shaped", pattern: pat(["CCC", "C.C", "C.C"], { C: ItemType.Leather }),
+    result: { id: ItemType.LeatherLeggings, count: 1 }, requiresTable: true,
   },
   {
-    type: "shaped", pattern: pat(["...", "C.C", "C.C"], { C: ItemType.CopperIngot }),
-    result: { id: ItemType.CopperBoots, count: 1 }, requiresTable: true,
+    type: "shaped", pattern: pat(["...", "C.C", "C.C"], { C: ItemType.Leather }),
+    result: { id: ItemType.LeatherBoots, count: 1 }, requiresTable: true,
   },
   // Iron armor
   {

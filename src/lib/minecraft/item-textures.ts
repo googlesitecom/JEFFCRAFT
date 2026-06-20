@@ -537,13 +537,13 @@ export function buildItemCanvases(): Record<string, HTMLCanvasElement> {
     gold_axe: imageDataToCanvas(texGoldAxe()),
     gold_sword: imageDataToCanvas(texGoldSword()),
     gold_shovel: imageDataToCanvas(texGoldShovel()),
-    // Copper ingot
-    copper_ingot: imageDataToCanvas(makeIngot(0xc87533, 0xe89a55, 0x8a4a1a)),
+    // Leather ingot
+    leather: imageDataToCanvas(makeIngot(0x8b5a2b, 0xe89a55, 0x8a4a1a)),
     // Armor - simple colored shapes
-    copper_helmet: imageDataToCanvas(makeArmor(0xc87533, "helmet")),
-    copper_chestplate: imageDataToCanvas(makeArmor(0xc87533, "chestplate")),
-    copper_leggings: imageDataToCanvas(makeArmor(0xc87533, "leggings")),
-    copper_boots: imageDataToCanvas(makeArmor(0xc87533, "boots")),
+    leather_helmet: imageDataToCanvas(makeArmor(0x8b5a2b, "helmet")),
+    leather_chestplate: imageDataToCanvas(makeArmor(0x8b5a2b, "chestplate")),
+    leather_leggings: imageDataToCanvas(makeArmor(0x8b5a2b, "leggings")),
+    leather_boots: imageDataToCanvas(makeArmor(0x8b5a2b, "boots")),
     iron_helmet: imageDataToCanvas(makeArmor(0xd8d8d8, "helmet")),
     iron_chestplate: imageDataToCanvas(makeArmor(0xd8d8d8, "chestplate")),
     iron_leggings: imageDataToCanvas(makeArmor(0xd8d8d8, "leggings")),

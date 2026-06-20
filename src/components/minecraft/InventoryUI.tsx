@@ -351,8 +351,8 @@ export function InventoryUI({
         onClick={(e) => { e.preventDefault(); if (!disabled) onClick(false); }}
         onContextMenu={(e) => { e.preventDefault(); if (!disabled) onClick(true); }}
         className={`w-12 h-12 border-2 flex items-center justify-center relative cursor-pointer hover:bg-white/10 ${
-          highlight ? "border-yellow-400" : disabled ? "border-stone-700 bg-stone-900/50" : "border-stone-600"
-        } bg-stone-800/80`}
+          highlight ? "border-yellow-400" : disabled ? "border-[#555] bg-[#6b6b6b]" : "border-[#555]"
+        } bg-[#8b8b8b]`}
         style={{ imageRendering: "pixelated" }}
       >
         {stack && (
@@ -381,37 +381,57 @@ export function InventoryUI({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="bg-stone-900/95 border-4 border-stone-700 rounded-lg p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        className="bg-[#c6c6c6] border-2 border-[#555] p-4 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
+        style={{ imageRendering: "pixelated", boxShadow: "inset 0 0 0 2px #555" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-white font-mono">
+          <h2 className="text-xl font-bold text-[#3f3f3f] font-mono" style={{ textShadow: "1px 1px 0 #fff" }}>
             {isCraftingTable ? "Mesa de Crafteo" : "Inventario"}
           </h2>
           <div className="flex gap-2">
             <button
               onClick={() => setShowRecipeBook(!showRecipeBook)}
-              className={`px-3 py-1 border-2 text-white text-sm font-mono rounded ${
-                showRecipeBook ? "bg-green-600 border-green-400" : "bg-green-700 hover:bg-green-600 border-green-500"
-              }`}
+              className={`px-3 py-1 border-2 text-[#fff] text-sm font-mono ${showRecipeBook ? "bg-[#4a8a4a] border-[#3a6a3a]" : "bg-[#5a8a5a] hover:bg-[#4a8a4a] border-[#3a6a3a]"}`}
+              style={{ imageRendering: "pixelated" }}
             >
-              📖 Libro de Recetas
+              📖 Recetas
             </button>
             <button
               onClick={onClose}
-              className="px-3 py-1 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white text-sm font-mono rounded"
+              className="px-3 py-1 bg-[#8a8a8a] hover:bg-[#7a7a7a] border-2 border-[#5a5a5a] text-white text-sm font-mono"
+              style={{ imageRendering: "pixelated" }}
             >
-              ✕ Cerrar
+              ✕
             </button>
           </div>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
+          {/* Character model + armor slots (like Minecraft) */}
+          {!isCraftingTable && (
+            <div className="flex-shrink-0 flex flex-col items-center gap-2">
+              {/* Armor slots */}
+              <div className="flex flex-col gap-1">
+                {["helmet", "chestplate", "leggings", "boots"].map((slot) => (
+                  <div key={slot} className="w-12 h-12 border-2 border-[#555] bg-[#8b8b8b]" style={{ imageRendering: "pixelated" }} />
+                ))}
+              </div>
+              {/* Character model (simple pixel art) */}
+              <div className="w-16 h-24 mt-2 relative" style={{ imageRendering: "pixelated" }}>
+                <div className="absolute top-0 left-3 w-10 h-10 bg-[#e8c39e] border border-[#555]" />
+                <div className="absolute top-10 left-1 w-14 h-10 bg-[#4a8a4a] border border-[#555]" />
+                <div className="absolute top-20 left-3 w-4 h-6 bg-[#2a3a5a] border border-[#555]" />
+                <div className="absolute top-20 left-9 w-4 h-6 bg-[#2a3a5a] border border-[#555]" />
+              </div>
+            </div>
+          )}
+
           {/* Crafting area */}
           <div className="flex-shrink-0">
-            <h3 className="text-white text-sm font-mono mb-2">Crafteo {isCraftingTable ? "(3×3)" : "(2×2)"}</h3>
+            <h3 className="text-[#3f3f3f] text-sm font-mono mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Crafteo {isCraftingTable ? "(3×3)" : "(2×2)"}</h3>
             <div className="flex items-center gap-4">
-              <div className="grid grid-cols-3 gap-1 p-2 bg-stone-800/60 rounded">
+              <div className="grid grid-cols-3 gap-1 p-1 bg-[#8b8b8b] border-2 border-[#555]">
                 {craftGrid.map((row, y) =>
                   row.map((stack, x) => (
                     <div key={`${x}-${y}`}>
@@ -426,13 +446,13 @@ export function InventoryUI({
                   ))
                 )}
               </div>
-              <div className="text-white text-2xl">→</div>
-              <div className="p-2 bg-stone-800/60 rounded">
+              <div className="text-[#3f3f3f] text-2xl">→</div>
+              <div className="p-1 bg-[#8b8b8b] border-2 border-[#555]">
                 {result ? (
                   <div
                     onClick={(e) => { e.preventDefault(); handleTakeResult(e.button === 2); }}
                     onContextMenu={(e) => { e.preventDefault(); handleTakeResult(true); }}
-                    className="w-12 h-12 border-2 border-yellow-400 bg-stone-800 flex items-center justify-center cursor-pointer hover:bg-yellow-400/20 relative"
+                    className="w-12 h-12 border-2 border-yellow-400 bg-[#8b8b8b] flex items-center justify-center cursor-pointer hover:bg-yellow-400/20 relative"
                     style={{ imageRendering: "pixelated" }}
                   >
                     <img src={getIcon(result.id)} alt={getName(result.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
@@ -443,7 +463,7 @@ export function InventoryUI({
                     )}
                   </div>
                 ) : (
-                  <div className="w-12 h-12 border-2 border-stone-600 bg-stone-800" />
+                  <div className="w-12 h-12 border-2 border-[#555] bg-[#8b8b8b]" />
                 )}
               </div>
             </div>
@@ -457,8 +477,8 @@ export function InventoryUI({
           {/* Recipe book */}
           {showRecipeBook && (
             <div className="flex-1">
-              <h3 className="text-white text-sm font-mono mb-2">Recetas ({allRecipes.length})</h3>
-              <div className="grid grid-cols-6 sm:grid-cols-8 gap-1 p-2 bg-stone-800/60 rounded max-h-64 overflow-y-auto">
+              <h3 className="text-[#3f3f3f] text-sm font-mono mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Recetas ({allRecipes.length})</h3>
+              <div className="grid grid-cols-6 sm:grid-cols-8 gap-1 p-2 bg-[#8b8b8b] border-2 border-[#555] max-h-64 overflow-y-auto">
                 {allRecipes.map((recipe, i) => {
                   const canCraft = craftableIds.has(recipe.result.id + "_" + recipe.result.count);
                   const needsTable = recipe.requiresTable && !isCraftingTable;
@@ -468,10 +488,10 @@ export function InventoryUI({
                       onClick={() => canCraft && !needsTable && handleRecipeClick(recipe)}
                       className={`w-12 h-12 border-2 flex items-center justify-center relative ${
                         needsTable
-                          ? "border-blue-600 bg-stone-900/60 cursor-help"
+                          ? "border-blue-600 bg-[#6b6b6b] cursor-help"
                           : canCraft
-                            ? "border-green-400 bg-stone-800 hover:bg-green-400/20 cursor-pointer"
-                            : "border-stone-700 bg-stone-900/60 cursor-not-allowed opacity-50"
+                            ? "border-green-400 bg-[#8b8b8b] hover:bg-green-400/20 cursor-pointer"
+                            : "border-[#555] bg-[#6b6b6b] cursor-not-allowed opacity-50"
                       }`}
                       title={getName(recipe.result.id) + (needsTable ? " (requiere mesa)" : canCraft ? "" : " (sin materiales)")}
                       style={{ imageRendering: "pixelated" }}
@@ -481,7 +501,7 @@ export function InventoryUI({
                         <span className="absolute top-0 right-0 w-2 h-2 bg-green-400 rounded-full" />
                       )}
                       {needsTable && (
-                        <span className="absolute bottom-0 right-0 text-[8px] text-blue-400 font-mono font-bold bg-stone-900/80 px-0.5">T</span>
+                        <span className="absolute bottom-0 right-0 text-[8px] text-blue-600 font-mono font-bold bg-[#ddd]/80 px-0.5">T</span>
                       )}
                     </button>
                   );
@@ -490,7 +510,7 @@ export function InventoryUI({
               <p className="text-stone-400 text-xs font-mono mt-2">
                 <span className="text-green-400">●</span> Con materiales · 
                 <span className="text-stone-500"> ●</span> Sin materiales · 
-                <span className="text-blue-400"> T</span> Requiere mesa
+                <span className="text-blue-600"> T</span> Requiere mesa
               </p>
             </div>
           )}
@@ -500,7 +520,7 @@ export function InventoryUI({
         {isCreative && (
           <div className="mt-6">
             <h3 className="text-white text-sm font-mono mb-2">Todos los objetos (click para obtener 64)</h3>
-            <div className="grid grid-cols-9 sm:grid-cols-12 gap-1 p-2 bg-stone-800/60 rounded max-h-48 overflow-y-auto">
+            <div className="grid grid-cols-9 sm:grid-cols-12 gap-1 p-2 bg-[#8b8b8b] border-2 border-[#555] rounded max-h-48 overflow-y-auto">
               {creativeItems.map((id) => {
                 const icon = getIcon(id);
                 const name = getName(id);
@@ -509,7 +529,7 @@ export function InventoryUI({
                   <button
                     key={id}
                     onClick={() => handleCreativeItemClick(id)}
-                    className="w-12 h-12 border-2 border-stone-600 hover:border-green-400 bg-stone-800 flex items-center justify-center cursor-pointer hover:bg-green-400/20"
+                    className="w-12 h-12 border-2 border-[#555] hover:border-green-400 bg-[#8b8b8b] flex items-center justify-center cursor-pointer hover:bg-green-400/20"
                     title={name}
                     style={{ imageRendering: "pixelated" }}
                   >
@@ -524,7 +544,7 @@ export function InventoryUI({
         {/* Main inventory (27 slots) */}
         <div className="mt-6">
           <h3 className="text-white text-sm font-mono mb-2">Inventario</h3>
-          <div className="grid grid-cols-9 gap-1 p-2 bg-stone-800/60 rounded">
+          <div className="grid grid-cols-9 gap-1 p-2 bg-[#8b8b8b] border-2 border-[#555] rounded">
             {inventory.slots.slice(HOTBAR_SIZE).map((stack, i) => (
               <div key={i}>
                 {renderSlot(
@@ -540,7 +560,7 @@ export function InventoryUI({
         {/* Hotbar (9 slots) */}
         <div className="mt-2">
           <h3 className="text-white text-sm font-mono mb-2">Hotbar</h3>
-          <div className="grid grid-cols-9 gap-1 p-2 bg-stone-800/60 rounded">
+          <div className="grid grid-cols-9 gap-1 p-2 bg-[#8b8b8b] border-2 border-[#555] rounded">
             {inventory.slots.slice(0, HOTBAR_SIZE).map((stack, i) => (
               <div key={i}>
                 {renderSlot(
@@ -560,7 +580,7 @@ export function InventoryUI({
             className="fixed pointer-events-none z-50"
             style={{ left: mousePos.x, top: mousePos.y, transform: "translate(-50%, -50%)" }}
           >
-            <div className="w-12 h-12 border-2 border-yellow-400 bg-stone-800/90 flex items-center justify-center relative" style={{ imageRendering: "pixelated" }}>
+            <div className="w-12 h-12 border-2 border-yellow-400 bg-[#8b8b8b]/90 flex items-center justify-center relative" style={{ imageRendering: "pixelated" }}>
               <img src={getIcon(heldItem.id)} alt="" className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
               {heldItem.count > 1 && (
                 <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>

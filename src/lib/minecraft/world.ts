@@ -287,19 +287,21 @@ export class World {
     };
 
     // Helper: place a vein of ore using random walk
-    const placeVein = (oreType: BlockType, startLx: number, startY: number, startLz: number, size: number) => {
+    const placeVein = (oreType: BlockType, startLx: number, startY: number, startLz: number, size: number): number => {
       let cx = startLx, cy = startY, cz = startLz;
+      let placed = 0;
       for (let i = 0; i < size; i++) {
         if (cx >= 0 && cx < CHUNK_SIZE && cy >= 0 && cy < WORLD_HEIGHT && cz >= 0 && cz < CHUNK_SIZE) {
           if (chunk.getLocal(cx, cy, cz) === BlockType.Stone) {
             chunk.setLocal(cx, cy, cz, oreType);
+            placed++;
           }
         }
-        // Random walk to next block in vein
         cx += Math.floor(oreRand() * 3) - 1;
         cy += Math.floor(oreRand() * 3) - 1;
         cz += Math.floor(oreRand() * 3) - 1;
       }
+      return placed;
     };
 
     // CARBÓN: 30 attempts, Y=0 to Y=110, vein 8-16 blocks (VERY COMMON)
