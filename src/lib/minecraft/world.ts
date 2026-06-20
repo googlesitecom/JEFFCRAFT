@@ -162,13 +162,7 @@ export class World {
     }
     if (wy === 0) return BlockType.Bedrock;
     if (wy < h - 3) {
-      // Stone with ores
-      const oreNoise = this.noise3D(wx * 0.1, wy * 0.1, wz * 0.1);
-      if (wy < 8 && oreNoise > 0.85) return BlockType.Diamond;
-      if (wy < 16 && oreNoise > 0.8) return BlockType.Gold;
-      if (oreNoise > 0.78) return BlockType.Iron;
-      if (oreNoise > 0.7) return BlockType.Coal;
-      return BlockType.Stone;
+      return BlockType.Stone; // ores are placed by vein generation in decorateChunk
     }
     if (wy < h) {
       // Sub-surface: dirt or sand near water
@@ -200,12 +194,7 @@ export class World {
           } else if (y < BEDROCK_DEPTH && this.noise3D(wx * 0.5, y * 0.5, wz * 0.5) > 0.2) {
             block = BlockType.Bedrock;
           } else if (y < h - 3) {
-            block = BlockType.Stone;
-            const oreNoise = this.noise3D(wx * 0.1, y * 0.1, wz * 0.1);
-            if (y < 8 && oreNoise > 0.85) block = BlockType.Diamond;
-            else if (y < 16 && oreNoise > 0.8) block = BlockType.Gold;
-            else if (oreNoise > 0.78) block = BlockType.Iron;
-            else if (oreNoise > 0.7) block = BlockType.Coal;
+            block = BlockType.Stone; // ores placed by vein generation later
           } else if (y < h) {
             block = h <= WATER_LEVEL + 1 ? BlockType.Sand : BlockType.Dirt;
           } else {
@@ -249,6 +238,68 @@ export class World {
           }
         }
       }
+    }
+
+    // === ORE VEIN GENERATION (like Minecraft) ===
+    // Deterministic RNG seeded by chunk coords + seed
+    const oreSeed = this.seed ^ (chunk.cx * 73856093) ^ (chunk.cz * 19349663);
+    let oreState = oreSeed >>> 0;
+    const oreRand = () => {
+      oreState = (oreState * 1664525 + 1013904223) >>> 0;
+      return oreState / 4294967296;
+    };
+
+    // Helper: place a vein of ore at (lx, y, lz) with given size
+    const placeVein = (oreType: BlockType, startLx: number, startY: number, startLz: number, size: number) => {
+      let cx = startLx, cy = startY, cz = startLz;
+      for (let i = 0; i < size; i++) {
+        // Check bounds and only replace stone
+        if (cx >= 0 && cx < CHUNK_SIZE && cy >= 0 && cy < WORLD_HEIGHT && cz >= 0 && cz < CHUNK_SIZE) {
+          if (chunk.getLocal(cx, cy, cz) === BlockType.Stone) {
+            chunk.setLocal(cx, cy, cz, oreType);
+          }
+        }
+        // Random walk to next block in vein
+        cx += Math.floor(oreRand() * 3) - 1;
+        cy += Math.floor(oreRand() * 3) - 1;
+        cz += Math.floor(oreRand() * 3) - 1;
+      }
+    };
+
+    // COAL: 20 attempts per chunk, Y=0 to Y=40, vein size 8-16
+    for (let i = 0; i < 20; i++) {
+      const lx = Math.floor(oreRand() * CHUNK_SIZE);
+      const lz = Math.floor(oreRand() * CHUNK_SIZE);
+      const y = Math.floor(oreRand() * 40);
+      const size = 8 + Math.floor(oreRand() * 9); // 8-16
+      placeVein(BlockType.Coal, lx, y, lz, size);
+    }
+
+    // IRON: 10 attempts per chunk, Y=0 to Y=30, vein size 4-8
+    for (let i = 0; i < 10; i++) {
+      const lx = Math.floor(oreRand() * CHUNK_SIZE);
+      const lz = Math.floor(oreRand() * CHUNK_SIZE);
+      const y = Math.floor(oreRand() * 30);
+      const size = 4 + Math.floor(oreRand() * 5); // 4-8
+      placeVein(BlockType.Iron, lx, y, lz, size);
+    }
+
+    // GOLD: 4 attempts per chunk, Y=0 to Y=16, vein size 2-6
+    for (let i = 0; i < 4; i++) {
+      const lx = Math.floor(oreRand() * CHUNK_SIZE);
+      const lz = Math.floor(oreRand() * CHUNK_SIZE);
+      const y = Math.floor(oreRand() * 16);
+      const size = 2 + Math.floor(oreRand() * 5); // 2-6
+      placeVein(BlockType.Gold, lx, y, lz, size);
+    }
+
+    // DIAMOND: 2 attempts per chunk, Y=0 to Y=14, vein size 1-4 (very rare)
+    for (let i = 0; i < 2; i++) {
+      const lx = Math.floor(oreRand() * CHUNK_SIZE);
+      const lz = Math.floor(oreRand() * CHUNK_SIZE);
+      const y = Math.floor(oreRand() * 14);
+      const size = 1 + Math.floor(oreRand() * 4); // 1-4
+      placeVein(BlockType.Diamond, lx, y, lz, size);
     }
 
     // Plant trees: deterministic per (wx, wz)
