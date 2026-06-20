@@ -7,12 +7,16 @@ import { ItemType, ITEMS, isItem } from "@/lib/minecraft/items";
 import { matchRecipe, getAvailableRecipes, RECIPES, Recipe } from "@/lib/minecraft/recipes";
 import { getAllBlockIds } from "@/lib/minecraft/blocks";
 import { getAllItemIds } from "@/lib/minecraft/items";
+import { ArmorSlots, equipArmor, getArmorSlot, serializeArmor, deserializeArmor, emptyArmor } from "@/lib/minecraft/armor";
 
 interface InventoryUIProps {
   inventory: Inventory;
   iconUrls: Record<string, string>;
   isCraftingTable: boolean;
   isCreative?: boolean;
+  // Armor state (for survival mode equip slots). If undefined, armor slots are hidden.
+  armor?: ArmorSlots;
+  onArmorChange?: (armor: ArmorSlots) => void;
   onClose: () => void;
   onInventoryChange: () => void;
 }
@@ -22,6 +26,8 @@ export function InventoryUI({
   iconUrls,
   isCraftingTable,
   isCreative = false,
+  armor,
+  onArmorChange,
   onClose,
   onInventoryChange,
 }: InventoryUIProps) {
@@ -126,6 +132,44 @@ export function InventoryUI({
         }
       }
     }
+  };
+
+  // === Click on an armor slot ===
+  // Left-click: equip held item if it's armor of this slot's type.
+  //   If slot already had armor, swap it back to held.
+  // Right-click: same logic but only places 1 (since armor is maxStack=1, equivalent).
+  // If held is null and slot has armor: pick up the armor.
+  const handleArmorSlotClick = (slotType: "helmet" | "chestplate" | "leggings" | "boots", isRight: boolean) => {
+    if (!armor || !onArmorChange) return;
+    const current = armor[slotType];
+
+    if (heldItem === null) {
+      // Pick up armor from slot
+      if (current !== null) {
+        setHeldItem({ id: current, count: 1 });
+        onArmorChange({ ...armor, [slotType]: null });
+        onInventoryChange();
+        refresh();
+      }
+      return;
+    }
+
+    // Held item must be armor of the right type
+    const heldSlotType = getArmorSlot(heldItem.id);
+    if (heldSlotType !== slotType) return;
+
+    // Place held into slot, swap current back to held (only 1 item, since armor is maxStack 1)
+    if (heldItem.count === 1) {
+      const swappedBack = current;
+      onArmorChange({ ...armor, [slotType]: heldItem.id as ItemType });
+      setHeldItem(swappedBack !== null ? { id: swappedBack, count: 1 } : null);
+    } else {
+      // Multiple held (shouldn't happen for armor but handle it): place 1, keep the rest
+      onArmorChange({ ...armor, [slotType]: heldItem.id as ItemType });
+      setHeldItem({ id: heldItem.id, count: heldItem.count - 1 });
+    }
+    onInventoryChange();
+    refresh();
   };
 
   // === Click on a craft grid slot ===
@@ -411,11 +455,42 @@ export function InventoryUI({
           {/* Character model + armor slots (like Minecraft) */}
           {!isCraftingTable && (
             <div className="flex-shrink-0 flex flex-col items-center gap-2">
-              {/* Armor slots */}
+              {/* Armor slots - functional in survival mode */}
               <div className="flex flex-col gap-1">
-                {["helmet", "chestplate", "leggings", "boots"].map((slot) => (
-                  <div key={slot} className="w-12 h-12 border-2 border-[#555] bg-[#8b8b8b]" style={{ imageRendering: "pixelated" }} />
-                ))}
+                {(["helmet", "chestplate", "leggings", "boots"] as const).map((slot) => {
+                  const equipped = armor?.[slot] ?? null;
+                  const canEquip = armor !== undefined && onArmorChange !== undefined;
+                  return (
+                    <div
+                      key={slot}
+                      onClick={(e) => { e.preventDefault(); if (canEquip) handleArmorSlotClick(slot, false); }}
+                      onContextMenu={(e) => { e.preventDefault(); if (canEquip) handleArmorSlotClick(slot, true); }}
+                      className={`w-12 h-12 border-2 flex items-center justify-center relative ${
+                        canEquip ? "bg-[#8b8b8b] border-[#555] hover:border-yellow-400 cursor-pointer" : "bg-[#8b8b8b] border-[#555]"
+                      }`}
+                      style={{ imageRendering: "pixelated" }}
+                      title={equipped !== null ? ITEMS[equipped as ItemType]?.name ?? "Armor" : (canEquip ? `Equipar ${slot}` : slot)}
+                    >
+                      {equipped !== null && (
+                        <>
+                          <img
+                            src={getIcon(equipped as number)}
+                            alt={ITEMS[equipped as ItemType]?.name ?? "armor"}
+                            className="w-10 h-10"
+                            style={{ imageRendering: "pixelated" }}
+                            draggable={false}
+                          />
+                          {/* Defense indicator */}
+                          {ITEMS[equipped as ItemType]?.defense && (
+                            <span className="absolute -bottom-0.5 -right-0.5 text-[8px] text-cyan-300 font-mono font-bold px-0.5 bg-black/50" style={{ textShadow: "1px 1px 0 #000" }}>
+                              {ITEMS[equipped as ItemType]!.defense}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
               {/* Character model (simple pixel art) */}
               <div className="w-16 h-24 mt-2 relative" style={{ imageRendering: "pixelated" }}>

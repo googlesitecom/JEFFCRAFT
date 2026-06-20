@@ -20,6 +20,7 @@ import { getSound } from "@/lib/minecraft/sound";
 import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
+import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn } from "@/lib/minecraft/armor";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -151,6 +152,10 @@ export default function MinecraftGame() {
   const dragonManagerRef = useRef<DragonManager | null>(null);
   // Force HUD re-render periodically so the dragon mount indicator updates
   const [, setHudTick] = useState(0);
+  // Armor state (mirror of player.armor for UI access)
+  const armorStateRef = useRef<ArmorSlots>(emptyArmor());
+  const pendingArmorLoadRef = useRef<ArmorSlots | null>(null);
+  const [, setArmorVersion] = useState(0);
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -346,6 +351,16 @@ export default function MinecraftGame() {
       } else {
         xpStateRef.current.reset();
       }
+      // Restore armor if available
+      if (pendingArmorLoadRef.current) {
+        player.armor = pendingArmorLoadRef.current;
+        pendingArmorLoadRef.current = null;
+      } else if (saved.armor) {
+        player.armor = deserializeArmor(saved.armor);
+      } else {
+        player.armor = emptyArmor();
+      }
+      armorStateRef.current = player.armor;
       // Force inventory refresh
       setInventoryVersion((v) => v + 1);
     } else if (pendingXpLoadRef.current) {
@@ -353,10 +368,21 @@ export default function MinecraftGame() {
       xpStateRef.current.deserialize(pendingXpLoadRef.current);
       pendingXpLoadRef.current = null;
       // Keep dragonEggAwardedRef state across respawn (already awarded)
+      // Restore armor if pending (from respawn), otherwise keep empty (reset on death)
+      if (pendingArmorLoadRef.current) {
+        player.armor = pendingArmorLoadRef.current;
+        pendingArmorLoadRef.current = null;
+      } else {
+        player.armor = emptyArmor();
+      }
+      armorStateRef.current = player.armor;
     } else {
       // Fresh new world - reset XP
       xpStateRef.current.reset();
       dragonEggAwardedRef.current = false;
+      // Reset armor for new world
+      player.armor = emptyArmor();
+      armorStateRef.current = player.armor;
     }
     prevXpLevelRef.current = xpStateRef.current.level;
     // Enable tracking of player modifications (for save system)
@@ -663,7 +689,7 @@ export default function MinecraftGame() {
           inventoryRef.current.removeSelected(1);
           setInventoryVersion((v) => v + 1);
           sound.levelUp();
-          setDragonNotification("¡Dragón invocado! Pulsa M para montarlo");
+          setDragonNotification("¡Dragón invocado! Pulsa N para montarlo");
           setTimeout(() => setDragonNotification(""), 4000);
           return true;
         }
@@ -930,8 +956,8 @@ export default function MinecraftGame() {
       }
 
       if (e.code === "KeyF") player.toggleFly();
-      if (e.code === "KeyM") {
-        // M: mount/dismount dragon pet (if one exists)
+      if (e.code === "KeyN") {
+        // N: mount/dismount dragon pet (if one exists)
         const dragon = dragonManager.getActiveDragon();
         if (!dragon) {
           setDragonNotification("No tienes dragón. Alcanza nivel 10 de XP para recibir un huevo.");
@@ -1409,22 +1435,25 @@ export default function MinecraftGame() {
     inventoryRef.current.clear();
     pendingLoadRef.current = null;
     pendingXpLoadRef.current = null;
+    pendingArmorLoadRef.current = null;
     // Reset XP state for new world
     xpStateRef.current.reset();
+    // Reset armor for new world
+    armorStateRef.current = emptyArmor();
   }, []);
 
   const handleRespawn = useCallback(() => {
-    // On respawn, keep XP at current level (like Minecraft) - save it before the screen change
-    // so the game effect can restore it when re-creating the world.
+    // On respawn, keep XP and armor at current state (like Minecraft keeps XP level)
+    // Save them before the screen change so the game effect can restore them.
     pendingXpLoadRef.current = xpStateRef.current.serialize();
+    pendingArmorLoadRef.current = armorStateRef.current;
     setScreen("main-menu");
     setTimeout(() => {
       if (worldConfigRef.current) {
         setScreen("playing");
         setIsLoaded(false);
         setIsDead(false);
-        // XP will be restored from pendingXpLoadRef in the game effect
-        // (Minecraft actually drops half your XP on death. We keep it simple and keep all.)
+        // XP and armor will be restored from pending refs in the game effect
       }
     }, 50);
   }, []);
@@ -1437,6 +1466,9 @@ export default function MinecraftGame() {
     inventoryRef.current.clear();
     // Reset XP state when leaving the world without saving
     xpStateRef.current.reset();
+    // Reset armor state
+    armorStateRef.current = emptyArmor();
+    pendingArmorLoadRef.current = null;
   }, []);
 
   const handleSaveWorld = useCallback(() => {
@@ -1455,7 +1487,8 @@ export default function MinecraftGame() {
       },
       inventoryRef.current,
       dayTimeRef.current,
-      xpStateRef.current.serialize()
+      xpStateRef.current.serialize(),
+      serializeArmor(armorStateRef.current)
     );
     setSaveMessage(success ? "✓ Mundo guardado" : "✗ Error al guardar");
     setTimeout(() => setSaveMessage(""), 3000);
@@ -1484,8 +1517,11 @@ export default function MinecraftGame() {
             // We'll apply the saved world in the effect via a ref
             pendingLoadRef.current = saved;
             pendingXpLoadRef.current = saved.xp || null;
+            pendingArmorLoadRef.current = saved.armor ? deserializeArmor(saved.armor) : null;
             // Clear inventory before loading saved one
             inventoryRef.current.clear();
+            // Reset local armor state until the effect restores it
+            armorStateRef.current = emptyArmor();
           }
         }}
       />
@@ -1669,7 +1705,7 @@ export default function MinecraftGame() {
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en horno</span> — Cocer comida</div>}
-              {mode === "survival" && <div><span className="text-yellow-400 font-bold">M</span> — Montar/desmontar dragón 🐉</div>}
+              {mode === "survival" && <div><span className="text-yellow-400 font-bold">N</span> — Montar/desmontar dragón 🐉</div>}
               {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
@@ -1739,7 +1775,7 @@ export default function MinecraftGame() {
         return (
           <div className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-black/50 rounded text-white font-mono text-xs">
             <div className="text-purple-300 font-bold">🐉 Dragón {dragon.isMounted ? "[MONTADO]" : "[Libre]"}</div>
-            <div className="text-white/70">Pulsa M para {dragon.isMounted ? "desmontar" : "montar"}</div>
+            <div className="text-white/70">Pulsa N para {dragon.isMounted ? "desmontar" : "montar"}</div>
           </div>
         );
       })()}
@@ -1751,6 +1787,14 @@ export default function MinecraftGame() {
           iconUrls={iconUrls}
           isCraftingTable={false}
           isCreative={mode === "creative"}
+          armor={mode === "survival" ? armorStateRef.current : undefined}
+          onArmorChange={mode === "survival" ? (newArmor) => {
+            if (playerRef.current) {
+              playerRef.current.armor = newArmor;
+              armorStateRef.current = newArmor;
+              setArmorVersion((v) => v + 1);
+            }
+          } : undefined}
           onClose={() => {
             setShowInventory(false);
           }}
@@ -1765,6 +1809,14 @@ export default function MinecraftGame() {
           iconUrls={iconUrls}
           isCraftingTable={true}
           isCreative={mode === "creative"}
+          armor={mode === "survival" ? armorStateRef.current : undefined}
+          onArmorChange={mode === "survival" ? (newArmor) => {
+            if (playerRef.current) {
+              playerRef.current.armor = newArmor;
+              armorStateRef.current = newArmor;
+              setArmorVersion((v) => v + 1);
+            }
+          } : undefined}
           onClose={() => {
             setShowCraftingTable(false);
           }}

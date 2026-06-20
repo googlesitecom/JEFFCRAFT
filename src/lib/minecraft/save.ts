@@ -25,13 +25,15 @@ export interface SavedWorld {
   dayTime: number;
   // XP state
   xp: { level: number; progress: number };
+  // Armor state [helmet, chestplate, leggings, boots] (-1 = empty)
+  armor: number[];
   // Timestamp
   savedAt: number;
 }
 
 const SAVE_PREFIX = "minicraft_world_";
 
-export function saveWorld(world: World, name: string, seed: number, mode: "creative" | "survival", player: { position: { x: number; y: number; z: number }; yaw: number; pitch: number; health: number; hunger: number }, inventory: Inventory, dayTime: number, xp: { level: number; progress: number }): boolean {
+export function saveWorld(world: World, name: string, seed: number, mode: "creative" | "survival", player: { position: { x: number; y: number; z: number }; yaw: number; pitch: number; health: number; hunger: number }, inventory: Inventory, dayTime: number, xp: { level: number; progress: number }, armor: number[]): boolean {
   try {
     // Collect ONLY player-modified blocks (much smaller than comparing all blocks)
     const modifiedBlocks: { x: number; y: number; z: number; type: number }[] = [];
@@ -57,6 +59,7 @@ export function saveWorld(world: World, name: string, seed: number, mode: "creat
       modifiedBlocks,
       dayTime,
       xp,
+      armor,
       savedAt: Date.now(),
     };
 

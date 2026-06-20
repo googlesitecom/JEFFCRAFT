@@ -77,3 +77,58 @@ Stage Summary:
 - All systems typecheck and the dev server compiles without errors
 - Files modified: mesher.ts, items.ts, atlas.ts, item-textures.ts, MinecraftGame.tsx
 - Files added: dragon.ts, public/Dragon.glb
+
+---
+Task ID: jeffcraft-v2-dragon-key-armor
+Agent: main (Super Z)
+Task: Cambiar tecla del dragón de M a N (M debe quedar libre) + arreglar armadura (no se podía equipar)
+
+Work Log:
+- Cambiada la tecla del dragón de M a N en handleKeyDown (e.code === "KeyN")
+- Actualizados todos los textos: HUD ("Pulsa N para..."), notificación al invocar dragón, ayuda en pausa
+- Verificado: la tecla M ahora NO hace nada (libre para futuras funciones)
+- Causa raíz del bug de armadura: las armaduras existían como items con propiedad `defense` pero NO había slots de equipar, ni el método `damage()` aplicaba reducción. Los slots visuales en InventoryUI eran solo decorativos (divs vacíos sin onClick).
+- Creado nuevo módulo `src/lib/minecraft/armor.ts`:
+  - Tipo `ArmorSlots = { helmet, chestplate, leggings, boots }`
+  - `emptyArmor()`, `getArmorSlot(id)` (devuelve tipo de slot para un item)
+  - `totalDefense(armor)` suma los defense de las piezas equipadas
+  - `applyArmorReduction(rawDamage, armor)` usa la fórmula de Minecraft: reduction = defense / (defense + 25). Con 20 defense → 44% reducción, con 10 → 28%, etc.
+  - `equipArmor(armor, itemId)` equipa y devuelve la pieza previa (swap)
+  - `serializeArmor()` / `deserializeArmor()` para save
+- Actualizado `player.ts`:
+  - Importado ArmorSlots + applyArmorReduction + emptyArmor
+  - Añadido campo `armor: ArmorSlots = emptyArmor()` a la clase Player
+  - Modificado `damage()`: ahora aplica `applyArmorReduction(amount, this.armor)` antes de restar vida
+- Actualizado `InventoryUI.tsx`:
+  - Añadidos props `armor?: ArmorSlots` y `onArmorChange?: (armor) => void`
+  - Añadido handler `handleArmorSlotClick(slotType, isRight)`:
+    - Si tienes un item en el cursor y es armadura del tipo correcto: lo equipa, devuelve la pieza previa al cursor
+    - Si el cursor está vacío y el slot tiene armadura: la recoge al cursor
+    - Rechaza items que no sean del tipo correcto para ese slot
+  - Reemplazados los slots visuales vacíos por slots funcionales que muestran el icono de la pieza equipada, un badge con el valor de defense, y manejan click izquierdo y derecho
+- Actualizado `MinecraftGame.tsx`:
+  - Añadidos refs: `armorStateRef` (mirror de player.armor para UI), `pendingArmorLoadRef` (para save/load)
+  - En el game effect: al cargar mundo guardado restaura `player.armor` desde `saved.armor` (o desde pendingArmorLoadRef en respawn); en mundo nuevo resetea a emptyArmor
+  - Pasa `armor={armorStateRef.current}` y `onArmorChange={...}` al InventoryUI tanto para inventario como para mesa de crafteo. onArmorChange actualiza player.armor + armorStateRef + fuerza re-render.
+  - handleSaveWorld ahora pasa `serializeArmor(armorStateRef.current)` a saveWorld
+  - onLoadWorld configura pendingArmorLoadRef desde saved.armor
+  - startWorld / handleExitToMenu / handleRespawn: resetean o preservan armor correctamente
+- Actualizado `save.ts`:
+  - Añadido campo `armor: number[]` a la interfaz SavedWorld
+  - Añadido parámetro `armor: number[]` a la función saveWorld()
+  - Compatible hacia atrás: si un save antiguo no tiene `armor`, se trata como vacío
+- TypeScript: limpio (sin errores en nuestros archivos)
+- Dev server: compila correctamente, página responde HTTP 200
+
+Stage Summary:
+- Tecla N ahora monta/desmonta al dragón. M está libre.
+- Sistema de armadura completamente funcional:
+  - 4 slots (casco, pechera, grebas, botas) en el inventario
+  - Click en slot con item en cursor: equipa (si es del tipo correcto), swap con el previo
+  - Click en slot con armadura equipada y cursor vacío: la recoge
+  - La armadura reduce el daño con la fórmula real de Minecraft (defense / (defense + 25))
+  - La armadura se persiste al guardar el mundo y se restaura al cargar
+  - Se conserva al reaparecer (no se pierde por morir)
+  - Se resetea al crear mundo nuevo o salir al menú sin guardar
+- Files modified: MinecraftGame.tsx, InventoryUI.tsx, player.ts, save.ts
+- Files added: armor.ts

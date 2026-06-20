@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { World, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
+import { ArmorSlots, applyArmorReduction, emptyArmor } from "./armor";
 
 const PLAYER_HEIGHT = 1.7;
 const PLAYER_WIDTH = 0.6; // half-width = 0.3
@@ -41,6 +42,9 @@ export class Player {
   maxHunger: number = 20;
   air: number = MAX_AIR; // seconds of air remaining
   fallStartY: number = 0;
+
+  // Armor slots (helmet, chestplate, leggings, boots)
+  armor: ArmorSlots = emptyArmor();
 
   // Water state
   inWater: boolean = false;
@@ -82,7 +86,9 @@ export class Player {
 
   damage(amount: number) {
     if (this.mode === "creative") return;
-    this.health = Math.max(0, this.health - amount);
+    // Apply armor reduction (Minecraft formula: defense / (defense + 25))
+    const reduced = applyArmorReduction(amount, this.armor);
+    this.health = Math.max(0, this.health - reduced);
   }
 
   heal(amount: number) {
