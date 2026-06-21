@@ -6,10 +6,11 @@ import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
 
 const DRAGON_MODEL_PATH = "/Dragon.glb";
-// Scale tuned to feel like a rideable Minecraft dragon (about 2.5 blocks long)
-const DRAGON_SCALE = 0.6;
+// Scale tuned to feel like a big rideable Minecraft dragon (about 4 blocks long).
+// The base Dragon.glb model is roughly 6 units long, so 0.7 scale ≈ 4 blocks.
+const DRAGON_SCALE = 0.7;
 // How high the player sits above the dragon's feet when mounted
-const RIDER_EYE_HEIGHT = 2.8;
+const RIDER_EYE_HEIGHT = 3.5;
 
 const DRAGON_FLY_SPEED = 18;       // blocks per second
 const DRAGON_TURN_RATE = 2.2;      // radians per second
@@ -165,8 +166,14 @@ export class DragonPet {
       // Update model
       if (this.model) {
         this.model.position.copy(this.position);
-        // Face direction of yaw (with a slight pitch tilt based on vertical movement for "dive/climb" feel)
-        this.model.rotation.set(0, this.yaw + Math.PI, 0);
+        // Face direction of yaw. In Three.js the forward axis is -Z by convention,
+        // but the Dragon.glb model's "forward" (head) actually points to +Z,
+        // so we add Math.PI to make the head face the direction of motion.
+        // Forward direction used for movement is (-sin(yaw), 0, -cos(yaw)).
+        // For the head to face the same way: rotate yaw + Math.PI.
+        // NOTE: Testing showed the model was flying backwards (head away from camera),
+        // so we use yaw WITHOUT the +Math.PI offset. This makes the head point forward.
+        this.model.rotation.set(0, this.yaw, 0);
         // Bank into turns (roll left/right based on lateral velocity)
         const lateralDir = new THREE.Vector3(this.velocity.x, 0, this.velocity.z);
         const bankAmount = lateralDir.dot(right) / Math.max(1, DRAGON_FLY_SPEED);
@@ -222,7 +229,8 @@ export class DragonPet {
 
       if (this.model) {
         this.model.position.copy(this.position);
-        this.model.rotation.set(0, this.yaw + Math.PI, 0);
+        // Same orientation fix as mounted mode: head faces direction of motion
+        this.model.rotation.set(0, this.yaw, 0);
         this.model.position.y += Math.sin(this.flightTime * 4) * 0.08;
       }
       return null;

@@ -215,3 +215,32 @@ Stage Summary:
 - Armadura se desgasta al recibir daño (1 por golpe por pieza), se rompe al llegar a 0
 - Barras de durabilidad visuales (verde/amarillo/rojo) en inventario, slots de armadura y hotbar
 - Files modified: items.ts, mining.ts (new), inventory.ts, armor.ts, player.ts, mesher.ts, textures.ts, MinecraftGame.tsx, InventoryUI.tsx
+
+---
+Task ID: jeffcraft-v2-entities-hp-dragon
+Agent: main (Super Z)
+Task: Ajustar HP de entidades + aumentar tamaño del dragón + arreglar que no avance de espaldas
+
+Work Log:
+- Verificadas las vidas actuales de las entidades:
+  - Vaca (cow): 10 HP ✓ (ya correcto)
+  - Cerdo (pig): 10 HP ✓ (ya correcto)
+  - Pollo (chicken): 4 HP ✓ (ya correcto)
+  - Araña (spider): 16 HP ✓ (ya correcto)
+  - Zombie: 20 HP ✓ (ya correcto)
+  Las vidas ya estaban exactamente como pediste.
+- Aumentado el tamaño del dragón:
+  - DRAGON_SCALE: 0.6 → 0.7 (~17% más grande, ahora ~4 bloques de largo)
+  - RIDER_EYE_HEIGHT: 2.8 → 3.5 (la cámara sube para compensar el dragón más grande)
+- Arreglado el problema de "avanzar de espaldas":
+  - Antes: this.model.rotation.set(0, this.yaw + Math.PI, 0) — el +Math.PI hacía que la cabeza apuntara en dirección OPUESTA al movimiento (de espaldas)
+  - Ahora: this.model.rotation.set(0, this.yaw, 0) — la cabeza apunta en la dirección correcta
+  - Aplicado tanto en modo montado como en modo "siguiendo al jugador"
+- TypeScript: limpio
+- Dev server: compila correctamente, HTTP 200
+
+Stage Summary:
+- Las vidas de las entidades ya estaban correctas (vaca=10, cerdo=10, araña=16, zombie=20, pollo=4)
+- Dragón ahora es más grande (escala 0.7 en lugar de 0.6)
+- Dragón ya no avanza de espaldas: su cabeza ahora apunta en la dirección de movimiento
+- Files modified: dragon.ts
