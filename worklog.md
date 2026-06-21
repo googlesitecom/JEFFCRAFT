@@ -132,3 +132,26 @@ Stage Summary:
   - Se resetea al crear mundo nuevo o salir al menú sin guardar
 - Files modified: MinecraftGame.tsx, InventoryUI.tsx, player.ts, save.ts
 - Files added: armor.ts
+
+---
+Task ID: jeffcraft-v2-restore-m-key
+Agent: main (Super Z)
+Task: Restaurar la tecla M para que haga lo mismo que el click derecho (comer/interactuar/colocar)
+
+Work Log:
+- Identificado el bug: al cambiar la tecla M de "comer/interactuar/colocar" a "montar dragón" y luego a N, la lógica de comer se perdió completamente. El click derecho solo colocaba bloques y abría mesa/horno, pero NO comía.
+- Extraída toda la lógica del click derecho en una función reutilizable `performRightClickAction()`:
+  1. Si tienes comida seleccionada en el cursor → la come (cura salud + hambre, consume item, sonido eat, animación eat)
+  2. Si apuntas a una mesa de crafteo → abre la mesa
+  3. Si apuntas a un horno → abre el horno
+  4. En caso contrario → coloca el bloque seleccionado
+- El handler `handleMouseDown` para botón 2 (click derecho) ahora llama a `performRightClickAction()`
+- Añadido `if (e.code === "KeyM") performRightClickAction()` en handleKeyDown — la tecla M ahora hace exactamente lo mismo que el click derecho
+- Actualizado el texto de ayuda en el menú de pausa: "Click der / M — Comer / Abrir mesa-horno / Colocar bloque"
+- TypeScript: limpio
+- Dev server: compila correctamente
+
+Stage Summary:
+- La tecla M ahora funciona igual que el click derecho: comer si tienes comida, abrir mesa/horno si apuntas a ellos, colocar bloque en caso contrario
+- El bug de no poder comer está arreglado (se había perdido al mover la M al dragón y luego a N)
+- Files modified: MinecraftGame.tsx

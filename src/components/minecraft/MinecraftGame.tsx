@@ -956,6 +956,10 @@ export default function MinecraftGame() {
       }
 
       if (e.code === "KeyF") player.toggleFly();
+      // M: same as right-click (eat / open crafting table / open furnace / place block)
+      if (e.code === "KeyM") {
+        performRightClickAction();
+      }
       if (e.code === "KeyN") {
         // N: mount/dismount dragon pet (if one exists)
         const dragon = dragonManager.getActiveDragon();
@@ -1005,6 +1009,52 @@ export default function MinecraftGame() {
     };
     window.addEventListener("mousemove", handleMouseMove);
 
+    // === Right-click action (also triggered by M key) ===
+    // Order: eat food (if holding food) → open crafting table / furnace → place block
+    const performRightClickAction = () => {
+      handView.triggerAction("place");
+      // 1. If holding food, eat it
+      const selected = inventoryRef.current.getSelected();
+      if (selected && selected.id >= 100) {
+        const itemDef = ITEMS[selected.id as ItemType];
+        if (itemDef?.food && itemDef.food > 0) {
+          // Eat the food
+          player.heal(itemDef.food);
+          if (player.hunger < player.maxHunger) {
+            player.hunger = Math.min(player.maxHunger, player.hunger + itemDef.food);
+          }
+          inventoryRef.current.removeSelected(1);
+          setInventoryVersion((v) => v + 1);
+          handView.triggerAction("eat");
+          sound.eat();
+          return;
+        }
+      }
+      // 2. Check if we're right-clicking a crafting table or furnace
+      const hit = player.raycast(6);
+      if (hit.hit && hit.block) {
+        const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+        if (block === BlockType.CraftingTable) {
+          document.exitPointerLock();
+          setShowCraftingTable(true);
+          return;
+        }
+        if (block === BlockType.Furnace) {
+          document.exitPointerLock();
+          setShowFurnace(true);
+          return;
+        }
+      }
+      // 3. Otherwise, place block
+      if (placeBlock()) {
+        const placedId = (() => {
+          const sel = inventoryRef.current.getSelected();
+          return sel ? sel.id : HOTBAR_BLOCKS[selectedSlotRef.current];
+        })();
+        sound.blockSound(placedId, "place");
+      }
+    };
+
     const handleMouseDown = (e: MouseEvent) => {
       if (document.pointerLockElement !== renderer.domElement) return;
       if (e.button === 0) {
@@ -1023,26 +1073,7 @@ export default function MinecraftGame() {
         }
       } else if (e.button === 2) {
         rightMouseDown = true;
-        handView.triggerAction("place");
-        // Check if we're right-clicking a crafting table or furnace
-        const hit = player.raycast(6);
-        if (hit.hit && hit.block) {
-          const block = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
-          if (block === BlockType.CraftingTable) {
-            // Open crafting table UI
-            document.exitPointerLock();
-            setShowCraftingTable(true);
-            return;
-          }
-          if (block === BlockType.Furnace) {
-            // Open furnace UI
-            document.exitPointerLock();
-            setShowFurnace(true);
-            return;
-          }
-        }
-        // Also check for attacking animals on right-click? No, left-click attacks
-        placeBlock();
+        performRightClickAction();
       }
     };
     const handleMouseUp = (e: MouseEvent) => {
@@ -1700,7 +1731,7 @@ export default function MinecraftGame() {
               <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
               <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
               <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque / Atacar animal" : "Romper bloque"}</div>
-              <div><span className="text-yellow-400 font-bold">Click der</span> — Colocar bloque / Abrir mesa-horno / Comer</div>
+              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Comer / Abrir mesa-horno / Colocar bloque</div>
               <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
