@@ -244,3 +244,28 @@ Stage Summary:
 - Dragón ahora es más grande (escala 0.7 en lugar de 0.6)
 - Dragón ya no avanza de espaldas: su cabeza ahora apunta en la dirección de movimiento
 - Files modified: dragon.ts
+
+---
+Task ID: jeffcraft-v2-dragon-collisions-size
+Agent: main (Super Z)
+Task: Añadir colisiones al dragón + aumentar tamaño un 15%
+
+Work Log:
+- Aumentado el tamaño del dragón un 15%:
+  - DRAGON_SCALE: 0.7 → 0.805 (0.7 * 1.15)
+  - RIDER_EYE_HEIGHT: 3.5 → 4.0 (cámara ajustada para el nuevo tamaño)
+  - Ahora mide ~4.6 bloques de largo
+- Añadidas colisiones al dragón (antes atravesaba todo):
+  - Definida hitbox: DRAGON_HALF_WIDTH = 1.2 (X/Z), DRAGON_HEIGHT = 2.5 (Y)
+  - Nuevo método checkCollision(): recorre los bloques que ocupa la hitbox y devuelve true si hay alguno sólido
+  - moveAxis() reescrito: ahora guarda la posición anterior, aplica el movimiento, y si detecta colisión revierte la posición en ese eje y pone la velocidad a 0
+  - Modo "siguiendo al jugador" actualizado para usar moveAxis() en lugar de mover position directamente
+  - Aplicado tanto en modo montado como en modo libre
+- TypeScript: limpio
+- Dev server: compila correctamente, HTTP 200
+
+Stage Summary:
+- Dragón ahora es 15% más grande (escala 0.7 → 0.805)
+- Dragón ya NO atraviesa bloques: colisiona con el terreno, árboles, construcciones, etc.
+- Al chocar, se detiene en ese eje (la velocidad se pone a 0) en lugar de pasar al otro lado
+- Files modified: dragon.ts

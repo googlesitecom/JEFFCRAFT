@@ -6,16 +6,23 @@ import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
 
 const DRAGON_MODEL_PATH = "/Dragon.glb";
-// Scale tuned to feel like a big rideable Minecraft dragon (about 4 blocks long).
-// The base Dragon.glb model is roughly 6 units long, so 0.7 scale ≈ 4 blocks.
-const DRAGON_SCALE = 0.7;
+// Scale tuned to feel like a big rideable Minecraft dragon (about 4.6 blocks long).
+// The base Dragon.glb model is roughly 6 units long, so 0.805 scale ≈ 4.6 blocks.
+// 0.805 = 0.7 * 1.15 (15% larger than before, per user request).
+const DRAGON_SCALE = 0.805;
 // How high the player sits above the dragon's feet when mounted
-const RIDER_EYE_HEIGHT = 3.5;
+const RIDER_EYE_HEIGHT = 4.0;
 
 const DRAGON_FLY_SPEED = 18;       // blocks per second
 const DRAGON_TURN_RATE = 2.2;      // radians per second
 const DRAGON_VERTICAL_SPEED = 10;  // blocks per second up/down
 const GRAVITY = 12;                // when not flying actively (used to settle on ground)
+
+// Dragon collision hitbox (in blocks). Used to prevent flying through terrain.
+// The dragon is roughly: width 2.5, height 2.5, length 4.5 (when scaled at 0.805).
+// We use a slightly smaller collision box than the visual for forgiveness.
+const DRAGON_HALF_WIDTH = 1.2;   // X/Z half-extent
+const DRAGON_HEIGHT = 2.5;       // Y extent from feet to top
 
 export class DragonPet {
   world: World;
@@ -220,12 +227,19 @@ export class DragonPet {
         this.velocity.y = Math.sin(this.flightTime * 2) * 0.8;
       }
 
-      this.position.x += this.velocity.x * dt;
-      this.position.y += this.velocity.y * dt;
-      this.position.z += this.velocity.z * dt;
+      // Move with collision detection (same as mounted mode).
+      this.moveAxis("x", this.velocity.x * dt);
+      this.moveAxis("y", this.velocity.y * dt);
+      this.moveAxis("z", this.velocity.z * dt);
 
-      if (this.position.y < 2) this.position.y = 2;
-      if (this.position.y > WORLD_HEIGHT - 5) this.position.y = WORLD_HEIGHT - 5;
+      if (this.position.y < 2) {
+        this.position.y = 2;
+        this.velocity.y = 0;
+      }
+      if (this.position.y > WORLD_HEIGHT - 5) {
+        this.position.y = WORLD_HEIGHT - 5;
+        this.velocity.y = 0;
+      }
 
       if (this.model) {
         this.model.position.copy(this.position);
@@ -239,8 +253,32 @@ export class DragonPet {
 
   private moveAxis(axis: "x" | "y" | "z", amount: number) {
     if (amount === 0) return;
+    // Save the original position so we can revert if a collision is detected.
+    const oldPos = this.position[axis];
     this.position[axis] += amount;
-    // Skip collision for now - dragons fly through everything (simpler, more fun)
+    if (this.checkCollision()) {
+      // Collision: revert to the original position and zero out velocity on this axis.
+      this.position[axis] = oldPos;
+      this.velocity[axis] = 0;
+    }
+  }
+
+  // Check if the dragon's hitbox overlaps any solid block in the world.
+  private checkCollision(): boolean {
+    const minX = Math.floor(this.position.x - DRAGON_HALF_WIDTH);
+    const maxX = Math.floor(this.position.x + DRAGON_HALF_WIDTH);
+    const minY = Math.floor(this.position.y);
+    const maxY = Math.floor(this.position.y + DRAGON_HEIGHT);
+    const minZ = Math.floor(this.position.z - DRAGON_HALF_WIDTH);
+    const maxZ = Math.floor(this.position.z + DRAGON_HALF_WIDTH);
+    for (let x = minX; x <= maxX; x++) {
+      for (let y = minY; y <= maxY; y++) {
+        for (let z = minZ; z <= maxZ; z++) {
+          if (isSolid(this.world.getBlock(x, y, z))) return true;
+        }
+      }
+    }
+    return false;
   }
 
   dispose() {
