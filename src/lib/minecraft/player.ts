@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import { World, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
-import { ArmorSlots, applyArmorReduction, emptyArmor } from "./armor";
+import { ArmorSlots, applyArmorReduction, emptyArmor, damageArmor } from "./armor";
 
 const PLAYER_HEIGHT = 1.7;
 const PLAYER_WIDTH = 0.6; // half-width = 0.3
@@ -89,6 +89,8 @@ export class Player {
     // Apply armor reduction (Minecraft formula: defense / (defense + 25))
     const reduced = applyArmorReduction(amount, this.armor);
     this.health = Math.max(0, this.health - reduced);
+    // Consume armor durability (1 per piece per hit)
+    this.armor = damageArmor(this.armor, amount);
   }
 
   heal(amount: number) {

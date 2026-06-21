@@ -21,34 +21,12 @@ import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
 import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn } from "@/lib/minecraft/armor";
+import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
 
-// Block hardness (mining time in seconds with bare hands)
-const BLOCK_HARDNESS: Partial<Record<BlockType, number>> = {
-  [BlockType.Grass]: 0.6,
-  [BlockType.Dirt]: 0.5,
-  [BlockType.Sand]: 0.5,
-  [BlockType.Gravel]: 0.6,
-  [BlockType.Snow]: 0.3,
-  [BlockType.Planks]: 1.0,
-  [BlockType.Wood]: 1.5,
-  [BlockType.Leaves]: 0.3,
-  [BlockType.Glass]: 0.3,
-  [BlockType.Brick]: 2.0,
-  [BlockType.Stone]: 1.5,
-  [BlockType.Cobblestone]: 2.0,
-  [BlockType.CoalOre]: 3.0,
-  [BlockType.IronOre]: 3.0,
-  [BlockType.GoldOre]: 3.0,
-  [BlockType.DiamondOre]: 3.0,
-  [BlockType.Bedrock]: Infinity,
-  [BlockType.CraftingTable]: 1.0,
-  [BlockType.Bookshelf]: 1.0,
-  [BlockType.Pumpkin]: 1.0,
-};
-
+// Block hardness is now defined in mining.ts (BLOCK_HARDNESS).
 // What each block drops when broken
 const BLOCK_DROPS: Partial<Record<BlockType, { id: number; count: number }>> = {
   [BlockType.Grass]: { id: BlockType.Dirt, count: 1 },
@@ -797,35 +775,26 @@ export default function MinecraftGame() {
         return;
       }
 
-      const hardness = BLOCK_HARDNESS[blockType] ?? 1.0;
-      if (hardness === Infinity) return;
+      const hardness = MINING_BLOCK_HARDNESS[blockType] ?? 10;
+      if (hardness === Infinity) {
+        // Bedrock - unbreakable
+        miningProgress = 0;
+        return;
+      }
 
-      // Get mining speed from selected tool
-      let speed = 1.0;
+      // Use the new mining system from mining.ts
       const selected = inventoryRef.current.getSelected();
-      if (selected && selected.id >= 100) {
-        const itemDef = ITEMS[selected.id as ItemType];
-        if (itemDef?.miningSpeed) {
-          const isStoneLike = [BlockType.Stone, BlockType.Cobblestone, BlockType.CoalOre, BlockType.IronOre, BlockType.GoldOre, BlockType.DiamondOre, BlockType.Brick].includes(blockType);
-          if (isStoneLike && itemDef.toolType === "pickaxe") {
-            speed = itemDef.miningSpeed;
-          } else if (!isStoneLike && (itemDef.toolType === "axe" || itemDef.toolType === "shovel")) {
-            speed = itemDef.miningSpeed;
-          }
-        }
+      const heldItemId = selected ? selected.id : null;
+      const mining = computeMining(blockType, heldItemId);
+
+      // If DPS is 0 (e.g., bedrock via mining module), can't break
+      if (mining.dps <= 0) {
+        miningProgress = 0;
+        return;
       }
 
-      // Stone and ores require a pickaxe
-      const requiresPickaxe = [BlockType.Stone, BlockType.Cobblestone, BlockType.CoalOre, BlockType.IronOre, BlockType.GoldOre, BlockType.DiamondOre, BlockType.Brick].includes(blockType);
-      if (requiresPickaxe) {
-        const hasPickaxe = selected && selected.id >= 100 && ITEMS[selected.id as ItemType]?.toolType === "pickaxe";
-        if (!hasPickaxe) {
-          miningProgress = 0;
-          return;
-        }
-      }
-
-      const miningTime = hardness / speed;
+      // Mining time = hardness / DPS
+      const miningTime = hardness / mining.dps;
       miningProgress += dt / miningTime;
 
       if (miningProgress >= 1.0) {
@@ -837,16 +806,18 @@ export default function MinecraftGame() {
         if (z % CHUNK_SIZE === 0) rebuildChunkAt(x, z - 1);
         if (z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x, z + 1);
 
-        // Drop item on the ground
-        const drop = BLOCK_DROPS[blockType];
-        if (drop) {
-          dropManager.spawnDrop(drop.id, drop.count, x + 0.5, y + 0.5, z + 0.5);
-        }
-        // Drop XP for certain ores
-        const xpDrop = BLOCK_XP_DROPS[blockType];
-        if (xpDrop) {
-          const xp = randXp(xpDrop);
-          if (xp > 0) dropManager.spawnXpOrb(xp, x + 0.5, y + 0.5, z + 0.5);
+        // Drop item on the ground ONLY if tier is sufficient (per user spec)
+        if (mining.dropItem) {
+          const drop = BLOCK_DROPS[blockType];
+          if (drop) {
+            dropManager.spawnDrop(drop.id, drop.count, x + 0.5, y + 0.5, z + 0.5);
+          }
+          // Drop XP for certain ores (only if drop is allowed)
+          const xpDrop = BLOCK_XP_DROPS[blockType];
+          if (xpDrop) {
+            const xp = randXp(xpDrop);
+            if (xp > 0) dropManager.spawnXpOrb(xp, x + 0.5, y + 0.5, z + 0.5);
+          }
         }
         // Sound
         sound.blockSound(blockType, "break");
@@ -855,6 +826,18 @@ export default function MinecraftGame() {
           const key = `${x},${y},${z}`;
           const tl = torchLights.get(key);
           if (tl) { scene.remove(tl); torchLights.delete(key); }
+        }
+
+        // Consume tool durability (1 use per block broken, only if a tool was used)
+        if (heldItemId !== null && heldItemId >= 100) {
+          const itemDef = ITEMS[heldItemId as ItemType];
+          if (itemDef?.maxDurability) {
+            const destroyed = inventoryRef.current.damageSelected(1);
+            if (destroyed) {
+              sound.blockSound(BlockType.Stone, "break");
+              setInventoryVersion((v) => v + 1);
+            }
+          }
         }
 
         miningProgress = 0;
@@ -1255,17 +1238,15 @@ export default function MinecraftGame() {
         const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
         const monster = monsterManager.findClosest(eyeX, eyeY, eyeZ, 4);
         if (animal || monster) {
-          // Attack - damage based on selected item (balanced for 3-4 hits to kill)
+          // Attack - damage based on selected item's attackDamage (per spec: wood=4, stone=5, iron=6, diamond=7 for swords)
           let damage = 1; // bare hands
+          let usedTool = false;
           const selected = inventoryRef.current.getSelected();
           if (selected && selected.id >= 100) {
             const itemDef = ITEMS[selected.id as ItemType];
-            if (itemDef?.toolType === "sword") {
-              // Wood=6 (4 hits), Stone=7 (3 hits), Iron=8 (3 hits), Gold=6 (4 hits), Diamond=10 (2 hits)
-              const tierDmg: Record<string, number> = { wood: 6, stone: 7, iron: 8, gold: 6, diamond: 10 };
-              damage = (itemDef.toolTier && tierDmg[itemDef.toolTier]) || 6;
-            } else if (itemDef?.toolType === "axe") {
-              damage = 4;
+            if (itemDef?.attackDamage) {
+              damage = itemDef.attackDamage;
+              usedTool = true;
             }
           }
           sound.hit();
@@ -1293,6 +1274,14 @@ export default function MinecraftGame() {
               const xp = randXp(ANIMAL_XP);
               if (xp > 0) dropManager.spawnXpOrb(xp, animal.position.x, animal.position.y + 0.5, animal.position.z);
               animalManager.removeAnimal(animal);
+            }
+          }
+          // Consume tool durability (1 use per attack, only if a tool was used)
+          if (usedTool) {
+            const destroyed = inventoryRef.current.damageSelected(1);
+            if (destroyed) {
+              sound.blockSound(BlockType.Stone, "break");
+              setInventoryVersion((v) => v + 1);
             }
           }
           // Reset mining when attacking
@@ -1659,6 +1648,7 @@ export default function MinecraftGame() {
           let iconUrl = "";
           let count = 0;
           let name = "";
+          let durFraction: number | null = null;
 
           if (mode === "survival") {
             // Show inventory items
@@ -1679,6 +1669,11 @@ export default function MinecraftGame() {
                 if (def) {
                   name = def.name;
                   iconUrl = iconUrls[def.icon] ?? "";
+                  // Compute durability fraction
+                  if (def.maxDurability) {
+                    const cur = stack.durability !== undefined ? stack.durability : def.maxDurability;
+                    durFraction = Math.max(0, Math.min(1, cur / def.maxDurability));
+                  }
                 }
               }
             }
@@ -1709,6 +1704,18 @@ export default function MinecraftGame() {
                 <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
                   {count}
                 </span>
+              )}
+              {/* Durability bar for tools/armor */}
+              {durFraction !== null && (
+                <div className="absolute bottom-0 left-1 right-1 h-[3px] bg-black/80 pointer-events-none">
+                  <div
+                    className="h-full"
+                    style={{
+                      width: `${durFraction * 100}%`,
+                      backgroundColor: durFraction > 0.5 ? "#4ade80" : durFraction > 0.2 ? "#facc15" : "#ef4444",
+                    }}
+                  />
+                </div>
               )}
             </div>
           );

@@ -155,3 +155,63 @@ Stage Summary:
 - La tecla M ahora funciona igual que el click derecho: comer si tienes comida, abrir mesa/horno si apuntas a ellos, colocar bloque en caso contrario
 - El bug de no poder comer está arreglado (se había perdido al mover la M al dragón y luego a N)
 - Files modified: MinecraftGame.tsx
+
+---
+Task ID: jeffcraft-v2-mining-system
+Agent: main (Super Z)
+Task: Implementar sistema de minado por tiers + durabilidad de herramientas/armadura + arreglar antorchas flotantes (versión final)
+
+Work Log:
+- Antorchas: rediseñada la textura para que use toda la altura (palo Y=5..15, llama Y=0..4) sin márgenes transparentes inferiores. Mesh ahora cy = y + 0.02 (base en el suelo), h = 0.55. Ya no flotan.
+- Sistema de minado implementado EXACTAMENTE según la spec del usuario:
+  - Tier 0 (madera/oro/mano): DPS=10, durabilidad=60 (oro 32)
+  - Tier 1 (piedra): DPS=20, durabilidad=130
+  - Tier 2 (hierro): DPS=40, durabilidad=250
+  - Tier 3 (diamante): DPS=80, durabilidad=1500
+  - Si tier < requerido: DPS baja a 1 y el bloque NO suelta item (aún se rompe, lentamente)
+  - Fórmula: Tiempo = Dureza / DPS
+- Creado src/lib/minecraft/mining.ts con:
+  - BLOCK_HARDNESS: dirt/sand=5, wood/planks=15, stone/cobble/coal=20, iron=40, gold=80, diamond=160, bedrock=Infinity
+  - BLOCK_REQUIRED_TIER: stone/coal/brick/furnace=0, iron=1, gold/diamond=2
+  - BLOCK_PREFERRED_TOOL: pickaxe (stone/ores), axe (wood), shovel (dirt/sand/snow)
+  - computeMining(block, heldItem) → { dps, tierSufficient, dropItem }
+  - HAND_DPS = 10, INSUFFICIENT_TIER_DPS = 1
+- Reescrito items.ts:
+  - Eliminados campos viejos (miningSpeed, canMineHard)
+  - Añadidos: TOOL_MINING_LEVELS, TOOL_DPS, TOOL_DURABILITY, ARMOR_DURABILITY, SWORD_DAMAGE, AXE_DAMAGE, INSUFFICIENT_TIER_DPS
+  - Cada herramienta ahora tiene: miningLevel (0-3), dps, maxDurability, attackDamage
+  - Armaduras: defense + maxDurability (leather=80, iron=240, diamond=528 multiplicado por slot ratio)
+- Reescrito inventory.ts:
+  - ItemStack ahora tiene `durability?: number` opcional
+  - addItem() inicializa durabilidad al máximo para herramientas/armaduras (cada una en su propio slot)
+  - damageItem(slot, amount) reduce durabilidad, destruye el item si llega a 0
+  - damageSelected(amount) = atajo para el hotbar
+  - serialize/deserialize ahora guardan/restauran durabilidad (compatible hacia atrás)
+- Reescrito armor.ts:
+  - ArmorSlot ahora es { itemId, durability } en lugar de ItemType | null
+  - equipArmor inicializa la pieza a durabilidad máxima
+  - damageArmor(armor, rawDamage) reduce 1 de durabilidad a cada pieza equipada por golpe, destruye si llega a 0
+  - serialize/deserialize guardan/restauran durabilidad (8 valores: 4 ids + 4 duraciones)
+- player.ts: damage() ahora llama applyArmorReduction + damageArmor, así la armadura absorbe daño y se desgasta
+- mineBlockContinuous reescrito: usa computeMining(), solo suelta items si mining.dropItem=true, consume 1 de durabilidad del tool por bloque roto
+- Combate: usa itemDef.attackDamage (espadas: wood=4, stone=5, iron=6, diamond=7; hachas: wood=3..diamond=6). Consume 1 durabilidad por ataque.
+- InventoryUI actualizado:
+  - handleArmorSlotClick usa el nuevo ArmorSlot tipo y preserva durabilidad al equipar/desequipar
+  - renderSlot muestra barra de durabilidad (verde/amarillo/rojo) bajo cada herramienta/armadura
+  - Slots de armadura muestran icono + badge de defense + barra de durabilidad
+- Hotbar del juego también muestra barra de durabilidad para el item seleccionado
+- TypeScript: limpio (sin errores en archivos del proyecto)
+- Dev server: compila correctamente, HTTP 200
+
+Stage Summary:
+- Antorchas ya no flotan (textura rediseñada sin margen transparente inferior + mesh base en y+0.02)
+- Sistema de minado por tiers funcional según spec:
+  - Madera solo pica piedra/carbón; pica hierro/diamante lentamente sin dropear
+  - Piedra pica + hierro; diamante lento sin drop
+  - Hierro pica todo incluyendo diamante (4s)
+  - Diamante pica todo a máxima velocidad
+- Tiempo = Dureza / DPS confirmado: carbón(20) con madera(10 DPS)=2s, carbón con diamante(80 DPS)=0.25s, diamante(160) con hierro(40 DPS)=4s
+- Herramientas se rompen tras uso: madera 60 usos, piedra 130, hierro 250, diamante 1500, oro 32
+- Armadura se desgasta al recibir daño (1 por golpe por pieza), se rompe al llegar a 0
+- Barras de durabilidad visuales (verde/amarillo/rojo) en inventario, slots de armadura y hotbar
+- Files modified: items.ts, mining.ts (new), inventory.ts, armor.ts, player.ts, mesher.ts, textures.ts, MinecraftGame.tsx, InventoryUI.tsx

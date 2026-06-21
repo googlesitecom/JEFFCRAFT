@@ -141,13 +141,17 @@ export function InventoryUI({
   // If held is null and slot has armor: pick up the armor.
   const handleArmorSlotClick = (slotType: "helmet" | "chestplate" | "leggings" | "boots", isRight: boolean) => {
     if (!armor || !onArmorChange) return;
-    const current = armor[slotType];
+    const currentSlot = armor[slotType];
+    const currentItemId = currentSlot.itemId;
 
     if (heldItem === null) {
       // Pick up armor from slot
-      if (current !== null) {
-        setHeldItem({ id: current, count: 1 });
-        onArmorChange({ ...armor, [slotType]: null });
+      if (currentItemId !== null) {
+        // Carry over durability if the piece was used
+        const heldStack: ItemStack = { id: currentItemId, count: 1 };
+        if (currentSlot.durability >= 0) heldStack.durability = currentSlot.durability;
+        setHeldItem(heldStack);
+        onArmorChange({ ...armor, [slotType]: { itemId: null, durability: -1 } });
         onInventoryChange();
         refresh();
       }
@@ -158,15 +162,19 @@ export function InventoryUI({
     const heldSlotType = getArmorSlot(heldItem.id);
     if (heldSlotType !== slotType) return;
 
-    // Place held into slot, swap current back to held (only 1 item, since armor is maxStack 1)
-    if (heldItem.count === 1) {
-      const swappedBack = current;
-      onArmorChange({ ...armor, [slotType]: heldItem.id as ItemType });
-      setHeldItem(swappedBack !== null ? { id: swappedBack, count: 1 } : null);
+    // Place held into slot, swap current back to held.
+    // The newly equipped piece starts at full durability (or uses held durability if it had any).
+    const newDurability = heldItem.durability !== undefined
+      ? heldItem.durability
+      : (ITEMS[heldItem.id as ItemType]?.maxDurability ?? 1);
+    onArmorChange({ ...armor, [slotType]: { itemId: heldItem.id as ItemType, durability: newDurability } });
+    if (currentItemId !== null) {
+      // Swap current back to held (with its durability)
+      const swappedStack: ItemStack = { id: currentItemId, count: 1 };
+      if (currentSlot.durability >= 0) swappedStack.durability = currentSlot.durability;
+      setHeldItem(swappedStack);
     } else {
-      // Multiple held (shouldn't happen for armor but handle it): place 1, keep the rest
-      onArmorChange({ ...armor, [slotType]: heldItem.id as ItemType });
-      setHeldItem({ id: heldItem.id, count: heldItem.count - 1 });
+      setHeldItem(null);
     }
     onInventoryChange();
     refresh();
@@ -389,6 +397,15 @@ export function InventoryUI({
     highlight?: boolean,
     disabled?: boolean
   ) => {
+    // Compute durability bar for tools/armor
+    let durFraction: number | null = null;
+    if (stack && stack.id >= 100) {
+      const def = ITEMS[stack.id as ItemType];
+      if (def?.maxDurability) {
+        const cur = stack.durability !== undefined ? stack.durability : def.maxDurability;
+        durFraction = Math.max(0, Math.min(1, cur / def.maxDurability));
+      }
+    }
     return (
       <div
         key={key}
@@ -412,6 +429,18 @@ export function InventoryUI({
               <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
                 {stack.count}
               </span>
+            )}
+            {/* Durability bar for tools/armor */}
+            {durFraction !== null && (
+              <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/80">
+                <div
+                  className="h-full"
+                  style={{
+                    width: `${durFraction * 100}%`,
+                    backgroundColor: durFraction > 0.5 ? "#4ade80" : durFraction > 0.2 ? "#facc15" : "#ef4444",
+                  }}
+                />
+              </div>
             )}
           </>
         )}
@@ -458,8 +487,17 @@ export function InventoryUI({
               {/* Armor slots - functional in survival mode */}
               <div className="flex flex-col gap-1">
                 {(["helmet", "chestplate", "leggings", "boots"] as const).map((slot) => {
-                  const equipped = armor?.[slot] ?? null;
+                  const slotData = armor?.[slot] ?? null;
+                  const equippedId = slotData?.itemId ?? null;
+                  const equippedDurability = slotData?.durability ?? -1;
                   const canEquip = armor !== undefined && onArmorChange !== undefined;
+                  // Compute durability fraction for the bar
+                  let durFraction = 1;
+                  if (equippedId !== null) {
+                    const maxDur = ITEMS[equippedId as ItemType]?.maxDurability ?? 1;
+                    const curDur = equippedDurability >= 0 ? equippedDurability : maxDur;
+                    durFraction = Math.max(0, Math.min(1, curDur / maxDur));
+                  }
                   return (
                     <div
                       key={slot}
@@ -469,23 +507,33 @@ export function InventoryUI({
                         canEquip ? "bg-[#8b8b8b] border-[#555] hover:border-yellow-400 cursor-pointer" : "bg-[#8b8b8b] border-[#555]"
                       }`}
                       style={{ imageRendering: "pixelated" }}
-                      title={equipped !== null ? ITEMS[equipped as ItemType]?.name ?? "Armor" : (canEquip ? `Equipar ${slot}` : slot)}
+                      title={equippedId !== null ? ITEMS[equippedId as ItemType]?.name ?? "Armor" : (canEquip ? `Equipar ${slot}` : slot)}
                     >
-                      {equipped !== null && (
+                      {equippedId !== null && (
                         <>
                           <img
-                            src={getIcon(equipped as number)}
-                            alt={ITEMS[equipped as ItemType]?.name ?? "armor"}
+                            src={getIcon(equippedId as number)}
+                            alt={ITEMS[equippedId as ItemType]?.name ?? "armor"}
                             className="w-10 h-10"
                             style={{ imageRendering: "pixelated" }}
                             draggable={false}
                           />
                           {/* Defense indicator */}
-                          {ITEMS[equipped as ItemType]?.defense && (
+                          {ITEMS[equippedId as ItemType]?.defense && (
                             <span className="absolute -bottom-0.5 -right-0.5 text-[8px] text-cyan-300 font-mono font-bold px-0.5 bg-black/50" style={{ textShadow: "1px 1px 0 #000" }}>
-                              {ITEMS[equipped as ItemType]!.defense}
+                              {ITEMS[equippedId as ItemType]!.defense}
                             </span>
                           )}
+                          {/* Durability bar */}
+                          <div className="absolute bottom-0 left-0 right-0 h-[3px] bg-black/80">
+                            <div
+                              className="h-full"
+                              style={{
+                                width: `${durFraction * 100}%`,
+                                backgroundColor: durFraction > 0.5 ? "#4ade80" : durFraction > 0.2 ? "#facc15" : "#ef4444",
+                              }}
+                            />
+                          </div>
                         </>
                       )}
                     </div>
