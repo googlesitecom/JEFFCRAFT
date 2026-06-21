@@ -572,23 +572,27 @@ function texFurnaceFront(): ImageData {
 function texTorch(): ImageData {
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
   clearTransparent(img);
+  // Texture uses full 16 rows: stick on bottom 11 rows (Y=5..15), flame on top 5 rows (Y=0..4).
+  // No transparent margin at the bottom so the torch visually sits flush on the ground.
   // Stick (brown)
   const stick = hexToRgb("#6e4d28");
   const stickLight = hexToRgb("#8a6536");
-  fillRect(img, 7, 7, 2, 7, stick);
-  setPixel(img, 7, 7, stickLight);
+  const stickDark = hexToRgb("#4a3318");
+  fillRect(img, 7, 5, 2, 11, stick);
+  setPixel(img, 7, 6, stickLight);
   setPixel(img, 8, 8, stickLight);
-  // Flame (orange/yellow)
+  setPixel(img, 7, 12, stickDark);
+  // Flame (orange/yellow) — at the very top of the texture
   const flameOrange = hexToRgb("#ff6600");
   const flameYellow = hexToRgb("#ffaa00");
   const flameLight = hexToRgb("#ffdd44");
-  fillRect(img, 6, 4, 4, 3, flameOrange);
-  fillRect(img, 7, 3, 2, 2, flameYellow);
-  setPixel(img, 7, 2, flameLight);
-  setPixel(img, 8, 2, flameLight);
-  // Glow
-  setPixel(img, 5, 5, flameOrange);
-  setPixel(img, 10, 5, flameOrange);
+  fillRect(img, 6, 1, 4, 4, flameOrange);
+  fillRect(img, 7, 0, 2, 2, flameYellow);
+  setPixel(img, 7, 0, flameLight);
+  setPixel(img, 8, 0, flameLight);
+  // Glow on sides of flame
+  setPixel(img, 5, 2, flameOrange);
+  setPixel(img, 11, 2, flameOrange);
   return img;
 }
 

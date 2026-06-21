@@ -68,6 +68,46 @@ export type ToolType = "pickaxe" | "axe" | "sword" | "shovel";
 export type ArmorType = "helmet" | "chestplate" | "leggings" | "boots";
 export type ArmorTier = "leather" | "iron" | "diamond";
 
+// Mining level: determines what blocks a tool can break.
+//   0 = bare hands / gold tools (only dirt/grass/sand/wood/leaves)
+//   1 = wood tools (also stone, cobblestone, coal ore)
+//   2 = stone tools (also iron ore)
+//   3 = iron tools (also gold ore, diamond ore, everything except bedrock)
+//   4 = diamond tools (same as iron but tier 4 for future obsidian etc.)
+// Gold tools mine fast but are level 0 (cannot mine stone/ores).
+export const TOOL_MINING_LEVELS: Record<ToolTier, number> = {
+  wood: 1,
+  stone: 2,
+  iron: 3,
+  diamond: 4,
+  gold: 0,
+};
+
+// Durability per tier (Minecraft values)
+export const TOOL_DURABILITY: Record<ToolTier, number> = {
+  wood: 59,
+  stone: 131,
+  iron: 250,
+  diamond: 1561,
+  gold: 32,
+};
+
+// Armor durability per tier
+export const ARMOR_DURABILITY: Record<ArmorTier, number> = {
+  leather: 80,
+  iron: 240,
+  diamond: 528,
+};
+
+// Damage multiplier per tier for swords (Minecraft values, simplified)
+export const SWORD_DAMAGE: Record<ToolTier, number> = {
+  wood: 4,
+  stone: 5,
+  iron: 6,
+  diamond: 7,
+  gold: 4,
+};
+
 export interface ItemDef {
   id: ItemType;
   name: string;
@@ -77,7 +117,8 @@ export interface ItemDef {
   toolType?: ToolType;
   toolTier?: ToolTier;
   miningSpeed?: number;
-  canMineHard?: boolean;
+  miningLevel?: number; // derived from toolTier, but stored here for direct access
+  maxDurability?: number; // tools + armor
   armorType?: ArmorType;
   armorTier?: ArmorTier;
   defense?: number;
