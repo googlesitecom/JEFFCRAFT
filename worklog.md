@@ -269,3 +269,36 @@ Stage Summary:
 - Dragón ya NO atraviesa bloques: colisiona con el terreno, árboles, construcciones, etc.
 - Al chocar, se detiene en ese eje (la velocidad se pone a 0) en lugar de pasar al otro lado
 - Files modified: dragon.ts
+
+---
+Task ID: jeffcraft-v2-github-push
+Agent: main (Super Z)
+Task: Subir todos los cambios a GitHub (repositorio googlesitecom/JEFFCRAFT)
+
+Work Log:
+- Verificado estado local: 11 commits sin empujar, working tree limpio
+- Intento de push inicial: rechazado porque el remoto tenía 1 commit que no teníamos localmente (commit fe8be88 "Add files via upload" que añadió Dragon.glb a la raíz del repo)
+- Hecho fetch del remoto para inspeccionar el commit divergente
+- Confirmado: el commit remoto solo añadía Dragon.glb (339KB) en la raíz — no tocaba ningún archivo de código
+- Estrategia elegida: merge (no rebase) para preservar el historial y evitar riesgo de conflictos
+- Ejecutado: git merge FETCH_HEAD --no-edit -m "Merge remote: Dragon.glb upload"
+- Resultado: merge limpio vía estrategia "ort", Dragon.glb añadido a la raíz (sin conflicto, ya que nosotros lo tenemos en /public/)
+- Push ejecutado con token: 12 commits subidos a origin/main
+- Token limpiado: removido ~/.git-credentials y unset credential.helper para que no quede persistente
+- Verificación final: origin/main ahora apunta a 1c4eb2c (HEAD local)
+
+Stage Summary:
+- 12 commits empujados a https://github.com/googlesitecom/JEFFCRAFT (rama main)
+- HEAD remoto: 1c4eb2c "Merge remote: Dragon.glb upload"
+- Todos los cambios de las últimas sesiones están ahora en GitHub:
+  * Sistema de minería por tiers con DPS y dureza (mining.ts)
+  * Sistema de XP con orbes y barra (xp.ts)
+  * Dragón mascota montable con colisiones (dragon.ts + Dragon.glb)
+  * Sistema de armadura con durabilidad (armor.ts)
+  * Inventario con durabilidad para herramientas
+  * Huevo de dragón al llegar a nivel 10 de XP
+  * Antorchas arregladas (ya no flotan)
+  * Tecla M = comer/interactuar/colocar; tecla N = montar dragón
+  * Vidas de entidades correctas (vaca=10, cerdo=10, araña=16, zombie=20)
+  * Dragón más grande (escala 0.805) y sin avanzar de espaldas
+- Token limpiado del sistema tras el push
