@@ -943,6 +943,23 @@ export default function MinecraftGame() {
       if (e.code === "KeyM") {
         performRightClickAction();
       }
+      // B: toggle dragon stay/follow mode (only when not mounted)
+      if (e.code === "KeyB") {
+        const dragon = dragonManager.getActiveDragon();
+        if (!dragon) {
+          setDragonNotification("No tienes dragón. Alcanza nivel 10 de XP para recibir un huevo.");
+          setTimeout(() => setDragonNotification(""), 3500);
+        } else if (dragon.isMounted) {
+          setDragonNotification("No puedes usar B mientras estás montado");
+          setTimeout(() => setDragonNotification(""), 2000);
+        } else {
+          dragon.isStaying = !dragon.isStaying;
+          setDragonNotification(dragon.isStaying
+            ? "🐉 Dragón esperando aquí"
+            : "🐉 Dragón te sigue");
+          setTimeout(() => setDragonNotification(""), 1800);
+        }
+      }
       if (e.code === "KeyN") {
         // N: mount/dismount dragon pet (if one exists)
         const dragon = dragonManager.getActiveDragon();
@@ -1744,6 +1761,7 @@ export default function MinecraftGame() {
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en horno</span> — Cocer comida</div>}
               {mode === "survival" && <div><span className="text-yellow-400 font-bold">N</span> — Montar/desmontar dragón 🐉</div>}
+              {mode === "survival" && <div><span className="text-yellow-400 font-bold">B</span> — Dragón espera/te sigue</div>}
               {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
               <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
             </div>
@@ -1810,10 +1828,16 @@ export default function MinecraftGame() {
       {(() => {
         const dragon = dragonManagerRef.current?.getActiveDragon?.();
         if (!dragon) return null;
+        const status = dragon.isMounted ? "[MONTADO]" : dragon.isStaying ? "[ESPERANDO]" : "[Libre]";
+        const hint = dragon.isMounted
+          ? "Pulsa N para desmontar"
+          : dragon.isStaying
+            ? "Pulsa N para montar · B para que te siga"
+            : "Pulsa N para montar · B para que espere";
         return (
           <div className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-black/50 rounded text-white font-mono text-xs">
-            <div className="text-purple-300 font-bold">🐉 Dragón {dragon.isMounted ? "[MONTADO]" : "[Libre]"}</div>
-            <div className="text-white/70">Pulsa N para {dragon.isMounted ? "desmontar" : "montar"}</div>
+            <div className="text-purple-300 font-bold">🐉 Dragón {status}</div>
+            <div className="text-white/70">{hint}</div>
           </div>
         );
       })()}

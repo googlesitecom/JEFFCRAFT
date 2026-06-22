@@ -302,3 +302,69 @@ Stage Summary:
   * Vidas de entidades correctas (vaca=10, cerdo=10, araña=16, zombie=20)
   * Dragón más grande (escala 0.805) y sin avanzar de espaldas
 - Token limpiado del sistema tras el push
+
+---
+Task ID: jeffcraft-v2-dragon-b-hand-tools-ai
+Agent: main (Super Z)
+Task: Tecla B para dragón (stay/follow), mejorar mano y herramientas, arreglar IA de animales y monstruos
+
+Work Log:
+- Tecla B implementada para el dragón:
+  - Añadido campo `isStaying: boolean` a DragonPet
+  - En modo "no montado": si isStaying=true, el dragón flota en su sitio (con bob suave) y mira al jugador
+  - Si isStaying=false, el dragón sigue al jugador como antes
+  - Toggle con tecla B (solo cuando no está montado)
+  - Notificación: "🐉 Dragón esperando aquí" / "🐉 Dragón te sigue"
+  - Indicador HUD actualizado: muestra [ESPERANDO] en morado cuando aplica
+  - Texto de ayuda: "B — Dragón espera/te sigue"
+- Mano rediseñada (hand.ts):
+  - Brazo con manga estilo Steve (color teal 0x4a8a8a) + sombra inferior
+  - Cuff (puño de manga) más definido
+  - Muñeca visible (skin shade)
+  - Palma con highlight superior
+  - 4 nudillos como bumps individuales en el dorso
+  - 4 dedos con longitudes diferentes (medio más largo, meñique más corto) + puntas más oscuras
+  - Pulgar más grande y mejor posicionado, con ángulo y punta
+  - Mejor iluminación: ambient + directional + fill light
+  - Posición y rotación ajustadas para que se vea natural
+- Herramientas en 3D (hand.ts):
+  - buildToolModel() crea un modelo 3D por tipo de herramienta:
+    * Pickaxe: mango vertical + cabeza horizontal con picos en los extremos
+    * Axe: mango + cabeza con filo (más claro) en el lado derecho
+    * Sword: mango + guarda + hoja vertical + punta
+    * Shovel: mango + cabeza cuadrada con borde de filo
+  - Colores por tier: madera=marrón, piedra=gris, hierro=blanco, diamante=cyan, oro=amarillo
+  - Cada parte tiene su propio material con sombreado (head + headShade para profundidad)
+  - Las herramientas se sostienen con rotación realista (mango en mano, cabeza hacia adelante)
+  - Comida/materiales siguen siendo sprites planos
+- Pixel art de herramientas mejorado (item-textures.ts):
+  - drawToolHead rediseñado para cada tipo:
+    * Pickaxe: barra curva con extremos puntiagudos, highlight arriba, sombra abajo
+    * Axe: bloque L con filo claro a la derecha, sombra inferior
+    * Sword: hoja con highlight en el borde izquierdo, sombra en derecho, guarda más detallada
+    * Shovel: pala redondeada con punta inferior, highlight y sombra laterales
+  - drawStick: mango más definido con end cap en la base
+- IA de animales mejorada (animals.ts):
+  - Flee: el animal SIEMPRE huye mirando en dirección opuesta al jugador (no solo al detectarlo)
+  - Al chocar con obstáculo: intenta saltar (si no está ya en el aire), si no puede gira 90° en dirección consistente (no random completo, evita jitter)
+  - Evita caminar por acantilados: si el bloque ahead+below es aire, gira
+  - Velocidad de caída limitada a -25 (no acelera infinitamente)
+  - Estado wander: 60% nueva dirección, 40% idle (más natural)
+- IA de monstruos mejorada (monsters.ts):
+  - Solo persigue al jugador dentro de rango 24 bloques (no a través del mundo)
+  - Colisión por eje (igual que animales): si choca intenta saltar, no atraviesa
+  - Evita caer por acantilados mientras persigue
+  - Velocidad de caída limitada
+  - Ground collision arreglado: ahora verifica si está dentro de un sólido (no solo si hay sólido debajo)
+  - checkCollision y canStepUp ahora aceptan bodyHeight opcional
+- TypeScript: limpio
+- Dev server: compila correctamente, HTTP 200
+
+Stage Summary:
+- Tecla B: dragón espera/te sigue (toggle)
+- Mano: más detallada y mejor orientada, estilo Minecraft
+- Herramientas: ahora son modelos 3D (pico, hacha, espada, pala) con cabeza + mango, colores por tier
+- Pixel art de herramientas mejorado (icons más reconocibles)
+- Animales: huyen naturalmente, no se atascan, evitan caer por acantilados
+- Monstruos: no atraviesan bloques, saltan obstáculos, no persiguen a través del mundo
+- Files modified: dragon.ts, hand.ts, item-textures.ts, animals.ts, monsters.ts, MinecraftGame.tsx

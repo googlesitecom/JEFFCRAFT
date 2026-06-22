@@ -235,42 +235,59 @@ export class Monster {
       }
     }
 
-    // Distance to player
+    // Distance to player (3D)
     const dx = playerX - this.position.x;
     const dy = playerY - this.position.y;
     const dz = playerZ - this.position.z;
     const dist = Math.sqrt(dx * dx + dz * dz);
 
-    // Face the player
+    // Face the player (only XZ, not Y, so monsters don't tilt)
     this.yaw = Math.atan2(-dx, -dz);
 
-    // Move toward player
+    // === MOVEMENT: stop if in attack range, otherwise move toward player ===
     let moveSpeed = this.def.speed;
     if (dist < this.def.attackRange) {
       moveSpeed = 0; // Stop to attack
+    }
+    // Only chase within a reasonable range (don't path across the world)
+    if (dist > 24) {
+      moveSpeed = 0; // Too far, give up
     }
 
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     this.velocity.x = forward.x * moveSpeed;
     this.velocity.z = forward.z * moveSpeed;
     this.velocity.y -= 25 * dt;
+    if (this.velocity.y < -25) this.velocity.y = -25;
 
-    // Move with collision
+    // === Move with per-axis collision ===
     const halfW = this.def.width / 2;
+    const bodyHeight = this.def.height;
+
+    // --- X axis ---
     const oldX = this.position.x;
     this.position.x += this.velocity.x * dt;
-    if (this.checkCollision(halfW)) {
+    if (this.checkCollision(halfW, bodyHeight)) {
       this.position.x = oldX;
-      if (this.canStepUp(halfW)) this.velocity.y = 7;
+      this.velocity.x = 0;
+      // Try to jump over the obstacle
+      if (this.velocity.y <= 0 && this.canStepUp(halfW, bodyHeight)) {
+        this.velocity.y = 8;
+      }
     }
 
+    // --- Z axis ---
     const oldZ = this.position.z;
     this.position.z += this.velocity.z * dt;
-    if (this.checkCollision(halfW)) {
+    if (this.checkCollision(halfW, bodyHeight)) {
       this.position.z = oldZ;
-      if (this.canStepUp(halfW)) this.velocity.y = 7;
+      this.velocity.z = 0;
+      if (this.velocity.y <= 0 && this.canStepUp(halfW, bodyHeight)) {
+        this.velocity.y = 8;
+      }
     }
 
+    // --- Y axis ---
     this.position.y += this.velocity.y * dt;
 
     // Ground collision
@@ -280,18 +297,35 @@ export class Monster {
     const cx = Math.floor(fx / CHUNK_SIZE);
     const cz = Math.floor(fz / CHUNK_SIZE);
     this.world.getOrCreateChunk(cx, cz);
+
+    // Check if feet are inside a solid block
     if (isSolid(this.world.getBlock(fx, fy, fz))) {
       this.position.y = fy + 1;
       this.velocity.y = 0;
-    } else if (isSolid(this.world.getBlock(fx, fy - 1, fz))) {
-      this.position.y = fy;
-      this.velocity.y = 0;
-    } else if (this.position.y < -10) {
-      this.position.y = 40;
-      this.velocity.y = 0;
+    } else if (this.velocity.y <= 0) {
+      // Falling: check block below
+      if (isSolid(this.world.getBlock(fx, fy - 1, fz))) {
+        this.position.y = fy;
+        this.velocity.y = 0;
+      } else if (this.position.y < -10) {
+        this.position.y = 40;
+        this.velocity.y = 0;
+      }
     }
 
-    // Attack player
+    // === AVOID walking off cliffs (so monsters don't fall into caves while chasing) ===
+    if (moveSpeed > 0 && this.velocity.y === 0) {
+      const aheadX = Math.floor(this.position.x + forward.x * 1.2);
+      const aheadZ = Math.floor(this.position.z + forward.z * 1.2);
+      const belowAheadY = Math.floor(this.position.y) - 1;
+      if (!isSolid(this.world.getBlock(aheadX, belowAheadY, aheadZ)) && !isSolid(this.world.getBlock(aheadX, Math.floor(this.position.y), aheadZ))) {
+        // Cliff ahead: stop, don't fall
+        this.velocity.x = 0;
+        this.velocity.z = 0;
+      }
+    }
+
+    // Attack player (only if close enough in 3D)
     this.attackTimer -= dt;
     if (dist < this.def.attackRange && Math.abs(dy) < 2 && this.attackTimer <= 0) {
       this.attackTimer = this.def.attackCooldown;
@@ -337,8 +371,8 @@ export class Monster {
     return null;
   }
 
-  private checkCollision(halfW: number): boolean {
-    const h = this.def.height;
+  private checkCollision(halfW: number, bodyHeight?: number): boolean {
+    const h = bodyHeight ?? this.def.height;
     const margin = 0.01;
     const minX = Math.floor(this.position.x - halfW - margin);
     const maxX = Math.floor(this.position.x + halfW + margin);
@@ -353,11 +387,12 @@ export class Monster {
     return false;
   }
 
-  private canStepUp(halfW: number): boolean {
+  private canStepUp(halfW: number, bodyHeight?: number): boolean {
+    const h = bodyHeight ?? this.def.height;
     const minX = Math.floor(this.position.x - halfW);
     const maxX = Math.floor(this.position.x + halfW);
     const minY = Math.floor(this.position.y) + 1;
-    const maxY = Math.floor(this.position.y + this.def.height) + 1;
+    const maxY = Math.floor(this.position.y + h) + 1;
     const minZ = Math.floor(this.position.z - halfW);
     const maxZ = Math.floor(this.position.z + halfW);
     for (let x = minX; x <= maxX; x++)

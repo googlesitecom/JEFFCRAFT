@@ -1,7 +1,8 @@
 // First-person hand view: Minecraft-style hand at bottom-right
+// Tools are rendered as 3D models (handle + head) instead of flat sprites.
 import * as THREE from "three";
 import { BlockType, BLOCKS } from "./blocks";
-import { ItemType, ITEMS } from "./items";
+import { ItemType, ITEMS, ToolType } from "./items";
 import { TextureAtlas } from "./atlas";
 
 export type HandAction = "idle" | "swing" | "eat" | "place" | "break";
@@ -13,8 +14,8 @@ function easeInOutCubic(t: number): number {
 export class HandView {
   scene: THREE.Scene;
   camera: THREE.OrthographicCamera;
-  pivot: THREE.Group;
-  itemPivot: THREE.Group;
+  pivot: THREE.Group;        // The hand + arm pivot (for swing animations)
+  itemPivot: THREE.Group;    // The held item pivot (positioned in front of hand)
   atlas: TextureAtlas;
   action: HandAction = "idle";
   actionTime: number = 0;
@@ -29,11 +30,15 @@ export class HandView {
     this.camera.position.set(0, 0, 5);
     this.camera.lookAt(0, 0, 0);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
     this.scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xfff0e0, 0.5);
+    const dir = new THREE.DirectionalLight(0xfff0e0, 0.55);
     dir.position.set(3, 5, 4);
     this.scene.add(dir);
+    // Fill light from below for softer shading
+    const fill = new THREE.DirectionalLight(0xa0c0ff, 0.25);
+    fill.position.set(-2, -3, 3);
+    this.scene.add(fill);
 
     this.pivot = new THREE.Group();
     this.scene.add(this.pivot);
@@ -44,57 +49,89 @@ export class HandView {
   }
 
   private buildHand() {
-    const skin = new THREE.MeshLambertMaterial({ color: 0xe8c39e });
-    const skinDark = new THREE.MeshLambertMaterial({ color: 0xd0a080 });
-    const sleeve = new THREE.MeshLambertMaterial({ color: 0x4a8a4a });
-    const sleeveDark = new THREE.MeshLambertMaterial({ color: 0x3a6a3a });
+    // Minecraft-style first-person hand: arm comes from bottom-right of screen.
+    // Skin tones
+    const skinMat = new THREE.MeshLambertMaterial({ color: 0xe8b896 });
+    const skinShadeMat = new THREE.MeshLambertMaterial({ color: 0xc89878 });
+    const skinHighlightMat = new THREE.MeshLambertMaterial({ color: 0xf8c8a6 });
+    // Sleeve (Steve-style teal shirt)
+    const sleeveMat = new THREE.MeshLambertMaterial({ color: 0x4a8a8a });
+    const sleeveShadeMat = new THREE.MeshLambertMaterial({ color: 0x3a6a6a });
 
-    // In Minecraft first-person:
-    // - The arm comes from below the screen (bottom-right)
-    // - The hand is at the top of the arm (visible part)
-    // - We see the BACK of the hand (dorsal view)
-    // - Fingers point AWAY from camera (into the screen, -Z)
-    // - The wrist is at the bottom, fingers at the top
-
-    // Arm sleeve (below hand, going down out of screen)
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.3, 0.12), sleeve);
-    arm.position.set(0, -0.18, 0);
+    // === Arm (sleeve) === — comes from below screen, going up to wrist
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.4, 0.14), sleeveMat);
+    arm.position.set(0, -0.25, 0);
     this.pivot.add(arm);
+    // Sleeve shading: darker bottom edge
+    const armShade = new THREE.Mesh(new THREE.BoxGeometry(0.141, 0.06, 0.141), sleeveShadeMat);
+    armShade.position.set(0, -0.42, 0);
+    this.pivot.add(armShade);
 
-    // Cuff
-    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.14), sleeveDark);
-    cuff.position.set(0, -0.05, 0);
+    // Cuff (where sleeve meets hand)
+    const cuff = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.04, 0.15), sleeveShadeMat);
+    cuff.position.set(0, -0.06, 0);
     this.pivot.add(cuff);
 
-    // Palm (the main visible block) - we see the back of it
-    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.14, 0.1), skin);
-    palm.position.set(0, 0.04, 0);
+    // === Wrist ===
+    const wrist = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.04, 0.12), skinShadeMat);
+    wrist.position.set(0, -0.02, 0);
+    this.pivot.add(wrist);
+
+    // === Palm === — main visible block, we see the back (dorsal view)
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.11), skinMat);
+    palm.position.set(0, 0.06, 0);
     this.pivot.add(palm);
+    // Palm highlight on top edge
+    const palmHighlight = new THREE.Mesh(new THREE.BoxGeometry(0.141, 0.02, 0.111), skinHighlightMat);
+    palmHighlight.position.set(0, 0.13, 0);
+    this.pivot.add(palmHighlight);
 
-    // Knuckles on top (the side facing camera, +Z)
-    const knuckle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 0.09), skinDark);
-    knuckle.position.set(0, 0.1, 0);
-    this.pivot.add(knuckle);
-
-    // Fingers pointing forward (into screen, -Z direction)
-    const fingerGeo = new THREE.BoxGeometry(0.025, 0.04, 0.05);
+    // === Knuckles === — bumps on the back of the hand
+    const knuckleMat = skinShadeMat;
     for (let i = 0; i < 4; i++) {
-      const f = new THREE.Mesh(fingerGeo, skin);
-      f.position.set(-0.04 + i * 0.028, 0.12, -0.02);
-      this.pivot.add(f);
+      const k = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.025, 0.06), knuckleMat);
+      k.position.set(-0.045 + i * 0.03, 0.13, -0.02);
+      this.pivot.add(k);
     }
 
-    // Thumb on the right side
-    const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.04), skin);
-    thumb.position.set(0.07, 0.07, 0);
-    thumb.rotation.z = -0.5;
-    this.pivot.add(thumb);
+    // === Fingers === — pointing forward into screen (-Z)
+    // Index, middle, ring, pinky
+    const fingerMat = skinMat;
+    const fingerLen = [0.07, 0.075, 0.065, 0.055]; // middle longest
+    for (let i = 0; i < 4; i++) {
+      const f = new THREE.Mesh(
+        new THREE.BoxGeometry(0.024, fingerLen[i], 0.05),
+        fingerMat
+      );
+      f.position.set(-0.045 + i * 0.03, 0.16 + fingerLen[i] / 2 - 0.04, -0.02);
+      this.pivot.add(f);
+      // Fingertip (slightly darker)
+      const tip = new THREE.Mesh(
+        new THREE.BoxGeometry(0.025, 0.015, 0.051),
+        skinShadeMat
+      );
+      tip.position.set(-0.045 + i * 0.03, 0.16 + fingerLen[i] - 0.04, -0.02);
+      this.pivot.add(tip);
+    }
 
-    // Position: bottom-right corner, properly oriented
-    this.pivot.position.set(0.95, -0.5, 0);
-    // Positive X rotation tilts the hand so we see the top/back (knuckles)
-    this.pivot.rotation.x = 0.3;
-    this.pivot.rotation.y = -0.4;
+    // === Thumb === — on the right side, angled
+    const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.045), skinMat);
+    thumb.position.set(0.085, 0.07, 0.01);
+    thumb.rotation.z = -0.7;
+    thumb.rotation.y = 0.3;
+    this.pivot.add(thumb);
+    // Thumb tip
+    const thumbTip = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.018, 0.046), skinShadeMat);
+    thumbTip.position.set(0.11, 0.11, 0.015);
+    thumbTip.rotation.z = -0.7;
+    thumbTip.rotation.y = 0.3;
+    this.pivot.add(thumbTip);
+
+    // Position: bottom-right corner, angled so we see the back/top of hand
+    this.pivot.position.set(0.85, -0.55, 0);
+    this.pivot.rotation.x = 0.35;
+    this.pivot.rotation.y = -0.45;
+    this.pivot.rotation.z = 0.05;
     this.pivot.scale.set(1.0, 1.0, 1.0);
   }
 
@@ -102,6 +139,7 @@ export class HandView {
     if (itemId === this.currentItem) return;
     this.currentItem = itemId;
 
+    // Clear previous item
     while (this.itemPivot.children.length > 0) {
       const child = this.itemPivot.children[0];
       this.itemPivot.remove(child);
@@ -114,10 +152,11 @@ export class HandView {
     if (itemId === null || itemId === undefined) return;
 
     if (itemId < 100) {
+      // === Block: render as 3D cube ===
       const def = BLOCKS[itemId as BlockType];
       if (!def) return;
       const mat = new THREE.MeshLambertMaterial({ map: this.atlas.texture });
-      const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+      const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
       const tile = this.atlas.tiles[def.textures.side] || this.atlas.tiles[def.textures.top];
       if (tile) {
         const uvs = geo.attributes.uv;
@@ -134,16 +173,31 @@ export class HandView {
         uvs.needsUpdate = true;
       }
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(0, 0.06, -0.12);
+      mesh.position.set(0, 0.08, -0.14);
       this.itemPivot.add(mesh);
     } else {
       const def = ITEMS[itemId as ItemType];
       if (!def) return;
+
+      // === Tools: render as 3D model (handle + head) ===
+      if (def.toolType) {
+        const toolMesh = this.buildToolModel(def.toolType, def.toolTier || "wood");
+        if (toolMesh) {
+          toolMesh.position.set(0, 0.05, -0.14);
+          // Angle the tool so the handle is in the hand and head points forward
+          toolMesh.rotation.x = -1.1;
+          toolMesh.rotation.y = -0.2;
+          this.itemPivot.add(toolMesh);
+          return;
+        }
+      }
+
+      // === Food / materials: render as flat sprite (billboard) ===
       const tile = this.atlas.tiles[def.icon];
       const mat = new THREE.MeshLambertMaterial({
         map: this.atlas.texture, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide,
       });
-      const geo = new THREE.PlaneGeometry(0.18, 0.18);
+      const geo = new THREE.PlaneGeometry(0.2, 0.2);
       if (tile) {
         const uvs = geo.attributes.uv;
         uvs.setXY(0, tile.u0, tile.v1);
@@ -153,10 +207,88 @@ export class HandView {
         uvs.needsUpdate = true;
       }
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(0, 0.06, -0.12);
-      if (def.toolType) mesh.rotation.x = -0.9;
+      mesh.position.set(0, 0.08, -0.14);
       this.itemPivot.add(mesh);
     }
+  }
+
+  // Build a 3D tool model: handle (stick) + head (colored box with texture per tier)
+  private buildToolModel(toolType: ToolType | undefined, tier: string): THREE.Group | null {
+    if (!toolType) return null;
+    const group = new THREE.Group();
+
+    // Tier colors for the tool head
+    const tierColors: Record<string, number> = {
+      wood: 0x8b6a3a,
+      stone: 0x888888,
+      iron: 0xe0e0e0,
+      diamond: 0x5edcdc,
+      gold: 0xffdd44,
+    };
+    const headColor = tierColors[tier] || 0x8b6a3a;
+    const handleColor = 0x6e4d28; // brown stick
+    const handleMat = new THREE.MeshLambertMaterial({ color: handleColor });
+    const headMat = new THREE.MeshLambertMaterial({ color: headColor });
+    const headShadeMat = new THREE.MeshLambertMaterial({ color: this.darken(headColor, 0.3) });
+
+    // Handle (vertical stick)
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.2, 0.025), handleMat);
+    handle.position.set(0, 0, 0);
+    group.add(handle);
+
+    if (toolType === "pickaxe") {
+      // Pickaxe head: a horizontal bar across the top of the handle
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.04, 0.04), headMat);
+      head.position.set(0, 0.1, 0);
+      group.add(head);
+      // Pointed ends (darker)
+      const left = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.045, 0.045), headShadeMat);
+      left.position.set(-0.08, 0.1, 0);
+      group.add(left);
+      const right = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.045, 0.045), headShadeMat);
+      right.position.set(0.08, 0.1, 0);
+      group.add(right);
+    } else if (toolType === "axe") {
+      // Axe head: a box on one side of the top
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.04), headMat);
+      head.position.set(0.04, 0.1, 0);
+      group.add(head);
+      // Blade edge (lighter)
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.06, 0.041), headShadeMat);
+      edge.position.set(0.09, 0.1, 0);
+      group.add(edge);
+    } else if (toolType === "sword") {
+      // Sword: long blade going up from the handle
+      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.22, 0.015), headMat);
+      blade.position.set(0, 0.13, 0);
+      group.add(blade);
+      // Blade tip (darker point)
+      const tip = new THREE.Mesh(new THREE.BoxGeometry(0.031, 0.03, 0.016), headShadeMat);
+      tip.position.set(0, 0.25, 0);
+      group.add(tip);
+      // Crossguard
+      const guard = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.04), handleMat);
+      guard.position.set(0, 0.02, 0);
+      group.add(guard);
+    } else if (toolType === "shovel") {
+      // Shovel: a square blade at the top of the handle
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.03), headMat);
+      head.position.set(0, 0.11, 0);
+      group.add(head);
+      // Blade edge
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.061, 0.015, 0.031), headShadeMat);
+      edge.position.set(0, 0.075, 0);
+      group.add(edge);
+    }
+
+    return group;
+  }
+
+  private darken(color: number, amount: number): number {
+    const r = Math.max(0, Math.floor(((color >> 16) & 0xff) * (1 - amount)));
+    const g = Math.max(0, Math.floor(((color >> 8) & 0xff) * (1 - amount)));
+    const b = Math.max(0, Math.floor((color & 0xff) * (1 - amount)));
+    return (r << 16) | (g << 8) | b;
   }
 
   triggerAction(action: HandAction) {
@@ -201,9 +333,9 @@ export class HandView {
       extraRotZ = Math.sin(this.idleTime * 0.7) * 0.005;
     }
 
-    this.pivot.rotation.x = 0.3 + extraRotX;
-    this.pivot.rotation.y = -0.4;
-    this.pivot.rotation.z = extraRotZ;
+    this.pivot.rotation.x = 0.35 + extraRotX;
+    this.pivot.rotation.y = -0.45;
+    this.pivot.rotation.z = 0.05 + extraRotZ;
     this.itemPivot.position.set(0, itemOffsetY, itemOffsetZ);
   }
 

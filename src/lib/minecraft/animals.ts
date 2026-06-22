@@ -183,12 +183,16 @@ export class Animal {
       (this.position.x - playerX) ** 2 + (this.position.z - playerZ) ** 2
     );
 
+    // === STATE MACHINE ===
     this.stateTimer -= dt;
     if (this.stateTimer <= 0) {
       if (this.state === "flee") {
+        // After fleeing, go back to wander
         this.state = "wander";
         this.stateTimer = 2 + Math.random() * 3;
+        this.yaw = Math.random() * Math.PI * 2;
       } else if (this.state === "wander") {
+        // 40% idle, 60% pick a new direction
         if (Math.random() < 0.4) {
           this.state = "idle";
           this.stateTimer = 1 + Math.random() * 2;
@@ -197,18 +201,25 @@ export class Animal {
           this.stateTimer = 2 + Math.random() * 3;
         }
       } else {
+        // idle -> wander
         this.state = "wander";
         this.yaw = Math.random() * Math.PI * 2;
         this.stateTimer = 2 + Math.random() * 3;
       }
     }
 
-    if (distToPlayer < this.def.fleeDistance && this.state !== "flee") {
-      this.state = "flee";
-      this.stateTimer = 2 + Math.random() * 2;
+    // === FLEE: when player gets too close, run directly AWAY from player ===
+    if (distToPlayer < this.def.fleeDistance) {
+      if (this.state !== "flee") {
+        this.state = "flee";
+        this.stateTimer = 2 + Math.random() * 2;
+      }
+      // Always face away from player while fleeing
       const dx = this.position.x - playerX;
       const dz = this.position.z - playerZ;
-      this.yaw = Math.atan2(-dx, -dz);
+      if (Math.abs(dx) + Math.abs(dz) > 0.001) {
+        this.yaw = Math.atan2(-dx, -dz);
+      }
     }
 
     let moveSpeed = 0;
@@ -224,6 +235,7 @@ export class Animal {
 
     // Gravity
     this.velocity.y -= 25 * dt;
+    if (this.velocity.y < -25) this.velocity.y = -25;
 
     // === MOVEMENT WITH COLLISION (per-axis) ===
     const halfW = this.def.width / 2;
@@ -235,11 +247,12 @@ export class Animal {
     if (this.checkBodyCollision(halfW, bodyHeight)) {
       this.position.x = oldX;
       this.velocity.x = 0;
-      // Try to step up 1 block
-      if (this.canStepUpFrom(halfW, bodyHeight)) {
+      // Try to step up 1 block (jump over obstacle)
+      if (this.canStepUpFrom(halfW, bodyHeight) && this.velocity.y <= 0) {
         this.velocity.y = 7;
       } else {
-        this.yaw += Math.PI / 2 + Math.random() * Math.PI;
+        // Can't step up → turn 90-180° (not random, to avoid jitter)
+        this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
       }
     }
 
@@ -249,10 +262,10 @@ export class Animal {
     if (this.checkBodyCollision(halfW, bodyHeight)) {
       this.position.z = oldZ;
       this.velocity.z = 0;
-      if (this.canStepUpFrom(halfW, bodyHeight)) {
+      if (this.canStepUpFrom(halfW, bodyHeight) && this.velocity.y <= 0) {
         this.velocity.y = 7;
       } else {
-        this.yaw += Math.PI / 2 + Math.random() * Math.PI;
+        this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
       }
     }
 
@@ -265,8 +278,6 @@ export class Animal {
     this.world.getOrCreateChunk(cx, cz);
 
     // Ground collision: find the highest solid block below the animal
-    // The animal's feet are at position.y. We check the block AT the feet
-    // and the block BELOW the feet.
     const feetX = Math.floor(this.position.x);
     const feetZ = Math.floor(this.position.z);
     const feetY = Math.floor(this.position.y);
@@ -287,6 +298,19 @@ export class Animal {
         // Fell out of world - respawn high
         this.position.y = 40;
         this.velocity.y = 0;
+      }
+    }
+
+    // === AVOID walking off cliffs: if moving forward and the block 2 ahead+below is air, turn ===
+    if (moveSpeed > 0 && this.velocity.y === 0) {
+      const aheadX = Math.floor(this.position.x + forward.x * 1.2);
+      const aheadZ = Math.floor(this.position.z + forward.z * 1.2);
+      const belowAheadY = Math.floor(this.position.y) - 1;
+      if (!isSolid(this.world.getBlock(aheadX, belowAheadY, aheadZ)) && !isSolid(this.world.getBlock(aheadX, Math.floor(this.position.y), aheadZ))) {
+        // Cliff ahead: turn
+        this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
+        this.velocity.x = 0;
+        this.velocity.z = 0;
       }
     }
 

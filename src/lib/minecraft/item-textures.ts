@@ -388,59 +388,80 @@ function texCookedChicken(): ImageData {
 
 // Helper to draw a tool head (the part that's not the stick)
 function drawToolHead(img: ImageData, headColor: [number, number, number], lightColor: [number, number, number], darkColor: [number, number, number], type: "pickaxe" | "axe" | "sword" | "shovel") {
+  // Tool heads are drawn in the TOP HALF of the 16x16 texture (Y 0-8).
+  // Handle is drawn separately by drawStick() in the BOTTOM HALF (Y 8-15).
   if (type === "pickaxe") {
-    // Pickaxe head: top row curved
-    fillRect(img, 3, 3, 10, 1, headColor);
-    setPixel(img, 4, 4, headColor);
-    setPixel(img, 7, 4, headColor);
-    setPixel(img, 11, 4, headColor);
-    // Highlight
+    // Pickaxe head: a curved horizontal bar with pointed ends (like a real pickaxe)
+    // Top row (curved arc)
+    fillRect(img, 2, 3, 12, 1, headColor);
+    fillRect(img, 3, 2, 10, 1, headColor);
+    // Pointed ends (curving down)
+    setPixel(img, 2, 4, headColor);
+    setPixel(img, 13, 4, headColor);
+    setPixel(img, 1, 4, darkColor);
+    setPixel(img, 14, 4, darkColor);
+    setPixel(img, 1, 5, darkColor);
+    setPixel(img, 14, 5, darkColor);
+    // Highlight on top-left of the bar
+    fillRect(img, 3, 2, 4, 1, lightColor);
     setPixel(img, 4, 3, lightColor);
     setPixel(img, 5, 3, lightColor);
-    setPixel(img, 6, 3, lightColor);
-    // Shadow
+    // Shadow on bottom-right
     setPixel(img, 11, 3, darkColor);
     setPixel(img, 12, 3, darkColor);
+    setPixel(img, 10, 4, darkColor);
   } else if (type === "axe") {
-    // Axe head: L-shape on top-right
-    fillRect(img, 7, 3, 5, 5, headColor);
+    // Axe head: L-shape block on the right side of the handle
+    // Main head block
+    fillRect(img, 7, 2, 6, 5, headColor);
+    // Extra bulk on the left (where it meets handle)
+    setPixel(img, 6, 3, headColor);
     setPixel(img, 6, 4, headColor);
-    setPixel(img, 6, 5, headColor);
-    setPixel(img, 12, 4, headColor);
-    setPixel(img, 12, 5, headColor);
-    // Highlight
-    setPixel(img, 8, 4, lightColor);
-    setPixel(img, 8, 5, lightColor);
-    // Shadow
-    setPixel(img, 11, 7, darkColor);
-    setPixel(img, 10, 7, darkColor);
+    // Blade edge (right side, lighter for sharp look)
+    fillRect(img, 12, 2, 1, 5, lightColor);
+    setPixel(img, 13, 3, lightColor);
+    setPixel(img, 13, 4, lightColor);
+    // Highlight on top
+    fillRect(img, 7, 2, 5, 1, lightColor);
+    // Shadow on bottom
+    fillRect(img, 7, 6, 6, 1, darkColor);
+    setPixel(img, 6, 5, darkColor);
   } else if (type === "sword") {
-    // Sword blade: vertical
-    fillRect(img, 7, 2, 2, 8, headColor);
-    // Blade tip
+    // Sword blade: vertical, pointing up
+    fillRect(img, 7, 2, 2, 7, headColor);
+    // Blade tip (pointed)
+    setPixel(img, 7, 1, headColor);
     setPixel(img, 8, 1, headColor);
-    // Highlight
-    setPixel(img, 7, 3, lightColor);
-    setPixel(img, 7, 4, lightColor);
-    setPixel(img, 7, 5, lightColor);
-    // Shadow
-    setPixel(img, 8, 8, darkColor);
-    setPixel(img, 8, 9, darkColor);
-    // Guard (cross)
-    fillRect(img, 5, 9, 6, 1, hexToRgb("#5d4037"));
-    setPixel(img, 6, 10, hexToRgb("#5d4037"));
-    setPixel(img, 9, 10, hexToRgb("#5d4037"));
+    setPixel(img, 8, 0, lightColor);
+    // Highlight on left edge of blade
+    fillRect(img, 7, 2, 1, 7, lightColor);
+    setPixel(img, 7, 1, lightColor);
+    // Shadow on right edge
+    fillRect(img, 8, 3, 1, 6, darkColor);
+    setPixel(img, 8, 2, darkColor);
+    // Crossguard (horizontal bar)
+    fillRect(img, 5, 9, 6, 1, hexToRgb("#6e4d28"));
+    setPixel(img, 4, 9, hexToRgb("#5d4037"));
+    setPixel(img, 11, 9, hexToRgb("#5d4037"));
+    setPixel(img, 5, 10, hexToRgb("#5d4037"));
+    setPixel(img, 10, 10, hexToRgb("#5d4037"));
   } else if (type === "shovel") {
-    // Shovel head: square on top
-    fillRect(img, 6, 3, 4, 4, headColor);
+    // Shovel head: a rounded square/spade on top of handle
+    fillRect(img, 6, 3, 5, 5, headColor);
+    // Top rounded
     setPixel(img, 7, 2, headColor);
     setPixel(img, 8, 2, headColor);
-    // Highlight
-    setPixel(img, 7, 4, lightColor);
-    setPixel(img, 7, 5, lightColor);
-    // Shadow
-    setPixel(img, 9, 6, darkColor);
-    setPixel(img, 9, 5, darkColor);
+    setPixel(img, 9, 2, headColor);
+    // Bottom point (spade shape)
+    setPixel(img, 8, 8, headColor);
+    setPixel(img, 8, 9, darkColor);
+    // Highlight on top-left
+    fillRect(img, 7, 3, 2, 1, lightColor);
+    setPixel(img, 6, 4, lightColor);
+    setPixel(img, 6, 5, lightColor);
+    // Shadow on right
+    fillRect(img, 10, 4, 1, 4, darkColor);
+    setPixel(img, 9, 7, darkColor);
   }
 }
 
@@ -448,16 +469,21 @@ function drawStick(img: ImageData) {
   const stickColor = hexToRgb("#9c6f3a");
   const darkStick = hexToRgb("#6e4d28");
   const lightStick = hexToRgb("#b08850");
-  // Vertical stick (handle) - diagonal from top-right to bottom-left
+  // Vertical handle: 2px wide, diagonal from top-center to bottom-left
   const positions = [
-    [8, 8], [8, 9], [8, 10], [8, 11], [8, 12],
-    [7, 13], [7, 14],
+    [8, 8], [8, 9], [8, 10], [8, 11],
+    [7, 12], [7, 13], [7, 14],
   ];
   for (const [x, y] of positions) {
     setPixel(img, x, y, stickColor);
     setPixel(img, x + 1, y, lightStick);
     setPixel(img, x, y + 1, darkStick);
+    setPixel(img, x + 1, y + 1, darkStick);
   }
+  // Handle end cap (bottom)
+  setPixel(img, 6, 14, darkStick);
+  setPixel(img, 7, 15, darkStick);
+  setPixel(img, 8, 15, darkStick);
 }
 
 function makeTool(headColor: [number, number, number], lightColor: [number, number, number], darkColor: [number, number, number], type: "pickaxe" | "axe" | "sword" | "shovel"): ImageData {

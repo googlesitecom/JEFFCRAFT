@@ -36,6 +36,8 @@ export class DragonPet {
   mixer: THREE.AnimationMixer | null = null;
   flyAction: THREE.AnimationAction | null = null;
   isMounted: boolean = false;
+  // When true, the dragon stays put (doesn't follow player when dismounted). Toggle with B key.
+  isStaying: boolean = false;
   // Visual bobbing during flight
   private flightTime: number = 0;
 
@@ -206,7 +208,37 @@ export class DragonPet {
       const eyeZ = this.position.z - forward3D.z * camDist;
       return { eyeX, eyeY, eyeZ, yaw: this.yaw, pitch: this.pitch };
     } else {
-      // === Not mounted: dragon follows player by flying ===
+      // === Not mounted: dragon follows player by flying, OR stays put if isStaying ===
+      if (this.isStaying) {
+        // Stay mode: hover in place with gentle bob, no movement toward player
+        this.velocity.multiplyScalar(0.8);
+        this.velocity.y = Math.sin(this.flightTime * 2) * 0.6;
+        this.moveAxis("x", this.velocity.x * dt);
+        this.moveAxis("y", this.velocity.y * dt);
+        this.moveAxis("z", this.velocity.z * dt);
+        // Keep above ground
+        if (this.position.y < 2) {
+          this.position.y = 2;
+          this.velocity.y = 0;
+        }
+        if (this.position.y > WORLD_HEIGHT - 5) {
+          this.position.y = WORLD_HEIGHT - 5;
+          this.velocity.y = 0;
+        }
+        // Face direction of player when staying (looks more alive)
+        const dxLook = playerPos.x - this.position.x;
+        const dzLook = playerPos.z - this.position.z;
+        if (Math.abs(dxLook) + Math.abs(dzLook) > 0.001) {
+          this.yaw = Math.atan2(-dxLook, -dzLook);
+        }
+        if (this.model) {
+          this.model.position.copy(this.position);
+          this.model.rotation.set(0, this.yaw, 0);
+          this.model.position.y += Math.sin(this.flightTime * 4) * 0.08;
+        }
+        return null;
+      }
+
       const dx = playerPos.x - this.position.x;
       const dy = playerPos.y - this.position.y;
       const dz = playerPos.z - this.position.z;
