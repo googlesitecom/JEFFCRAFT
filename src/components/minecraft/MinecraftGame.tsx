@@ -24,6 +24,9 @@ import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as
 import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
 import { NetherWorld } from "@/lib/minecraft/nether";
 import { EndermanManager, Enderman } from "@/lib/minecraft/enderman";
+import { BlazeManager, Blaze } from "@/lib/minecraft/blaze";
+import { EndWorld } from "@/lib/minecraft/end";
+import { EnderDragon } from "@/lib/minecraft/ender-dragon";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -382,6 +385,9 @@ export default function MinecraftGame() {
 
     // === Enderman Manager (tall black mobs that drop ender pearls) ===
     const endermanManager = new EndermanManager(world, scene);
+
+    // === Blaze Manager (fire mobs from the Nether that drop blaze rods) ===
+    const blazeManager = new BlazeManager(world, scene);
 
     // === Dragon Manager (player's pet dragon) ===
     const dragonManager = new DragonManager(world, scene);
@@ -1313,6 +1319,15 @@ export default function MinecraftGame() {
         endermanManager.update(dt, player.position.x, player.position.y, player.position.z, isNight);
       }
 
+      // Update blazes (spawn in survival, attack player with fire)
+      if (isSurvival) {
+        const blazeDamages = blazeManager.update(dt, player.position.x, player.position.y, player.position.z, isNight);
+        for (const bd of blazeDamages) {
+          player.damage(bd.damage);
+          sound.hurt();
+        }
+      }
+
       if (player.isDead()) {
         setIsDead(true);
       }
@@ -1327,7 +1342,8 @@ export default function MinecraftGame() {
         const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
         const monster = monsterManager.findClosest(eyeX, eyeY, eyeZ, 4);
         const enderman = endermanManager.findClosest(eyeX, eyeY, eyeZ, 4);
-        if (animal || monster || enderman) {
+        const blaze = blazeManager.findClosest(eyeX, eyeY, eyeZ, 5);
+        if (animal || monster || enderman || blaze) {
           let damage = 1;
           let usedTool = false;
           const selected = inventoryRef.current.getSelected();
@@ -1361,6 +1377,18 @@ export default function MinecraftGame() {
               const xp = randXp(MONSTER_XP);
               if (xp > 0) dropManager.spawnXpOrb(xp, enderman.position.x, enderman.position.y + 0.5, enderman.position.z);
               endermanManager.removeEnderman(enderman);
+            }
+          } else if (blaze) {
+            const died = blaze.takeDamage(damage);
+            blaze.knockback(player.position.x, player.position.z, 3);
+            if (died) {
+              const drops = blaze.getDrops();
+              for (const drop of drops) {
+                dropManager.spawnDrop(drop.id, drop.count, blaze.position.x, blaze.position.y + 0.5, blaze.position.z);
+              }
+              const xp = randXp(MONSTER_XP);
+              if (xp > 0) dropManager.spawnXpOrb(xp, blaze.position.x, blaze.position.y + 0.5, blaze.position.z);
+              blazeManager.removeBlaze(blaze);
             }
           } else if (animal) {
             const died = animal.takeDamage(damage, player.position);
@@ -1504,6 +1532,7 @@ export default function MinecraftGame() {
       animalManager.dispose();
       monsterManager.dispose();
       endermanManager.dispose();
+      blazeManager.dispose();
       dropManager.dispose();
       dragonManager.dispose();
       dragonManagerRef.current = null;

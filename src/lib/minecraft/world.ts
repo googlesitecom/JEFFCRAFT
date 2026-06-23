@@ -257,7 +257,8 @@ export class World {
     const x0 = chunk.cx * CHUNK_SIZE;
     const z0 = chunk.cz * CHUNK_SIZE;
 
-    // --- Carve caves (only stone and dirt, never ores) ---
+    // --- Carve caves FIRST (only stone and dirt, before ores are placed) ---
+    // Caves are less frequent so most of the underground is solid stone with ores.
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       for (let lz = 0; lz < CHUNK_SIZE; lz++) {
         const wx = x0 + lx;
@@ -265,19 +266,22 @@ export class World {
         for (let y = BEDROCK_DEPTH; y < 100; y++) {
           const b = chunk.getLocal(lx, y, lz);
           if (b === BlockType.Stone || b === BlockType.Dirt) {
+            // Caverns: large open spaces (rare, threshold 0.55 = less frequent)
             const cavern = this.noise3D(wx * 0.035, y * 0.04, wz * 0.035);
+            // Tunnels: narrow winding passages (very rare, threshold 0.72)
             const tunnel = this.noise3D(wx * 0.08, y * 0.12, wz * 0.08);
-            if (cavern > 0.45) {
+            if (cavern > 0.55) {
               chunk.setLocal(lx, y, lz, BlockType.Air);
-            } else if (tunnel > 0.65 && cavern > 0.2) {
+            } else if (tunnel > 0.72 && cavern > 0.3) {
               chunk.setLocal(lx, y, lz, BlockType.Air);
             }
+            // Most blocks remain Stone — ores are placed after cave carving
           }
         }
       }
     }
 
-    // --- ORE VEIN GENERATION (exactly like Minecraft) ---
+    // --- ORE VEIN GENERATION (placed AFTER caves, so ores are in solid stone) ---
     // Deterministic LCG RNG seeded by chunk coords + world seed
     const oreSeed = (this.seed ^ (chunk.cx * 73856093) ^ (chunk.cz * 19349663)) >>> 0;
     let oreState = oreSeed;
