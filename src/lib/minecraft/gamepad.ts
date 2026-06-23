@@ -1,32 +1,46 @@
 // Xbox controller support for Minecraft clone.
-// Maps gamepad inputs to the same key codes used by the keyboard handler.
-// The player can switch between keyboard and controller from the controls menu.
+// Uses the standard Gamepad API. Properly handles button edge detection
+// (pressed vs held) and works without mouse pointer lock.
 
 export type InputMode = "keyboard" | "controller";
 
-// Standard Xbox controller button mapping (Gamepad API standard mapping)
-// Button 0: A, 1: B, 2: X, 3: Y, 4: LB, 5: RB, 6: LT, 7: RT, 8: Back, 9: Start, 10: LS, 11: RS, 12: Up, 13: Down, 14: Left, 15: Right
+// Xbox button indices (standard mapping)
+// 0=A, 1=B, 2=X, 3=Y, 4=LB, 5=RB, 6=LT, 7=RT, 8=Back, 9=Start, 10=LS, 11=RS
+// 12=DUp, 13=DDown, 14=DLeft, 15=DRight
 
 export interface GamepadState {
-  // Movement (left stick)
-  moveX: number; // -1 to 1
-  moveZ: number; // -1 to 1
-  // Look (right stick)
-  lookX: number; // -1 to 1
+  // Analog sticks (-1 to 1, 0 = center)
+  moveX: number;
+  moveY: number;
+  lookX: number;
   lookY: number;
-  // Buttons (pressed this frame)
-  jump: boolean;
-  sneak: boolean;
-  sprint: boolean;
-  attack: boolean; // A
-  place: boolean;  // B
-  inventory: boolean; // X
-  hotbarUp: boolean; // RB
-  hotbarDown: boolean; // LB
-  pause: boolean; // Start
-  // Trigger states (analog 0-1)
-  leftTrigger: number;
-  rightTrigger: number;
+  // Digital buttons (true = currently held down)
+  a: boolean;
+  b: boolean;
+  x: boolean;
+  y: boolean;
+  lb: boolean;
+  rb: boolean;
+  lt: boolean;   // true when trigger > 0.5
+  rt: boolean;
+  back: boolean;
+  start: boolean;
+  ls: boolean;   // left stick click
+  rs: boolean;   // right stick click
+  dpadUp: boolean;
+  dpadDown: boolean;
+  dpadLeft: boolean;
+  dpadRight: boolean;
+}
+
+// Track previous button states for edge detection
+let prevButtons: boolean[] = new Array(16).fill(false);
+
+// Returns true if a button was pressed THIS frame (rising edge)
+export function wasPressed(current: boolean, index: number): boolean {
+  const was = prevButtons[index] || false;
+  prevButtons[index] = current;
+  return current && !was;
 }
 
 export function readGamepad(index: number = 0): GamepadState | null {
@@ -34,39 +48,55 @@ export function readGamepad(index: number = 0): GamepadState | null {
   const pad = pads[index];
   if (!pad) return null;
 
-  const deadzone = 0.15;
-  const clamp = (v: number) => Math.abs(v) < deadzone ? 0 : v;
+  const deadzone = 0.2;
+  const clamp = (v: number) => {
+    const abs = Math.abs(v);
+    if (abs < deadzone) return 0;
+    // Scale so that values outside deadzone map smoothly to 0..1
+    return Math.sign(v) * ((abs - deadzone) / (1 - deadzone));
+  };
+
   const lx = clamp(pad.axes[0] || 0);
   const ly = clamp(pad.axes[1] || 0);
   const rx = clamp(pad.axes[2] || 0);
   const ry = clamp(pad.axes[3] || 0);
 
   const btn = (i: number) => pad.buttons[i]?.pressed ?? false;
+  const trig = (i: number) => (pad.buttons[i]?.value || 0) > 0.5;
 
   return {
     moveX: lx,
-    moveZ: ly,
+    moveY: ly,
     lookX: rx,
     lookY: ry,
-    jump: btn(0),        // A
-    sneak: btn(4) || (pad.axes[1] && pad.axes[1] > 0.5 ? false : false), // LB or left stick click
-    sprint: btn(10),     // Left stick click (LS)
-    attack: btn(0),      // RT for attack instead? Let's use RT
-    place: btn(2),       // X button
-    inventory: btn(1),   // B button
-    hotbarUp: btn(5),    // RB
-    hotbarDown: btn(4),  // LB
-    pause: btn(9),       // Start
-    leftTrigger: pad.buttons[6]?.value || 0,
-    rightTrigger: pad.buttons[7]?.value || 0,
+    a: btn(0),
+    b: btn(1),
+    x: btn(2),
+    y: btn(3),
+    lb: btn(4),
+    rb: btn(5),
+    lt: trig(6),
+    rt: trig(7),
+    back: btn(8),
+    start: btn(9),
+    ls: btn(10),
+    rs: btn(11),
+    dpadUp: btn(12),
+    dpadDown: btn(13),
+    dpadLeft: btn(14),
+    dpadRight: btn(15),
   };
 }
 
-// Check if any gamepad is connected
 export function isGamepadConnected(): boolean {
   const pads = navigator.getGamepads();
   for (const p of pads) {
-    if (p) return true;
+    if (p && p.connected) return true;
   }
   return false;
+}
+
+// Reset edge tracking (call when switching input modes)
+export function resetGamepadState() {
+  prevButtons = new Array(16).fill(false);
 }

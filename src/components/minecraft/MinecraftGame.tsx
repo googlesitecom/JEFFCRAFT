@@ -27,7 +27,7 @@ import { EndermanManager, Enderman } from "@/lib/minecraft/enderman";
 import { BlazeManager, Blaze } from "@/lib/minecraft/blaze";
 import { EndWorld } from "@/lib/minecraft/end";
 import { EnderDragon } from "@/lib/minecraft/ender-dragon";
-import { InputMode, readGamepad, isGamepadConnected } from "@/lib/minecraft/gamepad";
+import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasPressed } from "@/lib/minecraft/gamepad";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -132,6 +132,7 @@ export default function MinecraftGame() {
   }>({ input: null, fuel: null, output: null, smeltProgress: 0, fuelProgress: 0 });
   const [showControls, setShowControls] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>("keyboard");
+  const inputModeRef = useRef<InputMode>("keyboard");
   const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
@@ -1232,54 +1233,133 @@ export default function MinecraftGame() {
       // === Dragon update (mount or follow player) ===
       const dragon = dragonManager.getActiveDragon();
       const isDragonMounted = dragon?.isMounted ?? false;
-      // === Gamepad input (if controller mode is active) ===
-      if (inputMode === "controller" && !isDragonMounted) {
-        const gp = readGamepad(0);
-        if (gp) {
-          // Movement: map left stick to WASD keys
-          player.setKey("KeyW", gp.moveZ < -0.3);
-          player.setKey("KeyS", gp.moveZ > 0.3);
-          player.setKey("KeyA", gp.moveX < -0.3);
-          player.setKey("KeyD", gp.moveX > 0.3);
-          // Jump
-          player.setKey("Space", gp.jump);
-          // Sprint (left stick click)
-          player.setKey("ShiftLeft", gp.sprint);
-          // Look (right stick)
-          const lookSensitivity = 0.05;
-          player.addMouseDelta(gp.lookX * lookSensitivity * 100, gp.lookY * lookSensitivity * 100);
-          // Hotbar navigation (RB/LB)
-          if (gp.hotbarUp) {
-            const idx = (selectedSlotRef.current + 1) % 9;
-            setSelectedSlot(idx);
-            selectedSlotRef.current = idx;
-            inventoryRef.current.setSelected(idx);
-          }
-          if (gp.hotbarDown) {
-            const idx = (selectedSlotRef.current - 1 + 9) % 9;
-            setSelectedSlot(idx);
-            selectedSlotRef.current = idx;
-            inventoryRef.current.setSelected(idx);
-          }
-          // Attack (RT trigger)
-          if (gp.rightTrigger > 0.5) {
-            leftMouseDown = true;
+
+      // === Gamepad input (Xbox controller) ===
+      // Runs when controller mode is active. Works WITHOUT pointer lock.
+      const usingController = inputModeRef.current === "controller";
+      const gp = usingController ? readGamepad(0) : null;
+      if (gp && !isDragonMounted && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest) {
+        // Movement: left stick → WASD
+        player.setKey("KeyW", gp.moveY < -0.3);
+        player.setKey("KeyS", gp.moveY > 0.3);
+        player.setKey("KeyA", gp.moveX < -0.3);
+        player.setKey("KeyD", gp.moveX > 0.3);
+        // Jump: A button
+        player.setKey("Space", gp.a);
+        // Sprint: left stick click (LS)
+        player.setKey("ShiftLeft", gp.ls);
+        // Down/dismount dragon: B button → simulate KeyN
+        // Look: right stick → mouse delta
+        const lookSensitivity = 3.0;
+        player.addMouseDelta(gp.lookX * lookSensitivity, gp.lookY * lookSensitivity);
+        // Hotbar: RB = next, LB = previous (edge detected)
+        if (wasPressed(gp.rb, 5)) {
+          const idx = (selectedSlotRef.current + 1) % 9;
+          setSelectedSlot(idx);
+          selectedSlotRef.current = idx;
+          inventoryRef.current.setSelected(idx);
+        }
+        if (wasPressed(gp.lb, 4)) {
+          const idx = (selectedSlotRef.current - 1 + 9) % 9;
+          setSelectedSlot(idx);
+          selectedSlotRef.current = idx;
+          inventoryRef.current.setSelected(idx);
+        }
+        // D-pad for hotbar slots 1-9
+        if (wasPressed(gp.dpadUp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
+        if (wasPressed(gp.dpadDown, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
+        if (wasPressed(gp.dpadLeft, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
+        if (wasPressed(gp.dpadRight, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
+
+        // Attack/Mine: RT trigger (held = continuous mining)
+        if (gp.rt) {
+          leftMouseDown = true;
+          handView.triggerAction("swing");
+          // In creative, break immediately
+          if (worldConfigRef.current?.mode === "creative") {
+            breakBlock();
           } else {
-            leftMouseDown = false;
+            // In survival, start mining
+            const hit = player.raycast(6);
+            if (hit.hit && hit.block) {
+              if (!miningBlock || miningBlock.x !== hit.block.x || miningBlock.y !== hit.block.y || miningBlock.z !== hit.block.z) {
+                miningProgress = 0;
+                miningBlock = { ...hit.block };
+              }
+            } else {
+              miningProgress = 0;
+              miningBlock = null;
+            }
           }
-          // Place (X button)
-          if (gp.place) {
-            performRightClickAction();
+          // Check for entity attacks
+          const eyeX = player.position.x;
+          const eyeY = player.position.y + 1.5;
+          const eyeZ = player.position.z;
+          const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
+          const monster = monsterManager.findClosest(eyeX, eyeY, eyeZ, 4);
+          if (animal || monster) {
+            miningProgress = 0;
+            miningBlock = null;
+          }
+        } else {
+          leftMouseDown = false;
+          miningProgress = 0;
+          miningBlock = null;
+        }
+
+        // Place/Interact: X button (edge detected — only once per press)
+        if (wasPressed(gp.x, 2)) {
+          performRightClickAction();
+        }
+
+        // Inventory: Y button (edge detected)
+        if (wasPressed(gp.y, 3)) {
+          document.exitPointerLock();
+          setShowInventory(true);
+        }
+
+        // Dragon mount: B button (edge detected)
+        if (wasPressed(gp.b, 1)) {
+          const dragon2 = dragonManager.getActiveDragon();
+          if (dragon2) {
+            if (dragon2.isMounted) {
+              dragon2.toggleMount(player.position);
+              player.position.set(dragon2.position.x + 1, dragon2.position.y, dragon2.position.z);
+              player.velocity.set(0, 0, 0);
+            } else {
+              const dx = dragon2.position.x - player.position.x;
+              const dy = dragon2.position.y - player.position.y;
+              const dz = dragon2.position.z - player.position.z;
+              const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+              if (dist <= 6) {
+                dragon2.toggleMount(player.position);
+              }
+            }
+          }
+        }
+
+        // Pause: Start button (edge detected)
+        if (wasPressed(gp.start, 9)) {
+          document.exitPointerLock();
+        }
+
+        // Dragon stay/follow: Back button (edge detected)
+        if (wasPressed(gp.back, 8)) {
+          const dragon2 = dragonManager.getActiveDragon();
+          if (dragon2 && !dragon2.isMounted) {
+            dragon2.isStaying = !dragon2.isStaying;
           }
         }
       }
 
-      // Apply mouse look to player even when mounted (so yaw/pitch sync with camera)
-      if (document.pointerLockElement === renderer.domElement && !player.isDead()) {
-        // When dragon is mounted, skip normal player movement - the dragon controls position.
-        // But still update player's yaw/pitch from mouse (used for dragon camera direction).
+      // === Player update ===
+      // Keyboard mode: requires pointer lock. Controller mode: runs without pointer lock.
+      const canUpdate = usingController
+        ? (!player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest)
+        : (document.pointerLockElement === renderer.domElement && !player.isDead());
+      if (canUpdate) {
         if (isDragonMounted) {
-          // Apply mouse-look only (no physics/movement)
+          // Apply look only (no physics/movement) when dragon is mounted
           const sensitivity = 0.0022;
           player.yaw -= player.mouseDeltaX * sensitivity;
           player.pitch -= player.mouseDeltaY * sensitivity;
@@ -1394,7 +1474,7 @@ export default function MinecraftGame() {
 
       // Continuous mining in survival mode when left mouse is held
       // But first check if we're aiming at an animal to attack it
-      if (leftMouseDown && document.pointerLockElement === renderer.domElement && !player.isDead()) {
+      if (leftMouseDown && (document.pointerLockElement === renderer.domElement || usingController) && !player.isDead()) {
         // Try to find an animal in front of the player (within 4 blocks)
         const eyeX = player.position.x;
         const eyeY = player.position.y + 1.5;
@@ -1964,12 +2044,17 @@ export default function MinecraftGame() {
                     <div className="mt-3 mb-1 text-yellow-300 font-bold text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
                       ── Control Xbox ──
                     </div>
-                    <ControlRow keys="Stick Izq" desc="Moverse" />
-                    <ControlRow keys="Stick Der" desc="Mirar" />
+                    <ControlRow keys="Stick Izq" desc="Moverse (arriba/abajo/izq/der)" />
+                    <ControlRow keys="Stick Der" desc="Mirar alrededor" />
                     <ControlRow keys="A" desc="Saltar" />
-                    <ControlRow keys="RT" desc="Minar / Atacar" />
-                    <ControlRow keys="X" desc="Colocar / Interactuar" />
-                    <ControlRow keys="LB / RB" desc="Cambiar slot" />
+                    <ControlRow keys="RT" desc="Minar bloque / Atacar (mantener)" />
+                    <ControlRow keys="X" desc="Colocar / Interactuar (presionar)" />
+                    <ControlRow keys="Y" desc="Abrir inventario" />
+                    <ControlRow keys="B" desc="Montar/desmontar dragón" />
+                    <ControlRow keys="LB / RB" desc="Slot anterior / siguiente" />
+                    <ControlRow keys="D-Pad" desc="Slots 1-4 directo" />
+                    <ControlRow keys="LS (click)" desc="Correr" />
+                    <ControlRow keys="Back" desc="Dragón espera/sigue" />
                     <ControlRow keys="Start" desc="Pausar" />
                   </>
                 )}
@@ -1977,7 +2062,7 @@ export default function MinecraftGame() {
               {/* Input mode selector */}
               <div className="flex gap-2 mb-3 justify-center">
                 <button
-                  onClick={() => setInputMode("keyboard")}
+                  onClick={() => { setInputMode("keyboard"); inputModeRef.current = "keyboard"; resetGamepadState(); }}
                   className="px-4 py-2 font-mono font-bold text-sm transition-all"
                   style={{
                     backgroundColor: inputMode === "keyboard" ? "#5a8a3a" : "#5a5a5a",
@@ -1993,7 +2078,7 @@ export default function MinecraftGame() {
                   ⌨ Teclado
                 </button>
                 <button
-                  onClick={() => setInputMode("controller")}
+                  onClick={() => { setInputMode("controller"); inputModeRef.current = "controller"; resetGamepadState(); }}
                   className="px-4 py-2 font-mono font-bold text-sm transition-all"
                   style={{
                     backgroundColor: inputMode === "controller" ? "#3a5a8a" : "#5a5a5a",
