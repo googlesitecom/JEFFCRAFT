@@ -61,6 +61,11 @@ export enum ItemType {
   DiamondBoots = 372,
   // Special
   DragonEgg = 400,
+  // Nether / End items
+  EnderEye = 410,
+  FlintAndSteel = 411,
+  BlazeRod = 412,
+  EnderPearl = 413,
 }
 
 export type ToolTier = "wood" | "stone" | "iron" | "diamond" | "gold";
@@ -216,6 +221,11 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   [ItemType.DiamondBoots]: { id: ItemType.DiamondBoots, name: "Diamond Boots", icon: "diamond_boots", maxStack: 1, armorType: "boots", armorTier: "diamond", defense: 3, maxDurability: 429 },
   // Special
   [ItemType.DragonEgg]: { id: ItemType.DragonEgg, name: "Dragon Egg", icon: "dragon_egg", maxStack: 1 },
+  // Nether / End items
+  [ItemType.EnderEye]: { id: ItemType.EnderEye, name: "Ender Eye", icon: "ender_eye", maxStack: 64 },
+  [ItemType.FlintAndSteel]: { id: ItemType.FlintAndSteel, name: "Flint and Steel", icon: "flint_and_steel", maxStack: 1, maxDurability: 65 },
+  [ItemType.BlazeRod]: { id: ItemType.BlazeRod, name: "Blaze Rod", icon: "blaze_rod", maxStack: 64 },
+  [ItemType.EnderPearl]: { id: ItemType.EnderPearl, name: "Ender Pearl", icon: "ender_eye", maxStack: 64 },
 };
 
 // Check if an ID is an item (not a block)

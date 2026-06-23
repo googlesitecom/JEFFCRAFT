@@ -239,16 +239,17 @@ export class Animal {
 
     // === MOVEMENT WITH COLLISION (per-axis) ===
     const halfW = this.def.width / 2;
+    const halfD = this.def.depth / 2;
     const bodyHeight = this.def.height;
 
     // --- X axis ---
     const oldX = this.position.x;
     this.position.x += this.velocity.x * dt;
-    if (this.checkBodyCollision(halfW, bodyHeight)) {
+    if (this.checkBodyCollision(halfW, halfD, bodyHeight)) {
       this.position.x = oldX;
       this.velocity.x = 0;
       // Try to step up 1 block (jump over obstacle)
-      if (this.canStepUpFrom(halfW, bodyHeight) && this.velocity.y <= 0) {
+      if (this.canStepUpFrom(halfW, halfD, bodyHeight) && this.velocity.y <= 0) {
         this.velocity.y = 7;
       } else {
         // Can't step up → turn 90-180° (not random, to avoid jitter)
@@ -259,10 +260,10 @@ export class Animal {
     // --- Z axis ---
     const oldZ = this.position.z;
     this.position.z += this.velocity.z * dt;
-    if (this.checkBodyCollision(halfW, bodyHeight)) {
+    if (this.checkBodyCollision(halfW, halfD, bodyHeight)) {
       this.position.z = oldZ;
       this.velocity.z = 0;
-      if (this.canStepUpFrom(halfW, bodyHeight) && this.velocity.y <= 0) {
+      if (this.canStepUpFrom(halfW, halfD, bodyHeight) && this.velocity.y <= 0) {
         this.velocity.y = 7;
       } else {
         this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
@@ -340,16 +341,16 @@ export class Animal {
     }
   }
 
-  // Check if the animal's body collides with any solid block
-  private checkBodyCollision(halfW: number, bodyHeight: number): boolean {
-    // Use a small margin to prevent entities from getting stuck in walls
+  // Check if the animal's body collides with any solid block.
+  // Uses separate half-width (X) and half-depth (Z) to match the model's actual shape.
+  private checkBodyCollision(halfW: number, halfD: number, bodyHeight: number): boolean {
     const margin = 0.01;
     const minX = Math.floor(this.position.x - halfW - margin);
     const maxX = Math.floor(this.position.x + halfW + margin);
     const minY = Math.floor(this.position.y + margin);
     const maxY = Math.floor(this.position.y + bodyHeight - margin);
-    const minZ = Math.floor(this.position.z - halfW - margin);
-    const maxZ = Math.floor(this.position.z + halfW + margin);
+    const minZ = Math.floor(this.position.z - halfD - margin);
+    const maxZ = Math.floor(this.position.z + halfD + margin);
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {
@@ -361,14 +362,13 @@ export class Animal {
   }
 
   // Check if the animal can step up 1 block (jump)
-  private canStepUpFrom(halfW: number, bodyHeight: number): boolean {
-    // Check if there's space 1 block above current position
+  private canStepUpFrom(halfW: number, halfD: number, bodyHeight: number): boolean {
     const minX = Math.floor(this.position.x - halfW);
     const maxX = Math.floor(this.position.x + halfW);
     const minY = Math.floor(this.position.y) + 1;
     const maxY = Math.floor(this.position.y + bodyHeight) + 1;
-    const minZ = Math.floor(this.position.z - halfW);
-    const maxZ = Math.floor(this.position.z + halfW);
+    const minZ = Math.floor(this.position.z - halfD);
+    const maxZ = Math.floor(this.position.z + halfD);
     for (let x = minX; x <= maxX; x++) {
       for (let y = minY; y <= maxY; y++) {
         for (let z = minZ; z <= maxZ; z++) {

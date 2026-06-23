@@ -18,8 +18,8 @@ export interface MonsterDef {
   width: number;
   height: number;
   modelScale: number;
+  modelYOffset: number;
   modelRotationOffset: number;
-  // Whether the monster burns in daylight
   burnsInSunlight: boolean;
 }
 
@@ -34,8 +34,10 @@ export const MONSTERS: Record<MonsterType, MonsterDef> = {
     drops: [{ id: ItemType.RawBeef, min: 0, max: 1 }, { id: ItemType.Coal, min: 0, max: 1 }],
     width: 0.6,
     height: 1.8,
+    // Zombie.glb: feet at Y=-4 in model space, scale 0.08 → feet at Y=-0.32. Offset +0.32.
     modelScale: 0.08,
-    modelRotationOffset: Math.PI, // flip 180° to face forward
+    modelYOffset: 0.32,
+    modelRotationOffset: Math.PI,
     burnsInSunlight: true,
   },
   spider: {
@@ -48,8 +50,10 @@ export const MONSTERS: Record<MonsterType, MonsterDef> = {
     drops: [{ id: ItemType.RawChicken, min: 0, max: 1 }, { id: ItemType.Stick, min: 0, max: 2 }],
     width: 1.0,
     height: 0.6,
+    // Spider.glb: feet at Y=-4 in model space, scale 0.06 → feet at Y=-0.24. Offset +0.24.
     modelScale: 0.06,
-    modelRotationOffset: Math.PI, // flip 180° to face forward
+    modelYOffset: 0.24,
+    modelRotationOffset: Math.PI,
     burnsInSunlight: false,
   },
 };
@@ -207,6 +211,18 @@ export class Monster {
     return false;
   }
 
+  // Apply knockback to the monster (pushed away from attacker).
+  knockback(fromX: number, fromZ: number, strength: number = 4) {
+    const dx = this.position.x - fromX;
+    const dz = this.position.z - fromZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > 0.001) {
+      this.velocity.x = (dx / dist) * strength;
+      this.velocity.z = (dz / dist) * strength;
+    }
+    this.velocity.y = Math.max(this.velocity.y, 3);
+  }
+
   getDrops(): { id: number; count: number }[] {
     const drops: { id: number; count: number }[] = [];
     for (const d of this.def.drops) {
@@ -339,7 +355,8 @@ export class Monster {
 
     // Update model
     if (this.model) {
-      this.model.position.copy(this.position);
+      // Apply modelYOffset so the model's feet rest on the ground (not buried)
+      this.model.position.set(this.position.x, this.position.y + this.def.modelYOffset, this.position.z);
       this.model.rotation.y = this.yaw + this.def.modelRotationOffset;
 
       // Walk animation
@@ -434,8 +451,8 @@ export class MonsterManager {
     this.scene = scene;
   }
 
-  update(dt: number, playerX: number, playerY: number, playerZ: number, isNight: boolean): { damage: number }[] {
-    const damages: { damage: number }[] = [];
+  update(dt: number, playerX: number, playerY: number, playerZ: number, isNight: boolean): { damage: number; fromX: number; fromZ: number }[] {
+    const damages: { damage: number; fromX: number; fromZ: number }[] = [];
 
     // Spawn at night
     if (isNight) {
@@ -450,7 +467,7 @@ export class MonsterManager {
     for (let i = this.monsters.length - 1; i >= 0; i--) {
       const m = this.monsters[i];
       const result = m.update(dt, playerX, playerY, playerZ, isNight);
-      if (result) damages.push(result);
+      if (result) damages.push({ damage: result.damage, fromX: m.position.x, fromZ: m.position.z });
 
       if (m.isDead) {
         this.disposeMonster(m);

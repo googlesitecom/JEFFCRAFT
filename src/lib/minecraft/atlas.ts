@@ -79,6 +79,15 @@ export const TEXTURE_NAMES = [
   "gold_sword",
   "gold_shovel",
   "dragon_egg",
+  "obsidian",
+  "netherrack",
+  "soul_sand",
+  "glowstone",
+  "nether_portal",
+  "end_stone",
+  "ender_eye",
+  "flint_and_steel",
+  "blaze_rod",
 ] as const;
 
 export type TextureName = (typeof TEXTURE_NAMES)[number];

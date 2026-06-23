@@ -301,6 +301,17 @@ export const RECIPES: Recipe[] = [
     type: "shaped", pattern: pat(["...", "D.D", "D.D"], { D: ItemType.Diamond }),
     result: { id: ItemType.DiamondBoots, count: 1 }, requiresTable: true,
   },
+  // === NETHER / END RECIPES ===
+  // Flint and Steel: 1 iron ingot + 1 stick (shapeless, simplified)
+  {
+    type: "shapeless", ingredients: [ItemType.IronIngot, ItemType.Stick],
+    result: { id: ItemType.FlintAndSteel, count: 1 }, requiresTable: false,
+  },
+  // Ender Eye: blaze rod + ender pearl (shapeless)
+  {
+    type: "shapeless", ingredients: [ItemType.BlazeRod, ItemType.EnderPearl],
+    result: { id: ItemType.EnderEye, count: 1 }, requiresTable: true,
+  },
 ];
 
 // Check if an ingredient matches an item id

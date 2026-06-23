@@ -596,6 +596,127 @@ function texTorch(): ImageData {
   return img;
 }
 
+// === NETHER / END BLOCK TEXTURES ===
+function texObsidian(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const base = hexToRgb("#1a0a2a");
+  const dark = hexToRgb("#0d0518");
+  const light = hexToRgb("#2a1a3a");
+  const purple = hexToRgb("#4a2a6a");
+  fill(img, base);
+  // Random dark/light spots
+  const rng = makeRng(42);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const r = rng();
+      if (r < 0.15) setPixel(img, x, y, dark);
+      else if (r < 0.3) setPixel(img, x, y, light);
+      else if (r < 0.35) setPixel(img, x, y, purple);
+    }
+  }
+  return img;
+}
+
+function texNetherrack(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const base = hexToRgb("#6e1f1f");
+  const dark = hexToRgb("#4a1010");
+  const light = hexToRgb("#8a2a2a");
+  const darker = hexToRgb("#2a0808");
+  fill(img, base);
+  const rng = makeRng(99);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const r = rng();
+      if (r < 0.2) setPixel(img, x, y, dark);
+      else if (r < 0.35) setPixel(img, x, y, light);
+      else if (r < 0.4) setPixel(img, x, y, darker);
+    }
+  }
+  return img;
+}
+
+function texSoulSand(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const base = hexToRgb("#4a3a28");
+  const dark = hexToRgb("#2a2018");
+  const light = hexToRgb("#5a4a38");
+  fill(img, base);
+  // Soul sand has face-like indentations
+  setPixel(img, 4, 4, dark);
+  setPixel(img, 5, 4, dark);
+  setPixel(img, 10, 4, dark);
+  setPixel(img, 11, 4, dark);
+  setPixel(img, 4, 10, dark);
+  setPixel(img, 5, 10, dark);
+  setPixel(img, 6, 11, dark);
+  setPixel(img, 9, 10, dark);
+  setPixel(img, 10, 10, dark);
+  setPixel(img, 11, 10, dark);
+  const rng = makeRng(77);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      if (rng() < 0.15) setPixel(img, x, y, light);
+    }
+  }
+  return img;
+}
+
+function texGlowstone(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const base = hexToRgb("#8a6a2a");
+  const light = hexToRgb("#e8c84a");
+  const bright = hexToRgb("#fff080");
+  const dark = hexToRgb("#5a4520");
+  fill(img, base);
+  const rng = makeRng(33);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const r = rng();
+      if (r < 0.2) setPixel(img, x, y, bright);
+      else if (r < 0.5) setPixel(img, x, y, light);
+      else if (r < 0.6) setPixel(img, x, y, dark);
+    }
+  }
+  return img;
+}
+
+function texNetherPortal(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  clearTransparent(img);
+  const portal = hexToRgb("#4a1a8a");
+  const light = hexToRgb("#7a3acc");
+  const bright = hexToRgb("#aa5aff");
+  fill(img, portal);
+  // Swirl pattern
+  const rng = makeRng(11);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const r = rng();
+      if (r < 0.25) setPixel(img, x, y, bright);
+      else if (r < 0.6) setPixel(img, x, y, light);
+    }
+  }
+  return img;
+}
+
+function texEndStone(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const base = hexToRgb("#d8d0a0");
+  const dark = hexToRgb("#a8a070");
+  const light = hexToRgb("#e8e0b0");
+  fill(img, base);
+  const rng = makeRng(55);
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      const r = rng();
+      if (r < 0.2) setPixel(img, x, y, dark);
+      else if (r < 0.35) setPixel(img, x, y, light);
+    }
+  }
+  return img;
+}
+
 // === ANIMAL TEXTURES (top-down view for sprites) ===
 function texPig(): ImageData {
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
@@ -724,6 +845,12 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
     furnace_side: imageDataToCanvas(texFurnaceSide()),
     furnace_front: imageDataToCanvas(texFurnaceFront()),
     torch: imageDataToCanvas(texTorch()),
+    obsidian: imageDataToCanvas(texObsidian()),
+    netherrack: imageDataToCanvas(texNetherrack()),
+    soul_sand: imageDataToCanvas(texSoulSand()),
+    glowstone: imageDataToCanvas(texGlowstone()),
+    nether_portal: imageDataToCanvas(texNetherPortal()),
+    end_stone: imageDataToCanvas(texEndStone()),
     pig: imageDataToCanvas(texPig()),
     cow: imageDataToCanvas(texCow()),
     chicken: imageDataToCanvas(texChicken()),

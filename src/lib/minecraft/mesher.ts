@@ -164,39 +164,87 @@ export function buildChunkGeometry(
         const block = chunk.getLocal(lx, y, lz);
         if (isAir(block)) continue;
 
-        // Torch: render as small cross (like Minecraft) instead of full cube
+        // Torch: render as small cross, attached to adjacent wall or floor (no floating).
         if (block === BlockType.Torch) {
           const tile = atlas.tiles["torch"];
           if (tile) {
             const target = cutout;
-            // Torch sits exactly on top of the block below (no floating).
-            // Block Y is the floor of this block (== top of the block below).
-            // Mesh base at y + 0.02 so it doesn't z-fight with the floor.
-            const cx = wx + 0.5, cy = y + 0.02, cz = wz + 0.5;
-            const w = 0.12, h = 0.55;
-            // Front face (+Z side)
+            // Detect orientation: which adjacent solid block determines where the torch attaches.
+            // Priority: wall (sides) > floor (below).
+            const blockBelow = world.getBlock(wx, y - 1, wz);
+            const blockEast = world.getBlock(wx + 1, y, wz);   // +X
+            const blockWest = world.getBlock(wx - 1, y, wz);   // -X
+            const blockNorth = world.getBlock(wx, y, wz + 1);  // +Z
+            const blockSouth = world.getBlock(wx, y, wz - 1);  // -Z
+            let attachDir: "floor" | "east" | "west" | "north" | "south" = "floor";
+            if (isOpaque(blockEast)) attachDir = "east";
+            else if (isOpaque(blockWest)) attachDir = "west";
+            else if (isOpaque(blockNorth)) attachDir = "north";
+            else if (isOpaque(blockSouth)) attachDir = "south";
+            // Default: floor (if block below is solid, or nothing solid adjacent)
+
+            // Position and tilt based on attachment direction
+            let cx = wx + 0.5, cy = y + 0.02, cz = wz + 0.5;
+            const w = 0.1, h = 0.5;
+            // Offset toward the wall and tilt slightly
+            let tiltX = 0, tiltZ = 0;
+            if (attachDir === "east") { cx = wx + 0.85; tiltX = -0.3; }
+            else if (attachDir === "west") { cx = wx + 0.15; tiltX = 0.3; }
+            else if (attachDir === "north") { cz = wz + 0.85; tiltZ = -0.3; }
+            else if (attachDir === "south") { cz = wz + 0.15; tiltZ = 0.3; }
+            // Floor torch: centered, no tilt
+
+            // Render as 2 crossed planes (X and Z aligned) at the attachment position.
+            // The torch is tilted toward the wall it's attached to.
+            // Plane 1 (Z-aligned, facing ±X)
             const si = target.positions.length / 3;
-            target.positions.push(cx - w, cy, cz, cx + w, cy, cz, cx + w, cy + h, cz, cx - w, cy + h, cz);
+            // Compute tilted corners: base at (cx, cy, cz), top at (cx+tiltX*h, cy+h, cz+tiltZ*h)
+            const baseX = cx, baseZ = cz;
+            const topX = cx + tiltX * h * 0.5;
+            const topZ = cz + tiltZ * h * 0.5;
+            // Plane 1: along X axis (left-right), facing Z
+            target.positions.push(
+              baseX - w, cy, cz,        // bottom-left
+              baseX + w, cy, cz,        // bottom-right
+              topX + w, cy + h, topZ,   // top-right (tilted)
+              topX - w, cy + h, topZ    // top-left (tilted)
+            );
             target.normals.push(0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1);
             target.uvs.push(tile.u0, tile.v0, tile.u1, tile.v0, tile.u1, tile.v1, tile.u0, tile.v1);
             target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
             target.indices.push(si, si + 1, si + 2, si, si + 2, si + 3);
-            // Back face (-Z side)
+            // Back face of plane 1
             const si2 = target.positions.length / 3;
-            target.positions.push(cx - w, cy, cz, cx + w, cy, cz, cx + w, cy + h, cz, cx - w, cy + h, cz);
+            target.positions.push(
+              baseX - w, cy, cz,
+              baseX + w, cy, cz,
+              topX + w, cy + h, topZ,
+              topX - w, cy + h, topZ
+            );
             target.normals.push(0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, -1);
             target.uvs.push(tile.u1, tile.v0, tile.u0, tile.v0, tile.u0, tile.v1, tile.u1, tile.v1);
             target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
             target.indices.push(si2, si2 + 1, si2 + 2, si2, si2 + 2, si2 + 3);
-            // Side faces (X-aligned cross)
+            // Plane 2: along Z axis (front-back), facing X
             const si3 = target.positions.length / 3;
-            target.positions.push(cx, cy, cz - w, cx, cy, cz + w, cx, cy + h, cz + w, cx, cy + h, cz - w);
+            target.positions.push(
+              cx, cy, baseZ - w,
+              cx, cy, baseZ + w,
+              topX, cy + h, topZ + w,
+              topX, cy + h, topZ - w
+            );
             target.normals.push(1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0);
             target.uvs.push(tile.u0, tile.v0, tile.u1, tile.v0, tile.u1, tile.v1, tile.u0, tile.v1);
             target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
             target.indices.push(si3, si3 + 1, si3 + 2, si3, si3 + 2, si3 + 3);
+            // Back face of plane 2
             const si4 = target.positions.length / 3;
-            target.positions.push(cx, cy, cz - w, cx, cy, cz + w, cx, cy + h, cz + w, cx, cy + h, cz - w);
+            target.positions.push(
+              cx, cy, baseZ - w,
+              cx, cy, baseZ + w,
+              topX, cy + h, topZ + w,
+              topX, cy + h, topZ - w
+            );
             target.normals.push(-1, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0);
             target.uvs.push(tile.u1, tile.v0, tile.u0, tile.v0, tile.u0, tile.v1, tile.u1, tile.v1);
             target.colors.push(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1);

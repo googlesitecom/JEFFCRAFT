@@ -37,6 +37,12 @@ export const BLOCK_HARDNESS: Partial<Record<BlockType, number>> = {
   [BlockType.Furnace]: 20,
   [BlockType.Pumpkin]: 10,
   [BlockType.Torch]: 1,
+  [BlockType.Obsidian]: 400, // very hard, requires diamond pickaxe
+  [BlockType.Netherrack]: 8,
+  [BlockType.SoulSand]: 6,
+  [BlockType.Glowstone]: 8,
+  [BlockType.NetherPortal]: 10,
+  [BlockType.EndStone]: 30,
 };
 
 // Required mining tier for each block (0 = any tool including hand).
@@ -54,6 +60,10 @@ export const BLOCK_REQUIRED_TIER: Partial<Record<BlockType, number>> = {
   [BlockType.IronOre]: 1,
   [BlockType.GoldOre]: 2,
   [BlockType.DiamondOre]: 2,
+  [BlockType.Obsidian]: 3, // requires diamond pickaxe
+  [BlockType.Netherrack]: 0,
+  [BlockType.Glowstone]: 0,
+  [BlockType.EndStone]: 0,
 };
 
 // Which tool type is appropriate for each block (for the "tool speed bonus").

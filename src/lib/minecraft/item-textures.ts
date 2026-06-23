@@ -580,7 +580,78 @@ export function buildItemCanvases(): Record<string, HTMLCanvasElement> {
     diamond_boots: imageDataToCanvas(makeArmor(0x5edcdc, "boots")),
     // Dragon egg (special item)
     dragon_egg: imageDataToCanvas(texDragonEgg()),
+    // Nether / End items
+    ender_eye: imageDataToCanvas(texEnderEye()),
+    flint_and_steel: imageDataToCanvas(texFlintAndSteel()),
+    blaze_rod: imageDataToCanvas(texBlazeRod()),
   };
+}
+
+// Ender Eye: green/teal eye with pupil
+function texEnderEye(): ImageData {
+  const img = new ImageData(16, 16);
+  clearTransparent(img);
+  const green = hexToRgb("#1a8a4a");
+  const lightGreen = hexToRgb("#3acc6a");
+  const dark = hexToRgb("#0a4a2a");
+  const pupil = hexToRgb("#0a0a0a");
+  // Eye shape (oval)
+  fillRect(img, 4, 6, 8, 4, green);
+  fillRect(img, 5, 5, 6, 1, green);
+  fillRect(img, 5, 10, 6, 1, green);
+  // Highlight
+  fillRect(img, 5, 6, 2, 1, lightGreen);
+  // Pupil (center)
+  fillRect(img, 7, 7, 2, 2, pupil);
+  setPixel(img, 8, 7, dark);
+  // Outline
+  setPixel(img, 4, 7, dark);
+  setPixel(img, 11, 7, dark);
+  return img;
+}
+
+// Flint and Steel: gray flint + steel striker
+function texFlintAndSteel(): ImageData {
+  const img = new ImageData(16, 16);
+  clearTransparent(img);
+  const steel = hexToRgb("#888888");
+  const steelLight = hexToRgb("#aaaaaa");
+  const steelDark = hexToRgb("#555555");
+  const flint = hexToRgb("#3a3a3a");
+  const flintLight = hexToRgb("#5a5a5a");
+  // Steel body (curved shape)
+  fillRect(img, 4, 6, 8, 4, steel);
+  fillRect(img, 5, 5, 6, 1, steelLight);
+  fillRect(img, 5, 10, 6, 1, steelDark);
+  // Flint (dark stone at the tip)
+  fillRect(img, 10, 7, 3, 3, flint);
+  setPixel(img, 11, 8, flintLight);
+  // Spark
+  setPixel(img, 13, 7, hexToRgb("#ffdd00"));
+  setPixel(img, 13, 9, hexToRgb("#ffaa00"));
+  return img;
+}
+
+// Blaze Rod: golden/yellow rod with glowing ends
+function texBlazeRod(): ImageData {
+  const img = new ImageData(16, 16);
+  clearTransparent(img);
+  const rod = hexToRgb("#d8a020");
+  const rodLight = hexToRgb("#f8c040");
+  const rodDark = hexToRgb("#a87010");
+  const glow = hexToRgb("#fff080");
+  // Rod body (vertical)
+  fillRect(img, 7, 2, 2, 12, rod);
+  // Highlight
+  fillRect(img, 7, 2, 1, 12, rodLight);
+  // Shadow
+  fillRect(img, 8, 2, 1, 12, rodDark);
+  // Glowing ends
+  fillRect(img, 6, 1, 4, 1, glow);
+  fillRect(img, 6, 14, 4, 1, glow);
+  setPixel(img, 7, 0, glow);
+  setPixel(img, 8, 0, glow);
+  return img;
 }
 
 // Dragon egg texture: dark purple/black egg with magenta spots

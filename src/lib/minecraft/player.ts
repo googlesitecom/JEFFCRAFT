@@ -46,6 +46,12 @@ export class Player {
   // Armor slots (helmet, chestplate, leggings, boots)
   armor: ArmorSlots = emptyArmor();
 
+  // Damage shake: when the player takes damage, the camera shakes briefly (like Minecraft).
+  private damageShakeTime: number = 0;
+  private damageShakeIntensity: number = 0;
+  private static readonly DAMAGE_SHAKE_DURATION = 0.4;
+  private static readonly DAMAGE_SHAKE_MAX_INTENSITY = 0.06;
+
   // Water state
   inWater: boolean = false;
   headInWater: boolean = false;
@@ -91,6 +97,26 @@ export class Player {
     this.health = Math.max(0, this.health - reduced);
     // Consume armor durability (1 per piece per hit)
     this.armor = damageArmor(this.armor, amount);
+    // Trigger camera shake
+    this.damageShakeTime = Player.DAMAGE_SHAKE_DURATION;
+    this.damageShakeIntensity = Math.min(
+      Player.DAMAGE_SHAKE_MAX_INTENSITY,
+      Player.DAMAGE_SHAKE_MAX_INTENSITY * (reduced / 5)
+    );
+    if (this.damageShakeIntensity < 0.02) this.damageShakeIntensity = 0.02;
+  }
+
+  // Apply knockback to the player (pushed away from a source position).
+  knockback(fromX: number, fromZ: number, strength: number = 6) {
+    if (this.mode === "creative") return;
+    const dx = this.position.x - fromX;
+    const dz = this.position.z - fromZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > 0.001) {
+      this.velocity.x = (dx / dist) * strength;
+      this.velocity.z = (dz / dist) * strength;
+    }
+    this.velocity.y = Math.max(this.velocity.y, 4);
   }
 
   heal(amount: number) {
@@ -126,6 +152,11 @@ export class Player {
   }
 
   update(dt: number) {
+    // Decay damage shake timer
+    if (this.damageShakeTime > 0) {
+      this.damageShakeTime -= dt;
+      if (this.damageShakeTime < 0) this.damageShakeTime = 0;
+    }
     // Apply mouse look
     const sensitivity = 0.0022;
     this.yaw -= this.mouseDeltaX * sensitivity;
@@ -323,15 +354,31 @@ export class Player {
   }
 
   private updateCamera() {
-    this.camera.position.set(
-      this.position.x,
-      this.position.y + EYE_OFFSET,
-      this.position.z
-    );
+    let camX = this.position.x;
+    let camY = this.position.y + EYE_OFFSET;
+    let camZ = this.position.z;
+    let rotX = this.pitch;
+    let rotY = this.yaw;
+    let rotZ = 0;
+
+    // Damage shake: vibrate the camera when recently hit
+    if (this.damageShakeTime > 0) {
+      const t = 1 - (this.damageShakeTime / Player.DAMAGE_SHAKE_DURATION);
+      const decay = 1 - t;
+      const intensity = this.damageShakeIntensity * decay;
+      const shake = (Math.random() * 2 - 1) * intensity;
+      const shake2 = (Math.random() * 2 - 1) * intensity;
+      rotY += shake;
+      rotX += shake2;
+      camX += (Math.random() * 2 - 1) * intensity * 0.3;
+      camY += (Math.random() * 2 - 1) * intensity * 0.3;
+    }
+
+    this.camera.position.set(camX, camY, camZ);
     this.camera.rotation.order = "YXZ";
-    this.camera.rotation.y = this.yaw;
-    this.camera.rotation.x = this.pitch;
-    this.camera.rotation.z = 0;
+    this.camera.rotation.y = rotY;
+    this.camera.rotation.x = rotX;
+    this.camera.rotation.z = rotZ;
   }
 
   raycast(maxDist: number = 6): {

@@ -24,6 +24,12 @@ export enum BlockType {
   Bookshelf = 21,
   Furnace = 22,
   Torch = 23,
+  Obsidian = 24,
+  Netherrack = 25,
+  SoulSand = 26,
+  Glowstone = 27,
+  NetherPortal = 28,
+  EndStone = 29,
 }
 
 export type RenderLayer = "opaque" | "cutout" | "translucent";
@@ -158,6 +164,36 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
     textures: { top: "torch", bottom: "torch", side: "torch" },
     layer: "cutout", solid: false,
   },
+  [BlockType.Obsidian]: {
+    id: BlockType.Obsidian, name: "Obsidian",
+    textures: { top: "obsidian", bottom: "obsidian", side: "obsidian" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.Netherrack]: {
+    id: BlockType.Netherrack, name: "Netherrack",
+    textures: { top: "netherrack", bottom: "netherrack", side: "netherrack" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.SoulSand]: {
+    id: BlockType.SoulSand, name: "Soul Sand",
+    textures: { top: "soul_sand", bottom: "soul_sand", side: "soul_sand" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.Glowstone]: {
+    id: BlockType.Glowstone, name: "Glowstone",
+    textures: { top: "glowstone", bottom: "glowstone", side: "glowstone" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.NetherPortal]: {
+    id: BlockType.NetherPortal, name: "Nether Portal",
+    textures: { top: "nether_portal", bottom: "nether_portal", side: "nether_portal" },
+    layer: "translucent", solid: false,
+  },
+  [BlockType.EndStone]: {
+    id: BlockType.EndStone, name: "End Stone",
+    textures: { top: "end_stone", bottom: "end_stone", side: "end_stone" },
+    layer: "opaque", solid: true,
+  },
 };
 
 // Helper functions
@@ -206,6 +242,18 @@ export const HOTBAR_BLOCKS: BlockType[] = [
   BlockType.Leaves,
   BlockType.Sand,
   BlockType.Glass,
+];
+
+// Nether blocks for creative inventory
+export const NETHER_BLOCKS: BlockType[] = [
+  BlockType.Obsidian,
+  BlockType.Netherrack,
+  BlockType.SoulSand,
+  BlockType.Glowstone,
+  BlockType.NetherPortal,
+  BlockType.EndStone,
+  BlockType.Brick,
+  BlockType.Torch,
 ];
 
 // Get ALL valid block ids (for creative inventory)

@@ -22,6 +22,8 @@ import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
 import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn } from "@/lib/minecraft/armor";
 import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
+import { NetherWorld } from "@/lib/minecraft/nether";
+import { EndermanManager, Enderman } from "@/lib/minecraft/enderman";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -48,6 +50,11 @@ const BLOCK_DROPS: Partial<Record<BlockType, { id: number; count: number }>> = {
   [BlockType.CraftingTable]: { id: BlockType.CraftingTable, count: 1 },
   [BlockType.Bookshelf]: { id: BlockType.Bookshelf, count: 1 },
   [BlockType.Pumpkin]: { id: BlockType.Pumpkin, count: 1 },
+  [BlockType.Obsidian]: { id: BlockType.Obsidian, count: 1 },
+  [BlockType.Netherrack]: { id: BlockType.Netherrack, count: 1 },
+  [BlockType.SoulSand]: { id: BlockType.SoulSand, count: 1 },
+  [BlockType.Glowstone]: { id: BlockType.Glowstone, count: 1 },
+  [BlockType.EndStone]: { id: BlockType.EndStone, count: 1 },
 };
 
 // XP dropped per block (Minecraft values, simplified)
@@ -108,6 +115,7 @@ export default function MinecraftGame() {
   const [showInventory, setShowInventory] = useState(false);
   const [showCraftingTable, setShowCraftingTable] = useState(false);
   const [showFurnace, setShowFurnace] = useState(false);
+  const [showControls, setShowControls] = useState(false);
   const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
@@ -371,6 +379,9 @@ export default function MinecraftGame() {
 
     // === Monster Manager (zombies & spiders at night) ===
     const monsterManager = new MonsterManager(world, scene);
+
+    // === Enderman Manager (tall black mobs that drop ender pearls) ===
+    const endermanManager = new EndermanManager(world, scene);
 
     // === Dragon Manager (player's pet dragon) ===
     const dragonManager = new DragonManager(world, scene);
@@ -639,6 +650,47 @@ export default function MinecraftGame() {
       buildChunk(cx, cz);
     }
 
+    // Try to ignite a nether portal at the given block position.
+    function tryIgnitePortal(bx: number, by: number, bz: number): boolean {
+      for (const [dx, dz] of [[0, 0], [-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        if (tryIgnitePortalAt(bx + dx, by, bz + dz, "x")) return true;
+        if (tryIgnitePortalAt(bx + dx, by, bz + dz, "z")) return true;
+      }
+      return false;
+    }
+    function tryIgnitePortalAt(x: number, y: number, z: number, axis: "x" | "z"): boolean {
+      const isObs = (bx: number, by: number, bz: number) => world.getBlock(bx, by, bz) === BlockType.Obsidian;
+      const isAirP = (bx: number, by: number, bz: number) => {
+        const b = world.getBlock(bx, by, bz);
+        return b === BlockType.Air || b === BlockType.NetherPortal;
+      };
+      let x1: number, x2: number, z1: number, z2: number;
+      if (axis === "x") { x1 = x; x2 = x + 1; z1 = z; z2 = z; }
+      else { x1 = x; x2 = x; z1 = z; z2 = z + 1; }
+      for (let dy = 0; dy < 3; dy++) {
+        if (!isAirP(x1, y + dy, z1)) return false;
+        if (!isAirP(x2, y + dy, z2)) return false;
+      }
+      if (!isObs(x1, y - 1, z1) || !isObs(x2, y - 1, z2)) return false;
+      if (!isObs(x1, y + 3, z1) || !isObs(x2, y + 3, z2)) return false;
+      if (axis === "x") {
+        for (let dy = -1; dy <= 3; dy++) {
+          if (!isObs(x1 - 1, y + dy, z1) || !isObs(x2 + 1, y + dy, z2)) return false;
+        }
+      } else {
+        for (let dy = -1; dy <= 3; dy++) {
+          if (!isObs(x1, y + dy, z1 - 1) || !isObs(x2, y + dy, z2 + 1)) return false;
+        }
+      }
+      for (let dy = 0; dy < 3; dy++) {
+        world.setBlock(x1, y + dy, z1, BlockType.NetherPortal);
+        world.setBlock(x2, y + dy, z2, BlockType.NetherPortal);
+      }
+      rebuildChunkAt(x1, z1);
+      rebuildChunkAt(x2, z2);
+      return true;
+    }
+
     function placeBlock(): boolean {
       const result = player.raycast(6);
       if (!result.hit || !result.block || !result.normal) return false;
@@ -670,6 +722,20 @@ export default function MinecraftGame() {
           setDragonNotification("¡Dragón invocado! Pulsa N para montarlo");
           setTimeout(() => setDragonNotification(""), 4000);
           return true;
+        }
+        // === Flint and Steel - ignite nether portal ===
+        if (selected && selected.id === ItemType.FlintAndSteel) {
+          const clickedBlock = world.getBlock(result.block.x, result.block.y, result.block.z);
+          if (clickedBlock === BlockType.Obsidian || clickedBlock === BlockType.NetherPortal) {
+            if (tryIgnitePortal(result.block.x, result.block.y, result.block.z)) {
+              inventoryRef.current.damageSelected(1);
+              setInventoryVersion((v) => v + 1);
+              sound.blockSound(BlockType.Glass, "break");
+              return true;
+            }
+          }
+          sound.blockSound(BlockType.Stone, "break");
+          return false;
         }
       }
 
@@ -1237,8 +1303,14 @@ export default function MinecraftGame() {
       if (monsterDamages.length > 0) {
         for (const md of monsterDamages) {
           player.damage(md.damage);
+          if (md.fromX !== undefined) player.knockback(md.fromX, md.fromZ, 5);
           sound.hurt();
         }
+      }
+
+      // Update endermen (spawn at night, drop ender pearls)
+      if (isSurvival) {
+        endermanManager.update(dt, player.position.x, player.position.y, player.position.z, isNight);
       }
 
       if (player.isDead()) {
@@ -1254,9 +1326,9 @@ export default function MinecraftGame() {
         const eyeZ = player.position.z;
         const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
         const monster = monsterManager.findClosest(eyeX, eyeY, eyeZ, 4);
-        if (animal || monster) {
-          // Attack - damage based on selected item's attackDamage (per spec: wood=4, stone=5, iron=6, diamond=7 for swords)
-          let damage = 1; // bare hands
+        const enderman = endermanManager.findClosest(eyeX, eyeY, eyeZ, 4);
+        if (animal || monster || enderman) {
+          let damage = 1;
           let usedTool = false;
           const selected = inventoryRef.current.getSelected();
           if (selected && selected.id >= 100) {
@@ -1267,18 +1339,28 @@ export default function MinecraftGame() {
             }
           }
           sound.hit();
-          // Attack monster first (closer threat)
           if (monster) {
             const died = monster.takeDamage(damage);
+            if (monster.knockback) monster.knockback(player.position.x, player.position.z, 4);
             if (died) {
               const drops = monster.getDrops();
               for (const drop of drops) {
                 dropManager.spawnDrop(drop.id, drop.count, monster.position.x, monster.position.y + 0.5, monster.position.z);
               }
-              // Drop XP for monster kill
               const xp = randXp(MONSTER_XP);
               if (xp > 0) dropManager.spawnXpOrb(xp, monster.position.x, monster.position.y + 0.5, monster.position.z);
               monsterManager.removeMonster(monster);
+            }
+          } else if (enderman) {
+            const died = enderman.takeDamage(damage);
+            if (died) {
+              const drops = enderman.getDrops();
+              for (const drop of drops) {
+                dropManager.spawnDrop(drop.id, drop.count, enderman.position.x, enderman.position.y + 0.5, enderman.position.z);
+              }
+              const xp = randXp(MONSTER_XP);
+              if (xp > 0) dropManager.spawnXpOrb(xp, enderman.position.x, enderman.position.y + 0.5, enderman.position.z);
+              endermanManager.removeEnderman(enderman);
             }
           } else if (animal) {
             const died = animal.takeDamage(damage, player.position);
@@ -1287,7 +1369,6 @@ export default function MinecraftGame() {
               for (const drop of drops) {
                 dropManager.spawnDrop(drop.id, drop.count, animal.position.x, animal.position.y + 0.5, animal.position.z);
               }
-              // Drop XP for animal kill
               const xp = randXp(ANIMAL_XP);
               if (xp > 0) dropManager.spawnXpOrb(xp, animal.position.x, animal.position.y + 0.5, animal.position.z);
               animalManager.removeAnimal(animal);
@@ -1422,6 +1503,7 @@ export default function MinecraftGame() {
       // Dispose animals
       animalManager.dispose();
       monsterManager.dispose();
+      endermanManager.dispose();
       dropManager.dispose();
       dragonManager.dispose();
       dragonManagerRef.current = null;
@@ -1739,56 +1821,47 @@ export default function MinecraftGame() {
         })}
       </div>
 
-      {/* Pause overlay */}
+      {/* Pause overlay — Minecraft-style menu */}
       {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-stone-800/95 border-4 border-stone-900 rounded-lg p-6 sm:p-8 max-w-md mx-4 text-center text-white shadow-2xl">
-            <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-wide" style={{ fontFamily: "monospace" }}>
-              {currentWorld?.name || "JEFFCRAFT"}
-            </h1>
-            <p className="mb-3 text-stone-300 text-sm">
-              Modo: <span className="text-yellow-400 font-bold">{mode === "creative" ? "Creativo" : "Survival"}</span>
-            </p>
-            <div className="text-left text-xs sm:text-sm space-y-1 bg-stone-900/60 p-4 rounded mb-4">
-              <div><span className="text-yellow-400 font-bold">WASD</span> — Moverse</div>
-              <div><span className="text-yellow-400 font-bold">Mouse</span> — Mirar alrededor</div>
-              <div><span className="text-yellow-400 font-bold">Espacio</span> — Saltar / Nadar arriba</div>
-              <div><span className="text-yellow-400 font-bold">Shift</span> — Correr</div>
-              <div><span className="text-yellow-400 font-bold">Click izq</span> — {mode === "survival" ? "Minar bloque / Atacar animal" : "Romper bloque"}</div>
-              <div><span className="text-yellow-400 font-bold">Click der / M</span> — Comer / Abrir mesa-horno / Colocar bloque</div>
-              <div><span className="text-yellow-400 font-bold">1-9 / Rueda</span> — Seleccionar slot</div>
-              {mode === "survival" && <div><span className="text-yellow-400 font-bold">E</span> — Abrir inventario</div>}
-              {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en mesa</span> — Craftear</div>}
-              {mode === "survival" && <div><span className="text-yellow-400 font-bold">Click der en horno</span> — Cocer comida</div>}
-              {mode === "survival" && <div><span className="text-yellow-400 font-bold">N</span> — Montar/desmontar dragón 🐉</div>}
-              {mode === "survival" && <div><span className="text-yellow-400 font-bold">B</span> — Dragón espera/te sigue</div>}
-              {mode === "creative" && <div><span className="text-yellow-400 font-bold">F</span> — Vuelo</div>}
-              <div><span className="text-yellow-400 font-bold">Esc</span> — Pausar</div>
+        <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.75)" }}>
+          {!showControls ? (
+            <div className="max-w-sm w-full mx-4" style={{ imageRendering: "pixelated" }}>
+              <h1 className="text-center text-3xl sm:text-4xl font-black mb-6 text-white" style={{ fontFamily: "monospace", textShadow: "3px 3px 0 #1a1a1a, 5px 5px 0 rgba(0,0,0,0.4)", WebkitTextStroke: "1px #1a1a1a" }}>
+                {currentWorld?.name || "JEFFCRAFT"}
+              </h1>
+              <div className="flex flex-col gap-1.5 mb-2">
+                <MCMenuButton onClick={handleStartClick} color="green">Continuar</MCMenuButton>
+                <MCMenuButton onClick={handleExitToMenu} color="red">Salir del mundo</MCMenuButton>
+              </div>
+              <div className="flex gap-1.5">
+                <MCMenuButton onClick={handleSaveWorld} color="blue" className="flex-1 text-sm">Guardar</MCMenuButton>
+                <MCMenuButton onClick={() => setShowControls(true)} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
+              </div>
+              {saveMessage && <p className="mt-3 text-center text-xs text-green-400 font-mono">{saveMessage}</p>}
+              <p className="mt-2 text-center text-xs text-stone-500 font-mono">{mode === "creative" ? "Creativo" : "Survival"} · Pulsa Esc para reanudar</p>
             </div>
-            {/* Action buttons */}
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={handleStartClick}
-                className="w-full py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 rounded text-lg font-bold transition-colors font-mono"
-              >
-                ▶ Continuar jugando
-              </button>
-              <button
-                onClick={handleSaveWorld}
-                className="w-full py-3 bg-blue-700 hover:bg-blue-600 border-2 border-blue-500 rounded text-lg font-bold transition-colors font-mono"
-              >
-                💾 Guardar mundo
-              </button>
-              <button
-                onClick={handleExitToMenu}
-                className="w-full py-3 bg-red-800 hover:bg-red-700 border-2 border-red-500 rounded text-lg font-bold transition-colors font-mono"
-              >
-                ✕ Abandonar mundo
-              </button>
+          ) : (
+            <div className="max-w-md w-full mx-4" style={{ imageRendering: "pixelated" }}>
+              <h2 className="text-center text-2xl font-black mb-4 text-white" style={{ fontFamily: "monospace", textShadow: "2px 2px 0 #1a1a1a" }}>Controles</h2>
+              <div className="text-left text-sm space-y-1.5 p-4 mb-4" style={{ backgroundColor: "rgba(0,0,0,0.6)", border: "3px solid rgba(60,60,60,0.9)", borderTopColor: "rgba(120,120,120,0.9)", borderLeftColor: "rgba(120,120,120,0.9)" }}>
+                <ControlRow keys="WASD" desc="Moverse" />
+                <ControlRow keys="Mouse" desc="Mirar alrededor" />
+                <ControlRow keys="Espacio" desc="Saltar / Nadar arriba" />
+                <ControlRow keys="Shift" desc="Correr" />
+                <ControlRow keys="Click izq" desc={mode === "survival" ? "Minar bloque / Atacar" : "Romper bloque"} />
+                <ControlRow keys="Click der / M" desc="Comer / Abrir mesa-horno / Colocar" />
+                <ControlRow keys="1-9 / Rueda" desc="Seleccionar slot" />
+                {mode === "survival" && <ControlRow keys="E" desc="Abrir inventario" />}
+                {mode === "survival" && <ControlRow keys="Click der en mesa" desc="Craftear" />}
+                {mode === "survival" && <ControlRow keys="Click der en horno" desc="Cocer comida" />}
+                {mode === "survival" && <ControlRow keys="N" desc="Montar/desmontar dragón 🐉" />}
+                {mode === "survival" && <ControlRow keys="B" desc="Dragón espera/te sigue" />}
+                {mode === "creative" && <ControlRow keys="F" desc="Vuelo" />}
+                <ControlRow keys="Esc" desc="Pausar" />
+              </div>
+              <MCMenuButton onClick={() => setShowControls(false)} color="green">← Volver</MCMenuButton>
             </div>
-            {saveMessage && <p className="mt-2 text-xs text-green-400 font-mono">{saveMessage}</p>}
-            <p className="mt-2 text-xs text-stone-400">Guarda el mundo para continuar después</p>
-          </div>
+          )}
         </div>
       )}
 
@@ -2006,6 +2079,38 @@ function MCButton({ children, onClick, primary, disabled, className = "" }: {
     `} style={{ imageRendering: "pixelated", textShadow: "1px 1px 0 #1a1a1a" }}>
       {children}
     </button>
+  );
+}
+
+// Minecraft-style menu button with beveled edges
+function MCMenuButton({ children, onClick, color = "gray", className = "" }: {
+  children: React.ReactNode; onClick?: () => void; color?: "green" | "red" | "blue" | "gray"; className?: string;
+}) {
+  const cm: Record<string, {bg:string;h:string;a:string;t:string;b:string}> = {
+    green: { bg: "#5a8a3a", h: "#6a9a4a", a: "#4a7a2a", t: "#7aaa5a", b: "#3a6a1a" },
+    red:   { bg: "#8a3a3a", h: "#9a4a4a", a: "#7a2a2a", t: "#aa5a5a", b: "#6a1a1a" },
+    blue:  { bg: "#3a5a8a", h: "#4a6a9a", a: "#2a4a7a", t: "#5a7aaa", b: "#1a3a6a" },
+    gray:  { bg: "#5a5a5a", h: "#6a6a6a", a: "#4a4a4a", t: "#7a7a7a", b: "#3a3a3a" },
+  };
+  const c = cm[color];
+  return (
+    <button onClick={onClick} className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.02] active:scale-95 ${className}`}
+      style={{ backgroundColor: c.bg, borderTop: `3px solid ${c.t}`, borderLeft: `3px solid ${c.t}`, borderBottom: `3px solid ${c.b}`, borderRight: `3px solid ${c.b}`, imageRendering: "pixelated", textShadow: "2px 2px 0 #1a1a1a", boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = c.h; }}
+      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = c.bg; }}
+      onMouseDown={(e) => { e.currentTarget.style.backgroundColor = c.a; }}
+      onMouseUp={(e) => { e.currentTarget.style.backgroundColor = c.h; }}>
+      {children}
+    </button>
+  );
+}
+
+function ControlRow({ keys, desc }: { keys: string; desc: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="font-mono font-bold text-yellow-300 min-w-[140px] text-xs" style={{ textShadow: "1px 1px 0 #000" }}>{keys}</span>
+      <span className="text-stone-300 text-xs font-mono flex-1">{desc}</span>
+    </div>
   );
 }
 
