@@ -113,7 +113,7 @@ interface WorldConfig {
 // =============== MAIN COMPONENT ===============
 export default function MinecraftGame() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [screen, setScreen] = useState<"main-menu" | "create-world" | "playing">("main-menu");
+  const [screen, setScreen] = useState<"main-menu" | "create-world" | "playing" | "multiplayer">("main-menu");
   const [currentWorld, setCurrentWorld] = useState<WorldConfig | null>(null);
   const [selectedSlot, setSelectedSlot] = useState(0);
   const [isLocked, setIsLocked] = useState(false);
@@ -1807,6 +1807,7 @@ export default function MinecraftGame() {
       <MainMenu
         iconUrls={iconUrls}
         onCreateWorld={() => setScreen("create-world")}
+        onMultiplayer={() => setScreen("multiplayer")}
         onLoadWorld={(name) => {
           const saved = loadWorld(name);
           if (saved) {
@@ -1933,8 +1934,20 @@ export default function MinecraftGame() {
         </>
       )}
 
-      {/* Hotbar */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex gap-1 p-1 bg-black/40 rounded-md backdrop-blur-sm" key={inventoryVersion}>
+      {/* Hotbar — Minecraft style with beveled slots */}
+      <div
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex p-1"
+        key={inventoryVersion}
+        style={{
+          backgroundColor: "rgba(0,0,0,0.55)",
+          borderTop: "3px solid rgba(80,80,80,0.8)",
+          borderLeft: "3px solid rgba(80,80,80,0.8)",
+          borderBottom: "3px solid rgba(0,0,0,0.9)",
+          borderRight: "3px solid rgba(0,0,0,0.9)",
+          imageRendering: "pixelated",
+          boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+        }}
+      >
         {Array.from({ length: 9 }).map((_, i) => {
           const isSelected = i === selectedSlot;
           let iconUrl = "";
@@ -1943,12 +1956,10 @@ export default function MinecraftGame() {
           let durFraction: number | null = null;
 
           if (mode === "survival") {
-            // Show inventory items
             const stack = inventoryRef.current.slots[i];
             if (stack) {
               count = stack.count;
               if (stack.id < 100) {
-                // Block
                 const def = BLOCKS[stack.id as BlockType];
                 if (def) {
                   name = def.name;
@@ -1956,12 +1967,10 @@ export default function MinecraftGame() {
                   iconUrl = iconUrls[iconName] ?? "";
                 }
               } else {
-                // Item
                 const def = ITEMS[stack.id as ItemType];
                 if (def) {
                   name = def.name;
                   iconUrl = iconUrls[def.icon] ?? "";
-                  // Compute durability fraction
                   if (def.maxDurability) {
                     const cur = stack.durability !== undefined ? stack.durability : def.maxDurability;
                     durFraction = Math.max(0, Math.min(1, cur / def.maxDurability));
@@ -1970,43 +1979,69 @@ export default function MinecraftGame() {
               }
             }
           } else {
-            // Creative: show HOTBAR_BLOCKS
             const blockType = HOTBAR_BLOCKS[i];
             const def = BLOCKS[blockType];
             name = def.name;
             const iconName = def.textures.side === "grass_side" ? "grass_side" : def.textures.top === "dirt" ? "dirt" : def.textures.top || def.textures.side;
             iconUrl = iconUrls[iconName] ?? "";
-            count = 0; // infinite in creative
+            count = 0;
           }
 
           return (
             <div
               key={i}
-              className={`w-12 h-12 sm:w-14 sm:h-14 border-2 flex items-center justify-center relative ${
-                isSelected ? "border-white bg-white/20" : "border-gray-500 bg-gray-800/60"
-              }`}
-              style={{ imageRendering: "pixelated" }}
-              title={name}
+              className="relative flex items-center justify-center"
+              style={{
+                width: "50px", height: "50px",
+                marginRight: i < 8 ? "2px" : "0",
+                imageRendering: "pixelated",
+              }}
             >
-              {iconUrl && (
-                <img src={iconUrl} alt={name} className="w-10 h-10 sm:w-12 sm:h-12" style={{ imageRendering: "pixelated" }} draggable={false} />
+              {/* Slot background */}
+              <div
+                className="absolute inset-0"
+                style={{
+                  backgroundColor: "rgba(100,100,100,0.3)",
+                  borderTop: "2px solid rgba(150,150,150,0.5)",
+                  borderLeft: "2px solid rgba(150,150,150,0.5)",
+                  borderBottom: "2px solid rgba(40,40,40,0.8)",
+                  borderRight: "2px solid rgba(40,40,40,0.8)",
+                }}
+              />
+              {/* Selection highlight */}
+              {isSelected && (
+                <div className="absolute inset-0 pointer-events-none" style={{
+                  border: "3px solid #ffffff",
+                  boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.3)",
+                  zIndex: 5,
+                }} />
               )}
-              <span className="absolute top-0 left-1 text-[10px] text-white/80 font-mono">{i + 1}</span>
+              {/* Item icon */}
+              {iconUrl && (
+                <img src={iconUrl} alt={name} className="relative z-10" style={{
+                  width: "34px", height: "34px", imageRendering: "pixelated",
+                }} draggable={false} />
+              )}
+              {/* Slot number */}
+              <span className="absolute top-0.5 left-1 text-[9px] font-mono pointer-events-none z-20"
+                style={{ color: "rgba(255,255,255,0.35)", textShadow: "1px 1px 0 #000" }}>
+                {i + 1}
+              </span>
+              {/* Stack count */}
               {count > 1 && (
-                <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
+                <span className="absolute bottom-0 right-1 text-sm font-mono font-bold pointer-events-none z-20"
+                  style={{ color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}>
                   {count}
                 </span>
               )}
-              {/* Durability bar for tools/armor */}
+              {/* Durability bar */}
               {durFraction !== null && (
-                <div className="absolute bottom-0 left-1 right-1 h-[3px] bg-black/80 pointer-events-none">
-                  <div
-                    className="h-full"
-                    style={{
-                      width: `${durFraction * 100}%`,
-                      backgroundColor: durFraction > 0.5 ? "#4ade80" : durFraction > 0.2 ? "#facc15" : "#ef4444",
-                    }}
-                  />
+                <div className="absolute bottom-0.5 left-1.5 right-1.5 h-[4px] pointer-events-none z-15"
+                  style={{ backgroundColor: "rgba(0,0,0,0.7)" }}>
+                  <div className="h-full" style={{
+                    width: `${durFraction * 100}%`,
+                    backgroundColor: durFraction > 0.5 ? "#4ade80" : durFraction > 0.2 ? "#facc15" : "#ef4444",
+                  }} />
                 </div>
               )}
             </div>
@@ -2436,10 +2471,11 @@ const SPLASH_TEXTS = [
 ];
 
 function MainMenu({
-  iconUrls, onCreateWorld, onLoadWorld,
+  iconUrls, onCreateWorld, onMultiplayer, onLoadWorld,
 }: {
   iconUrls: Record<string, string>;
   onCreateWorld: () => void;
+  onMultiplayer: () => void;
   onLoadWorld: (name: string) => void;
 }) {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
@@ -2455,41 +2491,46 @@ function MainMenu({
   }, []);
 
   return (
-    <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#2a2a2a" }}>
-      {/* Panorama background */}
+    <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
       <div className="absolute inset-0" style={{
-        backgroundImage: `url(${iconUrls["dirt"] || ""})`,
-        backgroundSize: "64px 64px", backgroundRepeat: "repeat",
-        backgroundPosition: `${panOffset}px 0`, opacity: 0.12, filter: "blur(3px)",
+        backgroundImage: `url(/IMG_2398.jpeg)`,
+        backgroundSize: "cover", backgroundPosition: "center", opacity: 0.55,
       }} />
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-black/70" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/35 to-black/75" />
 
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
-        {/* Logo + splash */}
-        <div className="mb-8 text-center relative">
-          <h1 className="text-6xl sm:text-8xl font-black tracking-wider text-white" style={{
-            fontFamily: "monospace", textShadow: "4px 4px 0 #1a1a1a, 6px 6px 0 rgba(0,0,0,0.4)",
-            WebkitTextStroke: "2px #1a1a1a", transform: "rotate(-3deg)",
+        <div className="mb-10 text-center relative">
+          <h1 className="text-5xl sm:text-7xl font-black tracking-wider text-white" style={{
+            fontFamily: "monospace",
+            textShadow: "0 0 30px rgba(60,100,220,0.4), 3px 3px 0 #0a0a1a, 5px 5px 0 rgba(0,0,0,0.5)",
+            WebkitTextStroke: "1px rgba(0,0,0,0.3)",
           }}>JEFFCRAFT</h1>
-          <span className="absolute top-1/2 -right-4 sm:right-12 text-yellow-300 font-bold text-sm sm:text-lg font-mono"
-            style={{ transform: "rotate(-15deg)", textShadow: "2px 2px 0 #1a1a1a" }}>
+          <span className="absolute top-1/2 -right-2 sm:right-16 text-yellow-300 font-bold text-xs sm:text-base font-mono"
+            style={{ transform: "rotate(-12deg)", textShadow: "2px 2px 0 #000" }}>
             {SPLASH_TEXTS[splashIndex]}
           </span>
         </div>
 
         {!showLoadMenu ? (
-          <div className="flex flex-col gap-2 w-full max-w-sm">
-            <MCButton onClick={onCreateWorld} primary>Crear nuevo mundo</MCButton>
-            <MCButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }}>Cargar mundo</MCButton>
-            <MCButton disabled>Opciones</MCButton>
-            <MCButton disabled>Salir del juego</MCButton>
+          <div className="flex flex-col gap-1.5 w-full max-w-xs">
+            <MCMenuButton onClick={onCreateWorld} color="green">Crear nuevo mundo</MCMenuButton>
+            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="blue">Cargar mundo</MCMenuButton>
+            <MCMenuButton onClick={onMultiplayer} color="gray">Multijugador</MCMenuButton>
+            <MCMenuButton onClick={() => {}} color="gray" className="opacity-50 cursor-not-allowed">Opciones</MCMenuButton>
           </div>
         ) : (
           <div className="w-full max-w-sm">
-            <h2 className="text-xl font-bold text-white font-mono mb-3 text-center" style={{ textShadow: "2px 2px 0 #1a1a1a" }}>
+            <h2 className="text-xl font-black text-white font-mono mb-3 text-center" style={{ textShadow: "2px 2px 0 #000" }}>
               Selecciona un mundo
             </h2>
-            <div className="bg-stone-900/90 border-2 border-stone-700 p-3 max-h-72 overflow-y-auto" style={{ imageRendering: "pixelated" }}>
+            <div className="p-2 max-h-72 overflow-y-auto" style={{
+              backgroundColor: "rgba(15,15,25,0.92)",
+              borderTop: "3px solid rgba(70,70,90,0.7)",
+              borderLeft: "3px solid rgba(70,70,90,0.7)",
+              borderBottom: "3px solid rgba(8,8,12,0.9)",
+              borderRight: "3px solid rgba(8,8,12,0.9)",
+              imageRendering: "pixelated",
+            }}>
               {savedWorlds.length === 0 ? (
                 <p className="text-stone-400 text-center font-mono py-6 text-sm">
                   No hay mundos guardados.<br />Crea un mundo y guárdalo desde el menú de pausa.
@@ -2497,25 +2538,39 @@ function MainMenu({
               ) : (
                 <div className="flex flex-col gap-1">
                   {savedWorlds.map((w) => (
-                    <div key={w.name} className="flex gap-2 items-center bg-stone-800/80 border-2 border-stone-700 p-2 hover:border-stone-500">
+                    <div key={w.name} className="flex gap-2 items-center p-2 hover:bg-white/10 transition-colors" style={{
+                      backgroundColor: "rgba(35,35,45,0.7)",
+                      borderTop: "2px solid rgba(60,60,70,0.5)",
+                      borderLeft: "2px solid rgba(60,60,70,0.5)",
+                      borderBottom: "2px solid rgba(15,15,20,0.7)",
+                      borderRight: "2px solid rgba(15,15,20,0.7)",
+                    }}>
                       <div className="flex-1">
                         <div className="text-white font-mono font-bold text-sm">{w.name}</div>
                         <div className="text-stone-400 text-xs font-mono">
                           {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
                         </div>
                       </div>
-                      <button onClick={() => onLoadWorld(w.name)} className="px-3 py-1 bg-green-800 hover:bg-green-700 border-2 border-green-600 text-white text-xs font-mono font-bold" style={{ imageRendering: "pixelated" }}>▶ Cargar</button>
-                      <button onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }} className="px-2 py-1 bg-red-900 hover:bg-red-800 border-2 border-red-700 text-white text-xs font-mono" style={{ imageRendering: "pixelated" }}>✕</button>
+                      <button onClick={() => onLoadWorld(w.name)} className="px-3 py-1 text-white text-xs font-mono font-bold transition-all hover:scale-105" style={{
+                        backgroundColor: "#3a6a2a", borderTop: "2px solid #5a8a3a", borderLeft: "2px solid #5a8a3a",
+                        borderBottom: "2px solid #1a3a0a", borderRight: "2px solid #1a3a0a", imageRendering: "pixelated",
+                      }}>▶ Cargar</button>
+                      <button onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }} className="px-2 py-1 text-white text-xs font-mono transition-all hover:scale-105" style={{
+                        backgroundColor: "#6a2a2a", borderTop: "2px solid #8a3a3a", borderLeft: "2px solid #8a3a3a",
+                        borderBottom: "2px solid #3a1a1a", borderRight: "2px solid #3a1a1a", imageRendering: "pixelated",
+                      }}>✕</button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-            <MCButton onClick={() => setShowLoadMenu(false)} className="mt-3">← Volver</MCButton>
+            <div className="mt-3">
+              <MCMenuButton onClick={() => setShowLoadMenu(false)} color="gray" className="w-full text-sm">← Volver</MCMenuButton>
+            </div>
           </div>
         )}
 
-        <p className="mt-8 text-white/40 text-xs font-mono">Jeffcraft v2.0 · No afiliado con Mojang o Microsoft</p>
+        <p className="mt-10 text-white/25 text-xs font-mono">Jeffcraft V2 · No afiliado con Mojang o Microsoft</p>
       </div>
     </div>
   );

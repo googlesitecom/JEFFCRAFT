@@ -450,16 +450,25 @@ export function InventoryUI({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-600/80"
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      style={{ backgroundColor: "rgba(15,15,20,0.85)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="bg-[#c6c6c6] border-2 border-[#555] p-4 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto"
-        style={{ imageRendering: "pixelated", boxShadow: "inset 0 0 0 2px #555" }}
+        className="max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto p-5"
+        style={{
+          backgroundColor: "#c6c6c6",
+          imageRendering: "pixelated",
+          borderTop: "4px solid #ffffff",
+          borderLeft: "4px solid #ffffff",
+          borderBottom: "4px solid #555555",
+          borderRight: "4px solid #555555",
+          boxShadow: "inset 0 0 0 2px #555, 0 8px 32px rgba(0,0,0,0.6)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-[#3f3f3f] font-mono" style={{ textShadow: "1px 1px 0 #fff" }}>
+          <h2 className="text-2xl font-black text-[#3f3f3f] font-mono" style={{ textShadow: "2px 2px 0 #fff" }}>
             {isCraftingTable ? "Mesa de Crafteo" : "Inventario"}
           </h2>
           <div className="flex gap-2">
