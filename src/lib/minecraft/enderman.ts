@@ -16,6 +16,16 @@ export class Enderman {
   isDead: boolean = false;
   walkAnimTime: number = 0;
   damageFlashTime: number = 0;
+  idleTime: number = 0;
+  teleportAnimTime: number = 0; // > 0 means teleport fade in progress
+  // References to body parts for procedural animation
+  legL!: THREE.Mesh;
+  legR!: THREE.Mesh;
+  armL!: THREE.Mesh;
+  armR!: THREE.Mesh;
+  head!: THREE.Mesh;
+  eyeL!: THREE.Mesh;
+  eyeR!: THREE.Mesh;
   // Enderman AI: wanders, teleports occasionally, becomes hostile if looked at
   state: "wander" | "hostile" | "idle" = "wander";
   stateTimer: number = 2;
@@ -30,39 +40,55 @@ export class Enderman {
   private buildModel(): THREE.Group {
     const group = new THREE.Group();
     // Enderman: tall (3 blocks), thin, black with purple eyes
-    const black = new THREE.MeshLambertMaterial({ color: 0x161616 });
-    const darkBlack = new THREE.MeshLambertMaterial({ color: 0x0a0a0a });
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff00ff }); // magenta eyes
+    const black = new THREE.MeshStandardMaterial({ color: 0x161616, roughness: 0.8 });
+    const darkBlack = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.8 });
+    // Magenta eyes with emissive glow
+    const eyeMat = new THREE.MeshStandardMaterial({
+      color: 0xff00ff, emissive: 0xff00ff, emissiveIntensity: 2.0, roughness: 0.3
+    });
 
     // Body (tall thin)
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.4, 0.3), black);
     body.position.y = 1.4;
+    body.castShadow = true;
     group.add(body);
     // Head
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), black);
     head.position.y = 2.4;
+    head.castShadow = true;
     group.add(head);
-    // Eyes (magenta)
+    this.head = head;
+    // Eyes (magenta, glowing)
     const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.02), eyeMat);
     eyeL.position.set(-0.12, 2.4, 0.26);
     group.add(eyeL);
+    this.eyeL = eyeL;
     const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.02), eyeMat);
     eyeR.position.set(0.12, 2.4, 0.26);
     group.add(eyeR);
+    this.eyeR = eyeR;
     // Arms (long, thin)
     const armL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.5, 0.2), black);
     armL.position.set(-0.45, 1.4, 0);
+    armL.castShadow = true;
     group.add(armL);
+    this.armL = armL;
     const armR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.5, 0.2), black);
     armR.position.set(0.45, 1.4, 0);
+    armR.castShadow = true;
     group.add(armR);
+    this.armR = armR;
     // Legs (long)
     const legL = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.25), darkBlack);
     legL.position.set(-0.15, 0.7, 0);
+    legL.castShadow = true;
     group.add(legL);
+    this.legL = legL;
     const legR = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.4, 0.25), darkBlack);
     legR.position.set(0.15, 0.7, 0);
+    legR.castShadow = true;
     group.add(legR);
+    this.legR = legR;
 
     return group;
   }
@@ -79,7 +105,7 @@ export class Enderman {
     return false;
   }
 
-  // Teleport to a random nearby position
+  // Teleport to a random nearby position with fade effect
   private teleportAway() {
     const angle = Math.random() * Math.PI * 2;
     const dist = 5 + Math.random() * 8;
@@ -96,6 +122,7 @@ export class Enderman {
     }
     this.position.set(newX, newY, newZ);
     this.velocity.set(0, 0, 0);
+    this.teleportAnimTime = 0.5; // 500ms fade-in
   }
 
   getDrops(): { id: number; count: number }[] {
@@ -195,13 +222,90 @@ export class Enderman {
     if (moveSpeed > 0) {
       this.walkAnimTime += dt * 5;
     }
-    // Damage flash
+    this.idleTime += dt;
+    if (this.teleportAnimTime > 0) this.teleportAnimTime -= dt;
+
+    // === WALK ANIMATION ===
+    if (moveSpeed > 0) {
+      const legSwing = Math.sin(this.walkAnimTime) * 0.5;
+      this.legL.rotation.x = legSwing;
+      this.legR.rotation.x = -legSwing;
+      // Body bob
+      this.model.position.y += Math.abs(Math.sin(this.walkAnimTime)) * 0.05;
+      // Arms sway gently
+      const armSway = Math.sin(this.walkAnimTime) * 0.15;
+      this.armL.rotation.x = armSway;
+      this.armR.rotation.x = -armSway;
+    } else {
+      // Idle: legs ease to neutral, gentle sway
+      this.legL.rotation.x *= 0.85;
+      this.legR.rotation.x *= 0.85;
+      const sway = Math.sin(this.idleTime * 0.6) * 0.05;
+      this.armL.rotation.x = sway;
+      this.armR.rotation.x = sway;
+      // Head occasionally looks around
+      this.head.rotation.y = Math.sin(this.idleTime * 0.4) * 0.3;
+    }
+
+    // === TELEPORT FADE ===
+    // Just teleported: model is transparent and scales up
+    if (this.teleportAnimTime > 0) {
+      const t = 1 - (this.teleportAnimTime / 0.5); // 0 → 1
+      this.model.scale.setScalar(0.5 + t * 0.5); // grow from 0.5 to 1.0
+      // Fade in opacity
+      this.model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          const mat = obj.material as THREE.MeshStandardMaterial;
+          mat.transparent = true;
+          mat.opacity = t;
+        }
+      });
+    } else {
+      this.model.scale.setScalar(1);
+      // Reset opacity (only if was transparent)
+      this.model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          const mat = obj.material as THREE.MeshStandardMaterial;
+          if (mat.transparent) {
+            mat.transparent = false;
+            mat.opacity = 1;
+          }
+        }
+      });
+    }
+
+    // === EYE GLOW PULSE ===
+    // Magenta eyes pulse subtly
+    const eyePulse = 1.5 + Math.sin(this.idleTime * 3) * 0.5;
+    const eyeMatL = this.eyeL.material as THREE.MeshStandardMaterial;
+    const eyeMatR = this.eyeR.material as THREE.MeshStandardMaterial;
+    eyeMatL.emissiveIntensity = eyePulse;
+    eyeMatR.emissiveIntensity = eyePulse;
+
+    // === DAMAGE FLASH ===
     if (this.damageFlashTime > 0) {
       this.damageFlashTime -= dt;
+      this.applyTint(0.8, 0.2, 0.8);
+    } else {
+      this.applyTint(0, 0, 0);
     }
 
     // Enderman doesn't attack aggressively (passive unless provoked)
     return null;
+  }
+
+  // Apply tint (for damage flash)
+  private applyTint(r: number, g: number, b: number) {
+    this.model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.MeshStandardMaterial;
+        if (mat && mat.emissive) {
+          // Don't tint eyes (they keep their magenta glow)
+          if (obj === this.eyeL || obj === this.eyeR) return;
+          mat.emissive.setRGB(r, g, b);
+        }
+      }
+    });
   }
 
   private checkCollision(halfW: number, bodyHeight: number): boolean {

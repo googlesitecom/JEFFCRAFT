@@ -177,6 +177,11 @@ export class Monster {
   damageFlashTime: number = 0;
   onFire: boolean = false;
   fireTimer: number = 0;
+  // Detected arm/head bones for procedural animations on GLB models
+  armBones: THREE.Object3D[] = [];
+  headBone: THREE.Object3D | null = null;
+  idleTime: number = 0;
+  attackAnimTime: number = 0; // > 0 means attack swing in progress
 
   constructor(type: MonsterType, world: World, position: THREE.Vector3) {
     this.type = type;
@@ -193,12 +198,32 @@ export class Monster {
       const model = await loadMonsterModel(path);
       model.scale.set(this.def.modelScale, this.def.modelScale, this.def.modelScale);
       this.model = model;
+      // Detect bones for procedural animations (zombie arms for attack, head for tracking)
+      this.detectBones();
     } catch (e) {
       // Fallback to procedural model
       const model = buildMonsterModel(this.def);
       model.scale.set(this.def.modelScale, this.def.modelScale, this.def.modelScale);
       this.model = model;
     }
+  }
+
+  // Detect arm and head bones (for GLB models) so we can animate attacks and head tracking
+  private detectBones() {
+    if (!this.model) return;
+    this.armBones = [];
+    this.headBone = null;
+    const armKeywords = ["arm", "Arm", "ARM", "hand", "Hand"];
+    const headKeywords = ["head", "Head", "HEAD"];
+    this.model.traverse((obj) => {
+      const name = obj.name || "";
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Bone) {
+        const isArm = armKeywords.some(k => name.includes(k));
+        const isHead = headKeywords.some(k => name.includes(k));
+        if (isArm) this.armBones.push(obj);
+        else if (isHead && this.headBone === null) this.headBone = obj;
+      }
+    });
   }
 
   takeDamage(amount: number): boolean {
@@ -345,6 +370,7 @@ export class Monster {
     this.attackTimer -= dt;
     if (dist < this.def.attackRange && Math.abs(dy) < 2 && this.attackTimer <= 0) {
       this.attackTimer = this.def.attackCooldown;
+      this.attackAnimTime = 0.4; // 400ms attack swing animation
       return { damage: this.def.damage };
     }
 
@@ -352,6 +378,8 @@ export class Monster {
     if (moveSpeed > 0) {
       this.walkAnimTime += dt * 6;
     }
+    this.idleTime += dt;
+    if (this.attackAnimTime > 0) this.attackAnimTime -= dt;
 
     // Update model
     if (this.model) {
@@ -359,7 +387,8 @@ export class Monster {
       this.model.position.set(this.position.x, this.position.y + this.def.modelYOffset, this.position.z);
       this.model.rotation.y = this.yaw + this.def.modelRotationOffset;
 
-      // Walk animation
+      // === WALK ANIMATION ===
+      // Procedural fallback models: use the assigned `legs` array
       const legs = (this.model as any).legs as THREE.Mesh[];
       if (legs) {
         const swing = Math.sin(this.walkAnimTime) * 0.4;
@@ -371,6 +400,55 @@ export class Monster {
             legs[i].rotation.x = Math.sin(this.walkAnimTime + i * 0.5) * 0.3;
             legs[i + 4].rotation.x = -Math.sin(this.walkAnimTime + i * 0.5) * 0.3;
           }
+        }
+      }
+
+      // GLB models: traverse for leg bones by name (when no procedural legs set)
+      if (!legs) {
+        const legBones: THREE.Object3D[] = [];
+        this.model.traverse((obj) => {
+          const name = obj.name || "";
+          if ((obj instanceof THREE.Mesh || obj instanceof THREE.Bone) &&
+              (name.toLowerCase().includes("leg") || name.toLowerCase().includes("limb"))) {
+            legBones.push(obj);
+          }
+        });
+        for (let i = 0; i < legBones.length; i++) {
+          const phase = (i % 2 === 0) ? 0 : Math.PI;
+          const swing = Math.sin(this.walkAnimTime + phase) * 0.5;
+          legBones[i].rotation.x = swing;
+        }
+      }
+
+      // Body bob while walking
+      if (moveSpeed > 0) {
+        const bob = Math.abs(Math.sin(this.walkAnimTime)) * 0.05;
+        this.model.position.y += bob;
+      }
+
+      // === ATTACK ANIMATION (zombie arms swing forward) ===
+      if (this.attackAnimTime > 0 && this.armBones.length > 0) {
+        const t = 1 - (this.attackAnimTime / 0.4); // 0 → 1
+        // Swing arms forward and back
+        const armSwing = Math.sin(t * Math.PI) * 1.4; // peaks at t=0.5
+        for (const arm of this.armBones) {
+          arm.rotation.x = -armSwing; // negative = forward
+        }
+      } else if (this.type === "zombie" && this.armBones.length > 0) {
+        // Default zombie pose: arms extended forward (classic Minecraft zombie)
+        for (const arm of this.armBones) {
+          arm.rotation.x = -1.4; // ~80 degrees forward
+        }
+      }
+
+      // === HEAD TRACKING (look at player when hostile) ===
+      if (this.headBone) {
+        if (dist < 8) {
+          // Slight head tilt toward player
+          this.headBone.rotation.x = Math.max(-0.3, Math.min(0.3, dy * 0.1));
+        } else if (moveSpeed === 0) {
+          // Idle: subtle head movement
+          this.headBone.rotation.y = Math.sin(this.idleTime * 0.6) * 0.2;
         }
       }
 

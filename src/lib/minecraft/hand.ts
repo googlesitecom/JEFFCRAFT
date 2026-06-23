@@ -334,7 +334,7 @@ export class HandView {
     this.idleTime += dt;
     this.actionTime += dt;
 
-    let extraRotX = 0, extraRotZ = 0, itemOffsetZ = 0, itemOffsetY = 0;
+    let extraRotX = 0, extraRotZ = 0, itemOffsetZ = 0, itemOffsetY = 0, extraRotY = 0;
 
     if (this.action === "swing") {
       const t = this.actionTime / 0.35;
@@ -342,33 +342,52 @@ export class HandView {
       else {
         const s = Math.sin(t * Math.PI);
         const e = easeInOutCubic(s);
-        extraRotX = -e * 0.6;
+        // Big swing down and forward
+        extraRotX = -e * 0.9;
+        // Slight wrist twist (yaw) for natural swing
+        extraRotY = e * 0.15;
+        // Slight roll
+        extraRotZ = e * 0.05;
       }
     } else if (this.action === "place") {
       const t = this.actionTime / 0.3;
       if (t >= 1) { this.action = "idle"; }
       else {
         const s = Math.sin(t * Math.PI);
-        extraRotX = -s * 0.4;
-        itemOffsetZ = -s * 0.08;
+        // Quick forward jab
+        extraRotX = -s * 0.5;
+        itemOffsetZ = -s * 0.12;
+        // Slight upward tilt
+        itemOffsetY = s * 0.04;
       }
     } else if (this.action === "eat") {
       const t = this.actionTime / 1.7;
       if (t >= 1) { this.action = "idle"; }
       else {
+        // Multiple bite motions
         const bite = Math.sin(t * Math.PI * 6);
         const biteAmount = Math.max(0, bite);
-        itemOffsetZ = biteAmount * 0.1;
-        itemOffsetY = -biteAmount * 0.05;
-        extraRotX = -biteAmount * 0.15;
+        // Bring food to mouth (forward + up)
+        itemOffsetZ = biteAmount * 0.14;
+        itemOffsetY = -biteAmount * 0.08;
+        extraRotX = -biteAmount * 0.25;
+        // Slight head/hand roll
+        extraRotZ = biteAmount * 0.04;
       }
     } else {
-      extraRotX = Math.sin(this.idleTime * 1.2) * 0.01;
-      extraRotZ = Math.sin(this.idleTime * 0.7) * 0.005;
+      // === IDLE ANIMATION ===
+      // Subtle breathing: slow vertical sway + tiny rotation
+      extraRotX = Math.sin(this.idleTime * 1.2) * 0.015;
+      extraRotZ = Math.sin(this.idleTime * 0.7) * 0.008;
+      // Tiny side-to-side sway
+      extraRotY = Math.sin(this.idleTime * 0.5) * 0.01;
+      // Subtle vertical bob
+      itemOffsetY = Math.sin(this.idleTime * 1.5) * 0.008;
     }
 
+    // Smooth interpolation: ease action transitions
     this.pivot.rotation.x = 0.3 + extraRotX;
-    this.pivot.rotation.y = -0.6;
+    this.pivot.rotation.y = -0.6 + extraRotY;
     this.pivot.rotation.z = 0.1 + extraRotZ;
     this.itemPivot.position.set(0, itemOffsetY, itemOffsetZ);
   }

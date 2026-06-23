@@ -23,6 +23,14 @@ export class EnderDragon {
   circleAngle: number = 0;
   circleRadius: number = 30;
   circleHeight: number = 55;
+  // Animation mixer for GLB animations (fly, idle, etc.)
+  mixer: THREE.AnimationMixer | null = null;
+  // Detected wings for procedural flap (fallback if GLB has no animations)
+  wingParts: THREE.Object3D[] = [];
+  headPart: THREE.Object3D | null = null;
+  // Banking/pitch for smooth flight attitude
+  prevYaw: number = 0;
+  bankAngle: number = 0;
 
   constructor(world: World, position: THREE.Vector3) {
     this.world = world;
@@ -36,32 +44,79 @@ export class EnderDragon {
       const model = gltf.scene;
       model.scale.set(2.0, 2.0, 2.0);
       this.model = model;
+      // Set up AnimationMixer if the GLB has animations
+      if (gltf.animations && gltf.animations.length > 0) {
+        this.mixer = new THREE.AnimationMixer(model);
+        // Play all animations (typically "fly", "idle") — fly takes priority
+        for (const clip of gltf.animations) {
+          const action = this.mixer.clipAction(clip);
+          action.play();
+        }
+      }
+      // Detect wing and head parts for procedural animation overlay
+      this.detectWingsAndHead();
+      // Enable shadows on all meshes
+      model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
     } catch (e) {
       console.error("Failed to load EnderDragon.glb:", e);
-      // Fallback: large black dragon
+      // Fallback: large black dragon with simple wings
       const group = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.BoxGeometry(3, 2, 6),
-        new THREE.MeshLambertMaterial({ color: 0x1a1a2a })
-      );
+      const dragonMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2a, roughness: 0.7 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 6), dragonMat);
       body.position.y = 1;
+      body.castShadow = true;
       group.add(body);
-      const head = new THREE.Mesh(
-        new THREE.BoxGeometry(1.5, 1.5, 1.5),
-        new THREE.MeshLambertMaterial({ color: 0x1a1a2a })
-      );
+      const head = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), dragonMat);
       head.position.set(0, 1.5, -3.5);
+      head.castShadow = true;
       group.add(head);
-      // Eyes (purple)
-      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xaa00ff });
+      this.headPart = head;
+      // Eyes (purple, glowing)
+      const eyeMat = new THREE.MeshStandardMaterial({
+        color: 0xaa00ff, emissive: 0xaa00ff, emissiveIntensity: 2.5
+      });
       const eyeL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.05), eyeMat);
       eyeL.position.set(-0.4, 1.7, -4.2);
       group.add(eyeL);
       const eyeR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.05), eyeMat);
       eyeR.position.set(0.4, 1.7, -4.2);
       group.add(eyeR);
+      // Wings (2 large flat boxes that will flap procedurally)
+      const wingMat = new THREE.MeshStandardMaterial({ color: 0x0a0a1a, roughness: 0.7, side: THREE.DoubleSide });
+      const wingL = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 3), wingMat);
+      wingL.position.set(-3, 2, 0);
+      wingL.castShadow = true;
+      group.add(wingL);
+      this.wingParts.push(wingL);
+      const wingR = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 3), wingMat);
+      wingR.position.set(3, 2, 0);
+      wingR.castShadow = true;
+      group.add(wingR);
+      this.wingParts.push(wingR);
       this.model = group;
     }
+  }
+
+  // Detect wing and head meshes by name for procedural flap/look animations
+  private detectWingsAndHead() {
+    if (!this.model) return;
+    this.wingParts = [];
+    this.headPart = null;
+    this.model.traverse((obj) => {
+      const name = obj.name.toLowerCase();
+      if (obj instanceof THREE.Mesh) {
+        if (name.includes("wing") || name.includes("arm")) {
+          this.wingParts.push(obj);
+        } else if (name.includes("head") || name.includes("neck")) {
+          if (this.headPart === null) this.headPart = obj;
+        }
+      }
+    });
   }
 
   takeDamage(amount: number): boolean {
@@ -121,17 +176,76 @@ export class EnderDragon {
       return { damage: 6 };
     }
 
+    // Update animation mixer (GLB clips)
+    if (this.mixer) this.mixer.update(dt);
+
     // Update model
     if (this.model) {
       this.model.position.copy(this.position);
       this.model.rotation.y = this.yaw;
+
+      // === PROCEDURAL FLIGHT ANIMATION OVERLAY ===
+      // Banking: tilt based on yaw change rate
+      const yawDelta = this.yaw - this.prevYaw;
+      this.prevYaw = this.yaw;
+      // Smooth bank
+      this.bankAngle += (yawDelta * 1.5 - this.bankAngle) * 0.1;
+      this.model.rotation.z = -this.bankAngle;
+      // Pitch up/down with vertical velocity
+      const vy = (targetY - this.position.y) * 1.5;
+      this.model.rotation.x = -vy * 0.05;
+
+      // === WING FLAP (if no AnimationMixer or as overlay) ===
+      if (this.wingParts.length > 0) {
+        const flap = Math.sin(this.flightTime * 4) * 0.6;
+        for (let i = 0; i < this.wingParts.length; i++) {
+          // Alternate wings: left wing flaps +z, right wing -z (or up/down depending on orientation)
+          const sign = (i % 2 === 0) ? 1 : -1;
+          this.wingParts[i].rotation.z = flap * sign;
+        }
+      }
+
+      // === HEAD TRACKING ===
+      if (this.headPart) {
+        // Look toward player
+        const dxh = playerX - this.position.x;
+        const dyh = playerY - this.position.y;
+        const dzh = playerZ - this.position.z;
+        const distH = Math.sqrt(dxh * dxh + dzh * dzh);
+        if (distH > 0.001) {
+          // Subtle head yaw toward player (limited)
+          const targetHeadYaw = Math.atan2(-dxh, -dzh) - this.yaw;
+          // Normalize and clamp
+          let hyd = targetHeadYaw;
+          while (hyd > Math.PI) hyd -= Math.PI * 2;
+          while (hyd < -Math.PI) hyd += Math.PI * 2;
+          this.headPart.rotation.y = Math.max(-0.5, Math.min(0.5, hyd));
+          this.headPart.rotation.x = Math.max(-0.3, Math.min(0.3, dyh * 0.05));
+        }
+      }
     }
 
     if (this.damageFlashTime > 0) {
       this.damageFlashTime -= dt;
+      this.applyTint(0.8, 0.2, 0.8);
+    } else {
+      this.applyTint(0, 0, 0);
     }
 
     return null;
+  }
+
+  // Apply tint (for damage flash)
+  private applyTint(r: number, g: number, b: number) {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.MeshStandardMaterial;
+        if (mat && mat.emissive) {
+          mat.emissive.setRGB(r, g, b);
+        }
+      }
+    });
   }
 
   distanceTo(x: number, y: number, z: number): number {

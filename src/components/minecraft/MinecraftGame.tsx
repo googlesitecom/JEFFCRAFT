@@ -199,14 +199,47 @@ export default function MinecraftGame() {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.35;
+    renderer.toneMappingExposure = 1.45;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    // Shadows: PCFSoft for smooth edges, 1024 for performance (60fps)
+    // Physically correct lighting (PBR) for better material response
+    (renderer as any).physicallyCorrectLights = true;
+    (renderer as any).useLegacyLights = false;
+    // Shadows: VSM for soft, accurate self-shadowing (better than PCFSoft)
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.VSMShadowMap;
     container.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.cursor = "none";
+
+    // === PMREM environment for PBR reflections (subtle, sky-driven) ===
+    const pmremGen = new THREE.PMREMGenerator(renderer);
+    // Build a tiny gradient env scene (same colors as sky) for IBL
+    const envScene = new THREE.Scene();
+    const envGeo = new THREE.SphereGeometry(100, 16, 8);
+    const envMat = new THREE.ShaderMaterial({
+      uniforms: {
+        topColor: { value: new THREE.Color("#2a6cd6") },
+        bottomColor: { value: new THREE.Color("#87ceeb") },
+      },
+      vertexShader: `
+        varying vec3 vWorld;
+        void main(){
+          vWorld = position;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 topColor; uniform vec3 bottomColor;
+        varying vec3 vWorld;
+        void main(){
+          float h = normalize(vWorld).y;
+          gl_FragColor = vec4(mix(bottomColor, topColor, max(h,0.0)), 1.0);
+        }`,
+      side: THREE.BackSide,
+    });
+    envScene.add(new THREE.Mesh(envGeo, envMat));
+    const envRT = pmremGen.fromScene(envScene as any, 0.04);
+    scene.environment = envRT.texture;
+    pmremGen.dispose();
 
     // === Skybox gradient (procedural sphere) ===
     const skyGeo = new THREE.SphereGeometry(500, 32, 16);
@@ -243,31 +276,32 @@ export default function MinecraftGame() {
     sky.frustumCulled = false;
     scene.add(sky);
 
-    // === Lighting ===
-    const ambient = new THREE.AmbientLight(0xffffff, 0.45);
+    // === Lighting (PBR-tuned for physically correct mode) ===
+    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xfff4e6, 1.1);
+    const sun = new THREE.DirectionalLight(0xfff4e6, 3.2);
     sun.position.set(50, 100, 30);
-    // Shadow config: 1024px for 60fps, tight frustum around player
+    // Shadow config: 2048px for crisper shadows, tight frustum around player
     sun.castShadow = true;
-    sun.shadow.mapSize.width = 1024;
-    sun.shadow.mapSize.height = 1024;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 150;
-    sun.shadow.camera.left = -40;
-    sun.shadow.camera.right = 40;
-    sun.shadow.camera.top = 40;
-    sun.shadow.camera.bottom = -40;
-    sun.shadow.bias = -0.001;
-    sun.shadow.normalBias = 0.05;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -50;
+    sun.shadow.camera.right = 50;
+    sun.shadow.camera.top = 50;
+    sun.shadow.camera.bottom = -50;
+    sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.04;
+    sun.shadow.radius = 4; // soft shadow radius (VSM)
     scene.add(sun);
     scene.add(sun.target);
     // Fill light: soft blue from opposite direction (sky bounce)
-    const fill = new THREE.DirectionalLight(0x88aaff, 0.3);
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.9);
     fill.position.set(-40, 60, -30);
     scene.add(fill);
     // Hemisphere: sky color from above, ground color from below
-    const hemi = new THREE.HemisphereLight(0x88bbff, 0x554433, 0.4);
+    const hemi = new THREE.HemisphereLight(0x88bbff, 0x554433, 1.2);
     scene.add(hemi);
 
     // === Build atlas and shared materials ===
@@ -2515,43 +2549,21 @@ function MainMenu({
     <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
       {/* Panoramic background with slow horizontal pan */}
       <div className="absolute inset-0" style={{
-        backgroundImage: `url(/IMG_2398.jpeg)`,
+        backgroundImage: `url(/IMG_2423.jpeg), url(/IMG_2398.jpeg)`,
         backgroundSize: "cover",
         backgroundPosition: `${panOffset}% center`,
-        opacity: 0.65,
+        opacity: 0.95,
         transition: "background-position 0.05s linear",
       }} />
-      {/* Vignette + gradient for depth and readability */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/30 to-black/80" />
-      <div className="absolute inset-0" style={{
-        background: "radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.6) 100%)",
-      }} />
+      {/* Subtle vignette for readability (image already has the title) */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/40" />
 
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
-        {/* Logo with splash text */}
-        <div className="mb-10 text-center relative">
-          <h1 className="text-5xl sm:text-7xl font-black tracking-wider text-white" style={{
-            fontFamily: "monospace",
-            textShadow: "0 0 40px rgba(80,140,255,0.6), 0 0 20px rgba(60,100,220,0.5), 4px 4px 0 #0a0a1a, 6px 6px 0 #050510, 8px 8px 12px rgba(0,0,0,0.7)",
-            WebkitTextStroke: "1.5px rgba(0,0,0,0.4)",
-            letterSpacing: "0.08em",
-          }}>JEFFCRAFT</h1>
-          {/* Splash text with bounce animation */}
-          <span className="absolute top-1/2 -right-2 sm:right-16 text-yellow-300 font-bold text-xs sm:text-base font-mono"
-            style={{
-              transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
-              textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
-              transition: "transform 0.1s",
-            }}>
-            {SPLASH_TEXTS[splashIndex]}
-          </span>
-        </div>
-
-        {/* Menu buttons */}
+        {/* Menu buttons — title removed (image already includes it) */}
         {!showLoadMenu ? (
           <div className="flex flex-col gap-2 w-full max-w-xs">
-            <MCMenuButton onClick={onCreateWorld} color="green">Crear nuevo mundo</MCMenuButton>
-            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="blue">Cargar mundo</MCMenuButton>
+            <MCMenuButton onClick={onCreateWorld} color="gray">Crear nuevo mundo</MCMenuButton>
+            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="gray">Cargar mundo</MCMenuButton>
             <MCMenuButton onClick={onMultiplayer} color="gray">Multijugador</MCMenuButton>
             <MCMenuButton onClick={() => {}} color="gray" className="opacity-50 cursor-not-allowed">Opciones</MCMenuButton>
           </div>
@@ -2607,7 +2619,19 @@ function MainMenu({
           </div>
         )}
 
-        <p className="mt-10 text-white/25 text-xs font-mono">Jeffcraft V2 · No afiliado con Mojang o Microsoft</p>
+        {/* Splash text at bottom-right (yellow, bouncing) */}
+        <span
+          className="absolute bottom-4 right-6 text-yellow-300 font-bold text-sm sm:text-lg font-mono pointer-events-none"
+          style={{
+            transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
+            textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
+            transition: "transform 0.1s",
+          }}
+        >
+          {SPLASH_TEXTS[splashIndex]}
+        </span>
+
+        <p className="absolute bottom-2 left-4 text-white/35 text-xs font-mono">Jeffcraft V2 · No afiliado con Mojang o Microsoft</p>
       </div>
     </div>
   );
@@ -2628,24 +2652,24 @@ function MCButton({ children, onClick, primary, disabled, className = "" }: {
   );
 }
 
-// Minecraft-style menu button with beveled edges
+// Minecraft-style menu button — gray background, white text, beveled edges
 function MCMenuButton({ children, onClick, color = "gray", className = "" }: {
   children: React.ReactNode; onClick?: () => void; color?: "green" | "red" | "blue" | "gray"; className?: string;
 }) {
-  const cm: Record<string, {bg:string;h:string;a:string;t:string;b:string;glow:string}> = {
-    green: { bg: "#5a8a3a", h: "#6a9a4a", a: "#4a7a2a", t: "#8aba5a", b: "#2a4a1a", glow: "rgba(120,200,80,0.5)" },
-    red:   { bg: "#8a3a3a", h: "#9a4a4a", a: "#7a2a2a", t: "#ba5a5a", b: "#4a1a1a", glow: "rgba(220,80,80,0.5)" },
-    blue:  { bg: "#3a5a8a", h: "#4a6a9a", a: "#2a4a7a", t: "#5a7aaa", b: "#1a2a4a", glow: "rgba(80,140,220,0.5)" },
-    gray:  { bg: "#5a5a5a", h: "#6a6a6a", a: "#4a4a4a", t: "#7a7a7a", b: "#2a2a2a", glow: "rgba(160,160,160,0.4)" },
-  };
-  const c = cm[color];
+  // All buttons use gray background with white text/detail (color prop is kept for backwards compat but ignored)
+  const bg = "#6b6b6b";
+  const h = "#7b7b7b";
+  const a = "#5b5b5b";
+  const t = "#9a9a9a"; // top/left highlight (lighter gray)
+  const b = "#3a3a3a"; // bottom/right shadow (darker gray)
+  const glow = "rgba(255,255,255,0.35)";
   return (
     <button onClick={onClick} className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.03] hover:-translate-y-px active:scale-95 active:translate-y-0 ${className}`}
-      style={{ backgroundColor: c.bg, borderTop: `3px solid ${c.t}`, borderLeft: `3px solid ${c.t}`, borderBottom: `3px solid ${c.b}`, borderRight: `3px solid ${c.b}`, imageRendering: "pixelated", textShadow: "2px 2px 0 #1a1a1a, -1px -1px 0 #1a1a1a", boxShadow: "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.15)" }}
-      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = c.h; e.currentTarget.style.boxShadow = `0 4px 12px ${c.glow}, inset 1px 1px 0 rgba(255,255,255,0.25)`; }}
-      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = c.bg; e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.15)"; }}
-      onMouseDown={(e) => { e.currentTarget.style.backgroundColor = c.a; e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.5), inset 1px 1px 3px rgba(0,0,0,0.4)"; }}
-      onMouseUp={(e) => { e.currentTarget.style.backgroundColor = c.h; e.currentTarget.style.boxShadow = `0 4px 12px ${c.glow}, inset 1px 1px 0 rgba(255,255,255,0.25)`; }}>
+      style={{ backgroundColor: bg, borderTop: `3px solid ${t}`, borderLeft: `3px solid ${t}`, borderBottom: `3px solid ${b}`, borderRight: `3px solid ${b}`, imageRendering: "pixelated", textShadow: "2px 2px 0 #1a1a1a, -1px -1px 0 #1a1a1a", boxShadow: "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; }}
+      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = bg; e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)"; }}
+      onMouseDown={(e) => { e.currentTarget.style.backgroundColor = a; e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.5), inset 1px 1px 3px rgba(0,0,0,0.4)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; }}>
       {children}
     </button>
   );

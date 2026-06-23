@@ -119,6 +119,10 @@ export class Animal {
   isDead: boolean = false;
   modelLoaded: boolean = false;
   damageFlashTime: number = 0; // seconds of red tint remaining
+  // Detected legs (for procedural walk animation)
+  legBones: THREE.Object3D[] = [];
+  headBone: THREE.Object3D | null = null;
+  idleTime: number = 0;
 
   constructor(type: AnimalType, world: World, position: THREE.Vector3) {
     this.type = type;
@@ -141,11 +145,31 @@ export class Animal {
       // The yaw rotation is applied in update(), so we add an offset here if needed
       this.model = model;
       this.modelLoaded = true;
+      // Detect legs and head by traversing model hierarchy and inspecting names
+      this.detectBones();
     } catch (e) {
       console.error("Failed to load animal model:", this.def.modelPath, e);
       this.model = buildFallbackModel(this.def);
       this.modelLoaded = true;
     }
+  }
+
+  // Detect leg bones and head bone by inspecting mesh/bone names (Minecraft-style GLBs use names like "leg_front_left", "Head", etc.)
+  private detectBones() {
+    if (!this.model) return;
+    this.legBones = [];
+    this.headBone = null;
+    const legKeywords = ["leg", "Leg", "LEG", "limb", "Limb"];
+    const headKeywords = ["head", "Head", "HEAD", "neck", "Neck"];
+    this.model.traverse((obj) => {
+      const name = obj.name || "";
+      if (obj instanceof THREE.Mesh || obj instanceof THREE.Bone) {
+        const isLeg = legKeywords.some(k => name.includes(k));
+        const isHead = headKeywords.some(k => name.includes(k));
+        if (isLeg && !isHead) this.legBones.push(obj);
+        else if (isHead && this.headBone === null) this.headBone = obj;
+      }
+    });
   }
 
   takeDamage(amount: number, playerPos?: THREE.Vector3): boolean {
@@ -318,6 +342,7 @@ export class Animal {
     if (moveSpeed > 0) {
       this.walkAnimTime += dt * 8;
     }
+    this.idleTime += dt;
 
     // Update model position and rotation
     if (this.model) {
@@ -325,10 +350,39 @@ export class Animal {
       // Apply yaw + rotation offset to fix GLB orientation
       this.model.rotation.y = this.yaw + this.def.modelRotationOffset;
 
-      // Walk animation: bob up and down slightly
+      // Walk animation: bob up and down + leg swing + head bob
       if (moveSpeed > 0) {
-        const bob = Math.abs(Math.sin(this.walkAnimTime)) * 0.05;
+        const bob = Math.abs(Math.sin(this.walkAnimTime)) * 0.06;
         this.model.position.y += bob;
+        // Swing legs alternately (procedural walk cycle)
+        if (this.legBones.length > 0) {
+          for (let i = 0; i < this.legBones.length; i++) {
+            // Alternate phase for even/odd legs (front-left + back-right vs front-right + back-left)
+            const phase = (i % 2 === 0) ? 0 : Math.PI;
+            const swing = Math.sin(this.walkAnimTime + phase) * 0.5;
+            this.legBones[i].rotation.x = swing;
+          }
+        }
+        // Head bob: slight forward/back pitch while walking
+        if (this.headBone) {
+          this.headBone.rotation.x = Math.sin(this.walkAnimTime) * 0.08;
+        }
+      } else {
+        // Idle animation: gentle breathing (subtle vertical scale) + occasional head tilt
+        const breath = Math.sin(this.idleTime * 1.5) * 0.015 + 1;
+        this.model.scale.set(this.def.modelScale, this.def.modelScale * breath, this.def.modelScale);
+        // Reset leg rotations to neutral
+        if (this.legBones.length > 0) {
+          for (const leg of this.legBones) {
+            leg.rotation.x *= 0.85; // ease back to 0
+          }
+        }
+        // Head looks around occasionally
+        if (this.headBone) {
+          const lookT = this.idleTime * 0.7;
+          this.headBone.rotation.y = Math.sin(lookT) * 0.3;
+          this.headBone.rotation.x = Math.sin(lookT * 0.5) * 0.05;
+        }
       }
 
       // Damage flash: tint the model red for 0.4 seconds after taking damage

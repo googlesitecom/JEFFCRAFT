@@ -21,6 +21,11 @@ export class Blaze {
   damageFlashTime: number = 0;
   attackTimer: number = 0;
   floatTime: number = 0;
+  // Detected rod particles (for spinning animation)
+  rodParts: THREE.Object3D[] = [];
+  // Glow pulse state
+  glowIntensity: number = 1;
+  attackAnimTime: number = 0;
 
   constructor(world: World, position: THREE.Vector3) {
     this.world = world;
@@ -34,19 +39,45 @@ export class Blaze {
       const model = gltf.scene;
       model.scale.set(0.5, 0.5, 0.5);
       this.model = model;
-      this.world; // just to suppress unused warning
+      // Detect rod-like parts (anything that's not the central body) for spinning
+      this.detectRods();
     } catch (e) {
       console.error("Failed to load Blaze.glb:", e);
-      // Fallback: simple floating box
+      // Fallback: simple floating box with rods
       const group = new THREE.Group();
       const body = new THREE.Mesh(
         new THREE.BoxGeometry(0.8, 1.2, 0.8),
-        new THREE.MeshLambertMaterial({ color: 0xffaa00, emissive: 0x664400 })
+        new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xff6600, emissiveIntensity: 0.6 })
       );
       body.position.y = 0.6;
+      body.castShadow = true;
       group.add(body);
+      // 4 rods orbiting the body
+      for (let i = 0; i < 4; i++) {
+        const angle = (i / 4) * Math.PI * 2;
+        const rod = new THREE.Mesh(
+          new THREE.BoxGeometry(0.12, 0.5, 0.12),
+          new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xff4400, emissiveIntensity: 0.8 })
+        );
+        rod.position.set(Math.cos(angle) * 0.7, 0.7, Math.sin(angle) * 0.7);
+        rod.castShadow = true;
+        group.add(rod);
+        this.rodParts.push(rod);
+      }
       this.model = group;
     }
+  }
+
+  // Detect rod-like mesh parts in the GLB (named "rod", "ring", "particle", etc.)
+  private detectRods() {
+    if (!this.model) return;
+    this.rodParts = [];
+    this.model.traverse((obj) => {
+      const name = obj.name.toLowerCase();
+      if (obj instanceof THREE.Mesh && (name.includes("rod") || name.includes("ring") || name.includes("particle") || name.includes("smoke"))) {
+        this.rodParts.push(obj);
+      }
+    });
   }
 
   takeDamage(amount: number): boolean {
@@ -77,6 +108,7 @@ export class Blaze {
   update(dt: number, playerX: number, playerY: number, playerZ: number): { damage: number } | null {
     if (this.isDead) return null;
     this.floatTime += dt;
+    if (this.attackAnimTime > 0) this.attackAnimTime -= dt;
 
     const dx = playerX - this.position.x;
     const dy = playerY - this.position.y;
@@ -111,6 +143,7 @@ export class Blaze {
     this.attackTimer -= dt;
     if (dist < 6 && Math.abs(dy) < 3 && this.attackTimer <= 0) {
       this.attackTimer = 2.0;
+      this.attackAnimTime = 0.6; // 600ms fire burst
       return { damage: 4 };
     }
 
@@ -118,14 +151,64 @@ export class Blaze {
     if (this.model) {
       this.model.position.copy(this.position);
       this.model.rotation.y = this.yaw + Math.PI;
+
+      // === ROD SPINNING ANIMATION ===
+      // Orbit rods around the blaze body
+      if (this.rodParts.length > 0) {
+        const spinSpeed = this.attackAnimTime > 0 ? 8 : 3; // spin faster when attacking
+        const angle = this.floatTime * spinSpeed;
+        for (let i = 0; i < this.rodParts.length; i++) {
+          const offset = (i / this.rodParts.length) * Math.PI * 2;
+          const r = 0.7;
+          // Preserve original Y, just orbit on XZ plane around the model origin
+          const origY = this.rodParts[i].position.y;
+          this.rodParts[i].position.x = Math.cos(angle + offset) * r;
+          this.rodParts[i].position.z = Math.sin(angle + offset) * r;
+          this.rodParts[i].position.y = origY + Math.sin(this.floatTime * 4 + i) * 0.05;
+        }
+      }
+
+      // === GLOW PULSE ===
+      // Pulsate emissive intensity (breathing fire effect)
+      this.glowIntensity = 0.6 + Math.sin(this.floatTime * 5) * 0.3 + (this.attackAnimTime > 0 ? 0.6 : 0);
+      this.applyGlow(this.glowIntensity);
     }
 
     // Damage flash
     if (this.damageFlashTime > 0) {
       this.damageFlashTime -= dt;
+      this.applyTint(0.8, 0.2, 0);
     }
 
     return null;
+  }
+
+  // Apply pulsing glow to all emissive materials in the model
+  private applyGlow(intensity: number) {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
+        if (mat && "emissiveIntensity" in mat) {
+          (mat as THREE.MeshStandardMaterial).emissiveIntensity = intensity;
+        }
+      }
+    });
+  }
+
+  // Apply tint (for damage flash)
+  private applyTint(r: number, g: number, b: number) {
+    if (!this.model) return;
+    this.model.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) {
+        const mat = obj.material as THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
+        if (mat && mat.emissive) {
+          // Blend tint over the emissive
+          const baseGlow = this.glowIntensity * 0.3;
+          mat.emissive.setRGB(Math.max(r, baseGlow * 1.0), Math.max(g, baseGlow * 0.4), Math.max(b, 0));
+        }
+      }
+    });
   }
 
   private checkCollision(halfW: number): boolean {
