@@ -32,14 +32,21 @@ export class HandView {
     this.camera.position.set(0, 0, 5);
     this.camera.lookAt(0, 0, 0);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.9);
+    // Layered lighting for better 3D depth
+    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
     this.scene.add(ambient);
-    const dir = new THREE.DirectionalLight(0xfff0e0, 0.45);
+    // Main key light (warm sun)
+    const dir = new THREE.DirectionalLight(0xfff2d8, 0.65);
     dir.position.set(3, 5, 4);
     this.scene.add(dir);
-    const fill = new THREE.DirectionalLight(0xa0c0ff, 0.2);
+    // Fill light (cool sky)
+    const fill = new THREE.DirectionalLight(0xa0c0ff, 0.3);
     fill.position.set(-2, -3, 3);
     this.scene.add(fill);
+    // Rim light from behind for edge definition
+    const rim = new THREE.DirectionalLight(0xffd8a0, 0.25);
+    rim.position.set(0, 2, -3);
+    this.scene.add(rim);
 
     this.pivot = new THREE.Group();
     this.scene.add(this.pivot);
@@ -51,44 +58,62 @@ export class HandView {
 
   private buildHand() {
     // Minecraft-style first-person arm: a single thick 3D block, skin-toned, no fingers.
-    // Colors based on the reference image: warm tan/skin tone (~#92654E).
-    const skinMat = new THREE.MeshLambertMaterial({ color: 0x92654e });
-    const skinLightMat = new THREE.MeshLambertMaterial({ color: 0xb07d62 });
-    const skinDarkMat = new THREE.MeshLambertMaterial({ color: 0x6e4a38 });
+    // Steve-style skin tone (~#b8845c) with cyan/teal shirt sleeve.
+    const skinMat = new THREE.MeshLambertMaterial({ color: 0xb8845c });
+    const skinLightMat = new THREE.MeshLambertMaterial({ color: 0xd4a378 });
+    const skinDarkMat = new THREE.MeshLambertMaterial({ color: 0x8a6038 });
+    const sleeveMat = new THREE.MeshLambertMaterial({ color: 0x3a8a8a });
+    const sleeveLightMat = new THREE.MeshLambertMaterial({ color: 0x5aaaaa });
+    const sleeveDarkMat = new THREE.MeshLambertMaterial({ color: 0x1a4a4a });
 
-    const armW = 0.28;
-    const armH = 0.7;
-    const armD = 0.28;
+    const armW = 0.30;
+    const armH = 0.75;
+    const armD = 0.30;
     const off = 0.005; // offset to prevent z-fighting
 
-    // Main arm block (skin colored)
-    const arm = new THREE.Mesh(new THREE.BoxGeometry(armW, armH, armD), skinMat);
-    arm.position.set(0, -0.15, 0);
-    this.pivot.add(arm);
+    // Sleeve (top portion - cyan/teal shirt)
+    const sleeveH = 0.30;
+    const sleeve = new THREE.Mesh(new THREE.BoxGeometry(armW, sleeveH, armD), sleeveMat);
+    sleeve.position.set(0, -0.15 + armH / 2 - sleeveH / 2, 0);
+    this.pivot.add(sleeve);
+    // Sleeve highlights
+    const sleeveLeftHL = new THREE.Mesh(new THREE.BoxGeometry(0.012, sleeveH - 0.02, armD - 0.02), sleeveLightMat);
+    sleeveLeftHL.position.set(-armW / 2 - off, -0.15 + armH / 2 - sleeveH / 2, 0);
+    this.pivot.add(sleeveLeftHL);
+    const sleeveTopHL = new THREE.Mesh(new THREE.BoxGeometry(armW - 0.02, 0.012, armD - 0.02), sleeveLightMat);
+    sleeveTopHL.position.set(0, -0.15 + armH / 2 - 0.005, 0);
+    this.pivot.add(sleeveTopHL);
+    const sleeveRightSh = new THREE.Mesh(new THREE.BoxGeometry(0.012, sleeveH - 0.02, armD - 0.02), sleeveDarkMat);
+    sleeveRightSh.position.set(armW / 2 + off, -0.15 + armH / 2 - sleeveH / 2, 0);
+    this.pivot.add(sleeveRightSh);
 
-    // Highlight on the left side (offset outward)
-    const leftHighlight = new THREE.Mesh(new THREE.BoxGeometry(0.012, armH - 0.02, armD - 0.02), skinLightMat);
-    leftHighlight.position.set(-armW / 2 - off, -0.15, 0);
+    // Skin portion (bottom - the hand/fist area)
+    const skinH = armH - sleeveH;
+    const skin = new THREE.Mesh(new THREE.BoxGeometry(armW, skinH, armD), skinMat);
+    skin.position.set(0, -0.15 + armH / 2 - sleeveH - skinH / 2, 0);
+    this.pivot.add(skin);
+
+    // Skin highlights
+    const leftHighlight = new THREE.Mesh(new THREE.BoxGeometry(0.012, skinH - 0.02, armD - 0.02), skinLightMat);
+    leftHighlight.position.set(-armW / 2 - off, -0.15 + armH / 2 - sleeveH - skinH / 2, 0);
     this.pivot.add(leftHighlight);
 
-    // Highlight on top
     const topHighlight = new THREE.Mesh(new THREE.BoxGeometry(armW - 0.02, 0.012, armD - 0.02), skinLightMat);
-    topHighlight.position.set(0, -0.15 + armH / 2 + off, 0);
+    topHighlight.position.set(0, -0.15 + armH / 2 - sleeveH - 0.005, 0);
     this.pivot.add(topHighlight);
 
-    // Shadow on right side
-    const rightShadow = new THREE.Mesh(new THREE.BoxGeometry(0.012, armH - 0.02, armD - 0.02), skinDarkMat);
-    rightShadow.position.set(armW / 2 + off, -0.15, 0);
+    // Skin shadows
+    const rightShadow = new THREE.Mesh(new THREE.BoxGeometry(0.012, skinH - 0.02, armD - 0.02), skinDarkMat);
+    rightShadow.position.set(armW / 2 + off, -0.15 + armH / 2 - sleeveH - skinH / 2, 0);
     this.pivot.add(rightShadow);
 
-    // Shadow on bottom
     const bottomShadow = new THREE.Mesh(new THREE.BoxGeometry(armW - 0.02, 0.012, armD - 0.02), skinDarkMat);
-    bottomShadow.position.set(0, -0.15 - armH / 2 - off, 0);
+    bottomShadow.position.set(0, -0.15 - armH / 2 + off, 0);
     this.pivot.add(bottomShadow);
 
-    // Fist cap at the top (lighter shade, slightly forward)
+    // Fist cap at the bottom (slightly lighter, the knuckle area)
     const fistCap = new THREE.Mesh(new THREE.BoxGeometry(armW - 0.01, 0.14, armD - 0.01), skinLightMat);
-    fistCap.position.set(0, -0.15 + armH / 2 - 0.07, 0.002);
+    fistCap.position.set(0, -0.15 - armH / 2 + 0.07, 0.002);
     this.pivot.add(fistCap);
 
     // Position: bottom-right corner, angled like Minecraft first-person

@@ -1936,16 +1936,16 @@ export default function MinecraftGame() {
 
       {/* Hotbar — Minecraft style with beveled slots */}
       <div
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex p-1"
+        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex p-1.5"
         key={inventoryVersion}
         style={{
-          backgroundColor: "rgba(0,0,0,0.55)",
-          borderTop: "3px solid rgba(80,80,80,0.8)",
-          borderLeft: "3px solid rgba(80,80,80,0.8)",
-          borderBottom: "3px solid rgba(0,0,0,0.9)",
-          borderRight: "3px solid rgba(0,0,0,0.9)",
+          backgroundColor: "rgba(20,20,25,0.85)",
+          borderTop: "3px solid rgba(110,110,120,0.9)",
+          borderLeft: "3px solid rgba(110,110,120,0.9)",
+          borderBottom: "3px solid rgba(0,0,0,0.95)",
+          borderRight: "3px solid rgba(0,0,0,0.95)",
           imageRendering: "pixelated",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+          boxShadow: "0 6px 20px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(0,0,0,0.5)",
         }}
       >
         {Array.from({ length: 9 }).map((_, i) => {
@@ -1990,46 +1990,49 @@ export default function MinecraftGame() {
           return (
             <div
               key={i}
-              className="relative flex items-center justify-center"
+              className="relative flex items-center justify-center transition-transform"
               style={{
-                width: "50px", height: "50px",
+                width: "52px", height: "52px",
                 marginRight: i < 8 ? "2px" : "0",
                 imageRendering: "pixelated",
+                transform: isSelected ? "translateY(-4px) scale(1.06)" : "translateY(0) scale(1)",
               }}
             >
               {/* Slot background */}
               <div
                 className="absolute inset-0"
                 style={{
-                  backgroundColor: "rgba(100,100,100,0.3)",
-                  borderTop: "2px solid rgba(150,150,150,0.5)",
-                  borderLeft: "2px solid rgba(150,150,150,0.5)",
-                  borderBottom: "2px solid rgba(40,40,40,0.8)",
-                  borderRight: "2px solid rgba(40,40,40,0.8)",
+                  backgroundColor: "rgba(139,139,139,0.45)",
+                  borderTop: "2px solid rgba(170,170,170,0.7)",
+                  borderLeft: "2px solid rgba(170,170,170,0.7)",
+                  borderBottom: "2px solid rgba(50,50,50,0.9)",
+                  borderRight: "2px solid rgba(50,50,50,0.9)",
                 }}
               />
-              {/* Selection highlight */}
+              {/* Selection highlight - bright white border with glow */}
               {isSelected && (
-                <div className="absolute inset-0 pointer-events-none" style={{
+                <div className="absolute pointer-events-none" style={{
+                  inset: "-4px",
                   border: "3px solid #ffffff",
-                  boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.3)",
+                  boxShadow: "0 0 10px rgba(255,255,255,0.6), inset 0 0 0 1px rgba(0,0,0,0.4)",
                   zIndex: 5,
                 }} />
               )}
-              {/* Item icon */}
+              {/* Item icon with subtle drop shadow */}
               {iconUrl && (
                 <img src={iconUrl} alt={name} className="relative z-10" style={{
-                  width: "34px", height: "34px", imageRendering: "pixelated",
+                  width: "36px", height: "36px", imageRendering: "pixelated",
+                  filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.6))",
                 }} draggable={false} />
               )}
               {/* Slot number */}
               <span className="absolute top-0.5 left-1 text-[9px] font-mono pointer-events-none z-20"
-                style={{ color: "rgba(255,255,255,0.35)", textShadow: "1px 1px 0 #000" }}>
+                style={{ color: "rgba(255,255,255,0.4)", textShadow: "1px 1px 0 #000" }}>
                 {i + 1}
               </span>
-              {/* Stack count */}
+              {/* Stack count with 4-direction shadow for readability */}
               {count > 1 && (
-                <span className="absolute bottom-0 right-1 text-sm font-mono font-bold pointer-events-none z-20"
+                <span className="absolute bottom-0.5 right-1 text-sm font-mono font-bold pointer-events-none z-20"
                   style={{ color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}>
                   {count}
                 </span>
@@ -2051,27 +2054,45 @@ export default function MinecraftGame() {
 
       {/* Pause overlay — Minecraft-style menu */}
       {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.75)" }}>
+        <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.78)", backdropFilter: "blur(2px)" }}>
           {!showControls ? (
             <div className="max-w-sm w-full mx-4" style={{ imageRendering: "pixelated" }}>
-              <h1 className="text-center text-3xl sm:text-4xl font-black mb-6 text-white" style={{ fontFamily: "monospace", textShadow: "3px 3px 0 #1a1a1a, 5px 5px 0 rgba(0,0,0,0.4)", WebkitTextStroke: "1px #1a1a1a" }}>
+              <h1 className="text-center text-3xl sm:text-4xl font-black mb-6 text-white" style={{
+                fontFamily: "monospace",
+                textShadow: "0 0 30px rgba(80,140,255,0.5), 3px 3px 0 #0a0a1a, 5px 5px 0 rgba(0,0,0,0.5)",
+                WebkitTextStroke: "1px #0a0a1a",
+                letterSpacing: "0.05em",
+              }}>
                 {currentWorld?.name || "JEFFCRAFT"}
               </h1>
-              <div className="flex flex-col gap-1.5 mb-2">
+              <div className="flex flex-col gap-2 mb-3">
                 <MCMenuButton onClick={handleStartClick} color="green">Continuar</MCMenuButton>
                 <MCMenuButton onClick={handleExitToMenu} color="red">Salir del mundo</MCMenuButton>
               </div>
-              <div className="flex gap-1.5">
+              <div className="flex gap-2">
                 <MCMenuButton onClick={handleSaveWorld} color="blue" className="flex-1 text-sm">Guardar</MCMenuButton>
                 <MCMenuButton onClick={() => setShowControls(true)} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
               </div>
-              {saveMessage && <p className="mt-3 text-center text-xs text-green-400 font-mono">{saveMessage}</p>}
-              <p className="mt-2 text-center text-xs text-stone-500 font-mono">{mode === "creative" ? "Creativo" : "Survival"} · Pulsa Esc para reanudar</p>
+              {saveMessage && <p className="mt-3 text-center text-xs text-green-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>{saveMessage}</p>}
+              <p className="mt-2 text-center text-xs text-stone-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>
+                {mode === "creative" ? "Creativo" : "Survival"} · Pulsa Esc para reanudar
+              </p>
             </div>
           ) : (
             <div className="max-w-md w-full mx-4" style={{ imageRendering: "pixelated" }}>
-              <h2 className="text-center text-2xl font-black mb-4 text-white" style={{ fontFamily: "monospace", textShadow: "2px 2px 0 #1a1a1a" }}>Controles</h2>
-              <div className="text-left text-sm space-y-1.5 p-4 mb-4" style={{ backgroundColor: "rgba(0,0,0,0.6)", border: "3px solid rgba(60,60,60,0.9)", borderTopColor: "rgba(120,120,120,0.9)", borderLeftColor: "rgba(120,120,120,0.9)" }}>
+              <h2 className="text-center text-2xl font-black mb-4 text-white" style={{
+                fontFamily: "monospace",
+                textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)",
+                letterSpacing: "0.05em",
+              }}>Controles</h2>
+              <div className="text-left text-sm space-y-1.5 p-4 mb-4" style={{
+                backgroundColor: "rgba(0,0,0,0.7)",
+                borderTop: "3px solid rgba(110,110,120,0.9)",
+                borderLeft: "3px solid rgba(110,110,120,0.9)",
+                borderBottom: "3px solid rgba(0,0,0,0.95)",
+                borderRight: "3px solid rgba(0,0,0,0.95)",
+                boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.1)",
+              }}>
                 <ControlRow keys="WASD" desc="Moverse" />
                 <ControlRow keys="Mouse" desc="Mirar alrededor" />
                 <ControlRow keys="Espacio" desc="Saltar / Nadar arriba" />
@@ -2112,15 +2133,15 @@ export default function MinecraftGame() {
               <div className="flex gap-2 mb-3 justify-center">
                 <button
                   onClick={() => { setInputMode("keyboard"); inputModeRef.current = "keyboard"; resetGamepadState(); }}
-                  className="px-4 py-2 font-mono font-bold text-sm transition-all"
+                  className="px-4 py-2 font-mono font-bold text-sm transition-all hover:scale-105"
                   style={{
                     backgroundColor: inputMode === "keyboard" ? "#5a8a3a" : "#5a5a5a",
-                    borderTop: "2px solid #7a7a7a",
-                    borderLeft: "2px solid #7a7a7a",
-                    borderBottom: "2px solid #3a3a3a",
-                    borderRight: "2px solid #3a3a3a",
+                    borderTop: "2px solid #8aba5a",
+                    borderLeft: "2px solid #8aba5a",
+                    borderBottom: "2px solid #2a4a1a",
+                    borderRight: "2px solid #2a4a1a",
                     color: "#fff",
-                    textShadow: "1px 1px 0 #000",
+                    textShadow: "1px 1px 0 #1a1a1a",
                     imageRendering: "pixelated",
                   }}
                 >
@@ -2128,15 +2149,15 @@ export default function MinecraftGame() {
                 </button>
                 <button
                   onClick={() => { setInputMode("controller"); inputModeRef.current = "controller"; resetGamepadState(); }}
-                  className="px-4 py-2 font-mono font-bold text-sm transition-all"
+                  className="px-4 py-2 font-mono font-bold text-sm transition-all hover:scale-105"
                   style={{
                     backgroundColor: inputMode === "controller" ? "#3a5a8a" : "#5a5a5a",
-                    borderTop: "2px solid #7a7a7a",
-                    borderLeft: "2px solid #7a7a7a",
-                    borderBottom: "2px solid #3a3a3a",
-                    borderRight: "2px solid #3a3a3a",
+                    borderTop: "2px solid #5a7aaa",
+                    borderLeft: "2px solid #5a7aaa",
+                    borderBottom: "2px solid #1a2a4a",
+                    borderRight: "2px solid #1a2a4a",
                     color: "#fff",
-                    textShadow: "1px 1px 0 #000",
+                    textShadow: "1px 1px 0 #1a1a1a",
                     imageRendering: "pixelated",
                   }}
                 >
@@ -2144,7 +2165,7 @@ export default function MinecraftGame() {
                 </button>
               </div>
               {!isGamepadConnected() && inputMode === "controller" && (
-                <p className="text-center text-xs text-yellow-400 font-mono mb-2">
+                <p className="text-center text-xs text-yellow-400 font-mono mb-2" style={{ textShadow: "1px 1px 0 #000" }}>
                   ⚠ No se detectó un control. Conecta un control Xbox.
                 </p>
               )}
@@ -2492,27 +2513,43 @@ function MainMenu({
 
   return (
     <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
+      {/* Panoramic background with slow horizontal pan */}
       <div className="absolute inset-0" style={{
         backgroundImage: `url(/IMG_2398.jpeg)`,
-        backgroundSize: "cover", backgroundPosition: "center", opacity: 0.55,
+        backgroundSize: "cover",
+        backgroundPosition: `${panOffset}% center`,
+        opacity: 0.65,
+        transition: "background-position 0.05s linear",
       }} />
-      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/35 to-black/75" />
+      {/* Vignette + gradient for depth and readability */}
+      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/30 to-black/80" />
+      <div className="absolute inset-0" style={{
+        background: "radial-gradient(ellipse at center, transparent 30%, rgba(0,0,0,0.6) 100%)",
+      }} />
 
       <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
+        {/* Logo with splash text */}
         <div className="mb-10 text-center relative">
           <h1 className="text-5xl sm:text-7xl font-black tracking-wider text-white" style={{
             fontFamily: "monospace",
-            textShadow: "0 0 30px rgba(60,100,220,0.4), 3px 3px 0 #0a0a1a, 5px 5px 0 rgba(0,0,0,0.5)",
-            WebkitTextStroke: "1px rgba(0,0,0,0.3)",
+            textShadow: "0 0 40px rgba(80,140,255,0.6), 0 0 20px rgba(60,100,220,0.5), 4px 4px 0 #0a0a1a, 6px 6px 0 #050510, 8px 8px 12px rgba(0,0,0,0.7)",
+            WebkitTextStroke: "1.5px rgba(0,0,0,0.4)",
+            letterSpacing: "0.08em",
           }}>JEFFCRAFT</h1>
+          {/* Splash text with bounce animation */}
           <span className="absolute top-1/2 -right-2 sm:right-16 text-yellow-300 font-bold text-xs sm:text-base font-mono"
-            style={{ transform: "rotate(-12deg)", textShadow: "2px 2px 0 #000" }}>
+            style={{
+              transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
+              textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
+              transition: "transform 0.1s",
+            }}>
             {SPLASH_TEXTS[splashIndex]}
           </span>
         </div>
 
+        {/* Menu buttons */}
         {!showLoadMenu ? (
-          <div className="flex flex-col gap-1.5 w-full max-w-xs">
+          <div className="flex flex-col gap-2 w-full max-w-xs">
             <MCMenuButton onClick={onCreateWorld} color="green">Crear nuevo mundo</MCMenuButton>
             <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="blue">Cargar mundo</MCMenuButton>
             <MCMenuButton onClick={onMultiplayer} color="gray">Multijugador</MCMenuButton>
@@ -2595,20 +2632,20 @@ function MCButton({ children, onClick, primary, disabled, className = "" }: {
 function MCMenuButton({ children, onClick, color = "gray", className = "" }: {
   children: React.ReactNode; onClick?: () => void; color?: "green" | "red" | "blue" | "gray"; className?: string;
 }) {
-  const cm: Record<string, {bg:string;h:string;a:string;t:string;b:string}> = {
-    green: { bg: "#5a8a3a", h: "#6a9a4a", a: "#4a7a2a", t: "#7aaa5a", b: "#3a6a1a" },
-    red:   { bg: "#8a3a3a", h: "#9a4a4a", a: "#7a2a2a", t: "#aa5a5a", b: "#6a1a1a" },
-    blue:  { bg: "#3a5a8a", h: "#4a6a9a", a: "#2a4a7a", t: "#5a7aaa", b: "#1a3a6a" },
-    gray:  { bg: "#5a5a5a", h: "#6a6a6a", a: "#4a4a4a", t: "#7a7a7a", b: "#3a3a3a" },
+  const cm: Record<string, {bg:string;h:string;a:string;t:string;b:string;glow:string}> = {
+    green: { bg: "#5a8a3a", h: "#6a9a4a", a: "#4a7a2a", t: "#8aba5a", b: "#2a4a1a", glow: "rgba(120,200,80,0.5)" },
+    red:   { bg: "#8a3a3a", h: "#9a4a4a", a: "#7a2a2a", t: "#ba5a5a", b: "#4a1a1a", glow: "rgba(220,80,80,0.5)" },
+    blue:  { bg: "#3a5a8a", h: "#4a6a9a", a: "#2a4a7a", t: "#5a7aaa", b: "#1a2a4a", glow: "rgba(80,140,220,0.5)" },
+    gray:  { bg: "#5a5a5a", h: "#6a6a6a", a: "#4a4a4a", t: "#7a7a7a", b: "#2a2a2a", glow: "rgba(160,160,160,0.4)" },
   };
   const c = cm[color];
   return (
-    <button onClick={onClick} className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.02] active:scale-95 ${className}`}
-      style={{ backgroundColor: c.bg, borderTop: `3px solid ${c.t}`, borderLeft: `3px solid ${c.t}`, borderBottom: `3px solid ${c.b}`, borderRight: `3px solid ${c.b}`, imageRendering: "pixelated", textShadow: "2px 2px 0 #1a1a1a", boxShadow: "0 2px 4px rgba(0,0,0,0.4)" }}
-      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = c.h; }}
-      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = c.bg; }}
-      onMouseDown={(e) => { e.currentTarget.style.backgroundColor = c.a; }}
-      onMouseUp={(e) => { e.currentTarget.style.backgroundColor = c.h; }}>
+    <button onClick={onClick} className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.03] hover:-translate-y-px active:scale-95 active:translate-y-0 ${className}`}
+      style={{ backgroundColor: c.bg, borderTop: `3px solid ${c.t}`, borderLeft: `3px solid ${c.t}`, borderBottom: `3px solid ${c.b}`, borderRight: `3px solid ${c.b}`, imageRendering: "pixelated", textShadow: "2px 2px 0 #1a1a1a, -1px -1px 0 #1a1a1a", boxShadow: "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.15)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = c.h; e.currentTarget.style.boxShadow = `0 4px 12px ${c.glow}, inset 1px 1px 0 rgba(255,255,255,0.25)`; }}
+      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = c.bg; e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.15)"; }}
+      onMouseDown={(e) => { e.currentTarget.style.backgroundColor = c.a; e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.5), inset 1px 1px 3px rgba(0,0,0,0.4)"; }}
+      onMouseUp={(e) => { e.currentTarget.style.backgroundColor = c.h; e.currentTarget.style.boxShadow = `0 4px 12px ${c.glow}, inset 1px 1px 0 rgba(255,255,255,0.25)`; }}>
       {children}
     </button>
   );
