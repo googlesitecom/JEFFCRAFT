@@ -597,6 +597,75 @@ function texTorch(): ImageData {
 }
 
 // === NETHER / END BLOCK TEXTURES ===
+
+// Chest textures
+function texChestTop(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const wood = hexToRgb("#8a6a3a");
+  const dark = hexToRgb("#6a4a2a");
+  const light = hexToRgb("#a87a4a");
+  fill(img, wood);
+  // Plank lines
+  for (let y = 0; y < 16; y += 4) {
+    fillRect(img, 0, y, 16, 1, dark);
+  }
+  // Border
+  fillRect(img, 0, 0, 16, 1, dark);
+  fillRect(img, 0, 15, 16, 1, dark);
+  fillRect(img, 0, 0, 1, 16, dark);
+  fillRect(img, 15, 0, 1, 16, dark);
+  // Highlight
+  setPixel(img, 1, 1, light);
+  setPixel(img, 2, 1, light);
+  return img;
+}
+
+function texChestSide(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const wood = hexToRgb("#8a6a3a");
+  const dark = hexToRgb("#6a4a2a");
+  const light = hexToRgb("#a87a4a");
+  const metal = hexToRgb("#555555");
+  fill(img, wood);
+  // Plank lines
+  fillRect(img, 0, 7, 16, 1, dark);
+  fillRect(img, 0, 0, 16, 1, dark);
+  fillRect(img, 0, 15, 16, 1, dark);
+  // Metal bands (iron reinforcement)
+  fillRect(img, 0, 3, 16, 1, metal);
+  fillRect(img, 0, 12, 16, 1, metal);
+  // Side highlight
+  fillRect(img, 1, 1, 1, 14, light);
+  // Lock area (center)
+  fillRect(img, 7, 8, 2, 4, metal);
+  setPixel(img, 7, 8, hexToRgb("#777777"));
+  return img;
+}
+
+function texChestFront(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const wood = hexToRgb("#8a6a3a");
+  const dark = hexToRgb("#6a4a2a");
+  const light = hexToRgb("#a87a4a");
+  const metal = hexToRgb("#555555");
+  const gold = hexToRgb("#ffcc00");
+  fill(img, wood);
+  // Plank lines
+  fillRect(img, 0, 7, 16, 1, dark);
+  fillRect(img, 0, 0, 16, 1, dark);
+  fillRect(img, 0, 15, 16, 1, dark);
+  // Metal bands
+  fillRect(img, 0, 3, 16, 1, metal);
+  fillRect(img, 0, 12, 16, 1, metal);
+  // Lock (center, gold)
+  fillRect(img, 6, 7, 4, 5, metal);
+  fillRect(img, 7, 8, 2, 3, gold);
+  setPixel(img, 7, 8, hexToRgb("#ffee44"));
+  // Highlight
+  fillRect(img, 1, 1, 1, 14, light);
+  return img;
+}
+
 function texObsidian(): ImageData {
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
   const base = hexToRgb("#1a0a2a");
@@ -845,6 +914,9 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
     furnace_side: imageDataToCanvas(texFurnaceSide()),
     furnace_front: imageDataToCanvas(texFurnaceFront()),
     torch: imageDataToCanvas(texTorch()),
+    chest_top: imageDataToCanvas(texChestTop()),
+    chest_side: imageDataToCanvas(texChestSide()),
+    chest_front: imageDataToCanvas(texChestFront()),
     obsidian: imageDataToCanvas(texObsidian()),
     netherrack: imageDataToCanvas(texNetherrack()),
     soul_sand: imageDataToCanvas(texSoulSand()),

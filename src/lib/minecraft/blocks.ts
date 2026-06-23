@@ -24,6 +24,7 @@ export enum BlockType {
   Bookshelf = 21,
   Furnace = 22,
   Torch = 23,
+  Chest = 30,
   Obsidian = 24,
   Netherrack = 25,
   SoulSand = 26,
@@ -163,6 +164,11 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
     id: BlockType.Torch, name: "Torch",
     textures: { top: "torch", bottom: "torch", side: "torch" },
     layer: "cutout", solid: false,
+  },
+  [BlockType.Chest]: {
+    id: BlockType.Chest, name: "Chest",
+    textures: { top: "chest_top", bottom: "chest_top", side: "chest_side" },
+    layer: "opaque", solid: true,
   },
   [BlockType.Obsidian]: {
     id: BlockType.Obsidian, name: "Obsidian",

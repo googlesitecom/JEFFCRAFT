@@ -182,14 +182,15 @@ export class World {
       return BlockType.Air;
     }
     if (wy < BEDROCK_DEPTH) return BlockType.Bedrock;
+    // Check caves in peekBlock too (so chunk borders match)
+    if (wy < 100) {
+      const cavern = this.noise3D(wx * 0.035, wy * 0.04, wz * 0.035);
+      const tunnel = this.noise3D(wx * 0.08, wy * 0.12, wz * 0.08);
+      if (cavern > 0.55 || (tunnel > 0.72 && cavern > 0.3)) {
+        if (wy < h - 3) return BlockType.Air; // cave in stone layer
+      }
+    }
     if (wy < h - 3) {
-      // Ores: use same vein logic as decorateChunk for consistency
-      // Use the same LCG seeded by chunk coords
-      const chunkCx = Math.floor(wx / CHUNK_SIZE);
-      const chunkCz = Math.floor(wz / CHUNK_SIZE);
-      const oreSeed = (this.seed ^ (chunkCx * 73856093) ^ (chunkCz * 19349663)) >>> 0;
-      // We can't replay the full vein generation, so just return Stone
-      // The actual ores are placed in decorateChunk and stored in the chunk
       return BlockType.Stone;
     }
     if (wy < h) {

@@ -106,11 +106,11 @@ export const TOOL_DPS: Record<ToolTier, number> = {
 };
 
 export const TOOL_DURABILITY: Record<ToolTier, number> = {
-  wood: 60,
-  stone: 130,
-  iron: 250,
-  diamond: 1500,
-  gold: 32,
+  wood: 200,
+  stone: 500,
+  iron: 1000,
+  diamond: 8000,
+  gold: 100,
 };
 
 // The DPS applied when the tool tier is insufficient for the block (still breaks, slowly).

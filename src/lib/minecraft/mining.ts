@@ -37,6 +37,7 @@ export const BLOCK_HARDNESS: Partial<Record<BlockType, number>> = {
   [BlockType.Furnace]: 20,
   [BlockType.Pumpkin]: 10,
   [BlockType.Torch]: 1,
+  [BlockType.Chest]: 10,
   [BlockType.Obsidian]: 400, // very hard, requires diamond pickaxe
   [BlockType.Netherrack]: 8,
   [BlockType.SoulSand]: 6,

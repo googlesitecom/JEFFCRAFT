@@ -34,6 +34,9 @@ export const TEXTURE_NAMES = [
   "furnace_side",
   "furnace_front",
   "torch",
+  "chest_top",
+  "chest_side",
+  "chest_front",
   // Animals (skins - pig, cow, chicken - front view)
   "pig",
   "cow",

@@ -10,6 +10,14 @@ interface FurnaceUIProps {
   iconUrls: Record<string, string>;
   onClose: () => void;
   onInventoryChange: () => void;
+  // Persistent furnace state (survives UI close so smelting continues)
+  furnaceState: {
+    input: { id: number; count: number } | null;
+    fuel: { id: number; count: number } | null;
+    output: { id: number; count: number } | null;
+    smeltProgress: number;
+    fuelProgress: number;
+  };
 }
 
 // Smelting recipes: input -> output
@@ -39,80 +47,66 @@ export function FurnaceUI({
   iconUrls,
   onClose,
   onInventoryChange,
+  furnaceState,
 }: FurnaceUIProps) {
-  // Input slot (what to smelt)
-  const [inputSlot, setInputSlot] = useState<{ id: number; count: number } | null>(null);
-  // Fuel slot
-  const [fuelSlot, setFuelSlot] = useState<{ id: number; count: number } | null>(null);
-  // Output slot (smelted result)
-  const [outputSlot, setOutputSlot] = useState<{ id: number; count: number } | null>(null);
-  // Smelting progress (0-1)
-  const [smeltProgress, setSmeltProgress] = useState(0);
-  // Fuel burn time remaining (0-1)
-  const [fuelProgress, setFuelProgress] = useState(0);
-  // Held item (for drag/drop)
+  // Use persistent furnace state from parent (survives UI close)
+  const inputSlot = furnaceState.input;
+  const fuelSlot = furnaceState.fuel;
+  const outputSlot = furnaceState.output;
+  const smeltProgress = furnaceState.smeltProgress;
+  const fuelProgress = furnaceState.fuelProgress;
+  // Held item (for drag/drop) — local to UI
   const [heldItem, setHeldItem] = useState<{ id: number; count: number } | null>(null);
   const [, forceUpdate] = useState(0);
   const refresh = () => forceUpdate((v) => v + 1);
 
-  // Smelting tick
+  // Smelting tick — runs while UI is open (state persists in parent ref when closed)
   useEffect(() => {
     const interval = setInterval(() => {
-      // Check if we can smelt
-      if (inputSlot && SMELTING_RECIPES[inputSlot.id] !== undefined) {
-        const outputId = SMELTING_RECIPES[inputSlot.id];
-        // Check output slot can accept
-        if (outputSlot && (outputSlot.id !== outputId || outputSlot.count >= 64)) {
+      if (furnaceState.input && SMELTING_RECIPES[furnaceState.input.id] !== undefined) {
+        const outputId = SMELTING_RECIPES[furnaceState.input.id];
+        if (furnaceState.output && (furnaceState.output.id !== outputId || furnaceState.output.count >= 64)) {
           return;
         }
-
-        // Need fuel
-        if (fuelProgress <= 0) {
-          // Consume fuel
-          if (fuelSlot && FUELS[fuelSlot.id] !== undefined) {
-            const fuelValue = FUELS[fuelSlot.id];
-            setFuelProgress(fuelValue);
-            // Consume 1 fuel
-            if (fuelSlot.count > 1) {
-              setFuelSlot({ id: fuelSlot.id, count: fuelSlot.count - 1 });
+        if (furnaceState.fuelProgress <= 0) {
+          if (furnaceState.fuel && FUELS[furnaceState.fuel.id] !== undefined) {
+            const fuelValue = FUELS[furnaceState.fuel.id];
+            furnaceState.fuelProgress = fuelValue;
+            if (furnaceState.fuel.count > 1) {
+              furnaceState.fuel = { id: furnaceState.fuel.id, count: furnaceState.fuel.count - 1 };
             } else {
-              setFuelSlot(null);
+              furnaceState.fuel = null;
             }
           } else {
-            return; // no fuel
+            return;
           }
         }
-
-        // Burn fuel
-        setFuelProgress((p) => Math.max(0, p - 0.05));
-        setSmeltProgress((p) => {
-          const newP = p + 0.05;
-          if (newP >= 1) {
-            // Smelt complete
-            const outputId = SMELTING_RECIPES[inputSlot.id];
-            setInputSlot((inp) => {
-              if (!inp) return null;
-              if (inp.count > 1) return { id: inp.id, count: inp.count - 1 };
-              return null;
-            });
-            setOutputSlot((out) => {
-              if (!out) return { id: outputId, count: 1 };
-              return { id: outputId, count: out.count + 1 };
-            });
-            return 0;
+        furnaceState.fuelProgress = Math.max(0, furnaceState.fuelProgress - 0.05);
+        furnaceState.smeltProgress += 0.05;
+        if (furnaceState.smeltProgress >= 1) {
+          const outId = SMELTING_RECIPES[furnaceState.input.id];
+          if (furnaceState.input.count > 1) {
+            furnaceState.input = { id: furnaceState.input.id, count: furnaceState.input.count - 1 };
+          } else {
+            furnaceState.input = null;
           }
-          return newP;
-        });
+          if (!furnaceState.output) {
+            furnaceState.output = { id: outId, count: 1 };
+          } else {
+            furnaceState.output = { id: outId, count: furnaceState.output.count + 1 };
+          }
+          furnaceState.smeltProgress = 0;
+        }
+        refresh();
       } else {
-        // Not smelting - slowly lose fuel progress (no, fuel stays)
-        // Reset smelt progress if no input
-        if (smeltProgress > 0 && (!inputSlot || SMELTING_RECIPES[inputSlot.id] === undefined)) {
-          setSmeltProgress(0);
+        if (furnaceState.smeltProgress > 0 && (!furnaceState.input || SMELTING_RECIPES[furnaceState.input.id] === undefined)) {
+          furnaceState.smeltProgress = 0;
+          refresh();
         }
       }
-    }, 100); // tick every 100ms
+    }, 100);
     return () => clearInterval(interval);
-  }, [inputSlot, fuelSlot, outputSlot, fuelProgress, smeltProgress]);
+  }, []); // empty deps — uses ref directly
 
   const getIcon = (id: number): string => {
     if (id < 100) {
@@ -190,9 +184,9 @@ export function FurnaceUI({
       return outputSlot;
     };
     const setCurrent = (val: { id: number; count: number } | null) => {
-      if (slot === "input") setInputSlot(val);
-      else if (slot === "fuel") setFuelSlot(val);
-      else setOutputSlot(val);
+      if (slot === "input") furnaceState.input = val;
+      else if (slot === "fuel") furnaceState.fuel = val;
+      else furnaceState.output = val;
     };
 
     const current = getCurrent();

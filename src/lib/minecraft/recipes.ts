@@ -302,6 +302,11 @@ export const RECIPES: Recipe[] = [
     result: { id: ItemType.DiamondBoots, count: 1 }, requiresTable: true,
   },
   // === NETHER / END RECIPES ===
+  // Chest: 8 planks (hollow center)
+  {
+    type: "shaped", pattern: pat(["PPP", "P.P", "PPP"], { P: BlockType.Planks }),
+    result: { id: BlockType.Chest as unknown as ItemType, count: 1 }, requiresTable: false,
+  },
   // Flint and Steel: 1 iron ingot + 1 stick (shapeless, simplified)
   {
     type: "shapeless", ingredients: [ItemType.IronIngot, ItemType.Stick],
