@@ -331,5 +331,7 @@ function buildMesh(data: FaceData, material: THREE.Material): THREE.Mesh | null 
   geo.setIndex(data.indices);
   const mesh = new THREE.Mesh(geo, material);
   mesh.frustumCulled = true;
+  // Enable shadow receiving for all solid meshes
+  mesh.receiveShadow = true;
   return mesh;
 }

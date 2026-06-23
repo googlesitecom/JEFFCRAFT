@@ -1,68 +1,79 @@
 // Xbox controller support for Minecraft clone.
-// Uses the standard Gamepad API. Properly handles button edge detection
-// (pressed vs held) and works without mouse pointer lock.
+// Auto-detects controller connection. Polls every frame when active.
+// Works completely without mouse/keyboard — no pointer lock needed.
 
 export type InputMode = "keyboard" | "controller";
 
-// Xbox button indices (standard mapping)
-// 0=A, 1=B, 2=X, 3=Y, 4=LB, 5=RB, 6=LT, 7=RT, 8=Back, 9=Start, 10=LS, 11=RS
-// 12=DUp, 13=DDown, 14=DLeft, 15=DRight
-
 export interface GamepadState {
-  // Analog sticks (-1 to 1, 0 = center)
   moveX: number;
   moveY: number;
   lookX: number;
   lookY: number;
-  // Digital buttons (true = currently held down)
   a: boolean;
   b: boolean;
   x: boolean;
   y: boolean;
   lb: boolean;
   rb: boolean;
-  lt: boolean;   // true when trigger > 0.5
+  lt: boolean;
   rt: boolean;
   back: boolean;
   start: boolean;
-  ls: boolean;   // left stick click
-  rs: boolean;   // right stick click
+  ls: boolean;
+  rs: boolean;
   dpadUp: boolean;
   dpadDown: boolean;
   dpadLeft: boolean;
   dpadRight: boolean;
 }
 
-// Track previous button states for edge detection
-let prevButtons: boolean[] = new Array(16).fill(false);
+// Edge detection: track which buttons were pressed last frame
+const prevButtonStates: Map<number, boolean> = new Map();
 
-// Returns true if a button was pressed THIS frame (rising edge)
-export function wasPressed(current: boolean, index: number): boolean {
-  const was = prevButtons[index] || false;
-  prevButtons[index] = current;
-  return current && !was;
+// Auto-detect: set to controller mode when a gamepad connects
+let autoDetectedController = false;
+
+// Listen for gamepad connection/disconnection
+if (typeof window !== "undefined") {
+  window.addEventListener("gamepadconnected", (e: GamepadEvent) => {
+    console.log("Gamepad connected:", e.gamepad.id);
+    autoDetectedController = true;
+  });
+  window.addEventListener("gamepaddisconnected", (e: GamepadEvent) => {
+    console.log("Gamepad disconnected:", e.gamepad.id);
+    autoDetectedController = false;
+  });
+}
+
+// Returns true if a button was just pressed (rising edge) since last call
+function wasJustPressed(current: boolean, id: number): boolean {
+  const prev = prevButtonStates.get(id) || false;
+  prevButtonStates.set(id, current);
+  return current && !prev;
 }
 
 export function readGamepad(index: number = 0): GamepadState | null {
+  // navigator.getGamepads() must be called every frame to get fresh data
   const pads = navigator.getGamepads();
+  if (!pads) return null;
   const pad = pads[index];
-  if (!pad) return null;
+  if (!pad || !pad.connected) return null;
 
   const deadzone = 0.2;
-  const clamp = (v: number) => {
+  const applyDeadzone = (v: number): number => {
     const abs = Math.abs(v);
     if (abs < deadzone) return 0;
-    // Scale so that values outside deadzone map smoothly to 0..1
     return Math.sign(v) * ((abs - deadzone) / (1 - deadzone));
   };
 
-  const lx = clamp(pad.axes[0] || 0);
-  const ly = clamp(pad.axes[1] || 0);
-  const rx = clamp(pad.axes[2] || 0);
-  const ry = clamp(pad.axes[3] || 0);
+  // Axes: 0=LeftX, 1=LeftY, 2=RightX, 3=RightY
+  const lx = applyDeadzone(pad.axes[0] || 0);
+  const ly = applyDeadzone(pad.axes[1] || 0);
+  const rx = applyDeadzone(pad.axes[2] || 0);
+  const ry = applyDeadzone(pad.axes[3] || 0);
 
   const btn = (i: number) => pad.buttons[i]?.pressed ?? false;
-  const trig = (i: number) => (pad.buttons[i]?.value || 0) > 0.5;
+  const trig = (i: number) => (pad.buttons[i]?.value || 0) > 0.4;
 
   return {
     moveX: lx,
@@ -88,15 +99,46 @@ export function readGamepad(index: number = 0): GamepadState | null {
   };
 }
 
+// Check edge detection for a specific button
+export function wasButtonPressed(state: GamepadState, buttonIndex: number): boolean {
+  switch (buttonIndex) {
+    case 0: return wasJustPressed(state.a, 0);
+    case 1: return wasJustPressed(state.b, 1);
+    case 2: return wasJustPressed(state.x, 2);
+    case 3: return wasJustPressed(state.y, 3);
+    case 4: return wasJustPressed(state.lb, 4);
+    case 5: return wasJustPressed(state.rb, 5);
+    case 8: return wasJustPressed(state.back, 8);
+    case 9: return wasJustPressed(state.start, 9);
+    case 10: return wasJustPressed(state.ls, 10);
+    case 12: return wasJustPressed(state.dpadUp, 12);
+    case 13: return wasJustPressed(state.dpadDown, 13);
+    case 14: return wasJustPressed(state.dpadLeft, 14);
+    case 15: return wasJustPressed(state.dpadRight, 15);
+    default: return false;
+  }
+}
+
 export function isGamepadConnected(): boolean {
+  if (autoDetectedController) return true;
   const pads = navigator.getGamepads();
+  if (!pads) return false;
   for (const p of pads) {
     if (p && p.connected) return true;
   }
   return false;
 }
 
-// Reset edge tracking (call when switching input modes)
 export function resetGamepadState() {
-  prevButtons = new Array(16).fill(false);
+  prevButtonStates.clear();
+}
+
+// Returns true if a gamepad was recently connected (for auto-switching)
+export function wasGamepadConnected(): boolean {
+  return autoDetectedController;
+}
+
+// Clear the auto-detect flag (after switching)
+export function clearAutoDetect() {
+  autoDetectedController = false;
 }

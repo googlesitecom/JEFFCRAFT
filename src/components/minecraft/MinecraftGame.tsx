@@ -27,7 +27,7 @@ import { EndermanManager, Enderman } from "@/lib/minecraft/enderman";
 import { BlazeManager, Blaze } from "@/lib/minecraft/blaze";
 import { EndWorld } from "@/lib/minecraft/end";
 import { EnderDragon } from "@/lib/minecraft/ender-dragon";
-import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasPressed } from "@/lib/minecraft/gamepad";
+import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButtonPressed, wasGamepadConnected, clearAutoDetect } from "@/lib/minecraft/gamepad";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -191,9 +191,11 @@ export default function MinecraftGame() {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.3;
+    renderer.toneMappingExposure = 1.4;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.shadowMap.enabled = false;
+    // Enable shadows for realistic lighting
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
     renderer.domElement.style.display = "block";
     renderer.domElement.style.cursor = "none";
@@ -233,24 +235,37 @@ export default function MinecraftGame() {
     sky.frustumCulled = false;
     scene.add(sky);
 
-    // === Lighting (improved for better visuals) ===
-    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    // === Lighting (improved for better visuals with shadows) ===
+    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xfff4e6, 0.7);
+    const sun = new THREE.DirectionalLight(0xfff4e6, 1.0);
     sun.position.set(50, 100, 30);
+    // Shadow settings
+    sun.castShadow = true;
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 200;
+    sun.shadow.camera.left = -60;
+    sun.shadow.camera.right = 60;
+    sun.shadow.camera.top = 60;
+    sun.shadow.camera.bottom = -60;
+    sun.shadow.bias = -0.0005;
+    sun.shadow.normalBias = 0.04;
     scene.add(sun);
+    scene.add(sun.target);
     // Fill light for softer shadows
-    const fill = new THREE.DirectionalLight(0xb0c4de, 0.2);
+    const fill = new THREE.DirectionalLight(0xb0c4de, 0.25);
     fill.position.set(-30, 50, -40);
     scene.add(fill);
-    const hemi = new THREE.HemisphereLight(0xbfdfff, 0x6b5a3a, 0.4);
+    const hemi = new THREE.HemisphereLight(0xbfdfff, 0x6b5a3a, 0.35);
     scene.add(hemi);
 
     // === Build atlas and shared materials ===
     resetAtlas();
     const canvases = buildTextureCanvases();
     const atlas = getSharedAtlas(canvases);
-    // Opaque material: solid blocks (no alpha)
+    // Opaque material: solid blocks (no alpha) — receives shadows
     const opaqueMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
@@ -267,14 +282,16 @@ export default function MinecraftGame() {
       alphaTest: 0.5,
       depthWrite: true,
     });
-    // Translucent material: water - alpha blended, depthWrite off
+    // Translucent material: water — improved with shininess and better alpha
     const transparentMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.75,
       side: THREE.DoubleSide,
       depthWrite: false,
+      emissive: 0x113355,
+      emissiveIntensity: 0.15,
     });
     // Glass material: alpha blended, depthWrite OFF so you can see through
     const glassMaterial = new THREE.MeshLambertMaterial({
@@ -491,10 +508,19 @@ export default function MinecraftGame() {
       const nightFactor = 1 - dayFactor;
       isNight = nightFactor > 0.5;
 
-      // Sun light intensity
-      sun.intensity = 0.6 * dayFactor;
-      ambient.intensity = 0.7 * dayFactor + 0.15 * nightFactor;
+      // Sun light intensity (stronger for better shadows)
+      sun.intensity = 1.2 * dayFactor;
+      ambient.intensity = 0.5 * dayFactor + 0.15 * nightFactor;
       hemi.intensity = 0.35 * dayFactor + 0.1 * nightFactor;
+
+      // Shadow camera follows player so shadows always render around the player
+      sun.position.set(
+        player.position.x + Math.cos(sunAngle) * 80,
+        player.position.y + Math.sin(sunAngle) * 80,
+        player.position.z + 30
+      );
+      sun.target.position.copy(player.position);
+      sun.target.updateMatrixWorld();
 
       // Sky color: day = light blue, night = dark blue
       const dayColor = new THREE.Color("#87ceeb");
@@ -1235,71 +1261,59 @@ export default function MinecraftGame() {
       const isDragonMounted = dragon?.isMounted ?? false;
 
       // === Gamepad input (Xbox controller) ===
-      // Runs when controller mode is active. Works WITHOUT pointer lock.
+      // Auto-switch to controller when a gamepad is detected
+      if (wasGamepadConnected() && inputModeRef.current === "keyboard") {
+        inputModeRef.current = "controller";
+        setInputMode("controller");
+        clearAutoDetect();
+      }
+
       const usingController = inputModeRef.current === "controller";
       const gp = usingController ? readGamepad(0) : null;
-      if (gp && !isDragonMounted && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest) {
+
+      // If controller is active and we have a gamepad, use it for everything
+      if (gp && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest) {
         // Movement: left stick → WASD
         player.setKey("KeyW", gp.moveY < -0.3);
         player.setKey("KeyS", gp.moveY > 0.3);
         player.setKey("KeyA", gp.moveX < -0.3);
         player.setKey("KeyD", gp.moveX > 0.3);
-        // Jump: A button
+        // Jump: A
         player.setKey("Space", gp.a);
-        // Sprint: left stick click (LS)
+        // Sprint: LS click
         player.setKey("ShiftLeft", gp.ls);
-        // Down/dismount dragon: B button → simulate KeyN
-        // Look: right stick → mouse delta
-        const lookSensitivity = 3.0;
-        player.addMouseDelta(gp.lookX * lookSensitivity, gp.lookY * lookSensitivity);
-        // Hotbar: RB = next, LB = previous (edge detected)
-        if (wasPressed(gp.rb, 5)) {
-          const idx = (selectedSlotRef.current + 1) % 9;
-          setSelectedSlot(idx);
-          selectedSlotRef.current = idx;
-          inventoryRef.current.setSelected(idx);
+        // Fly down in creative: B (held)
+        if (gp.b && worldConfigRef.current?.mode === "creative") {
+          player.setKey("ControlLeft", true);
+        } else {
+          player.setKey("ControlLeft", false);
         }
-        if (wasPressed(gp.lb, 4)) {
-          const idx = (selectedSlotRef.current - 1 + 9) % 9;
-          setSelectedSlot(idx);
-          selectedSlotRef.current = idx;
-          inventoryRef.current.setSelected(idx);
-        }
-        // D-pad for hotbar slots 1-9
-        if (wasPressed(gp.dpadUp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
-        if (wasPressed(gp.dpadDown, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
-        if (wasPressed(gp.dpadLeft, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
-        if (wasPressed(gp.dpadRight, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
+        // Look: right stick
+        const lookSens = 3.5;
+        player.addMouseDelta(gp.lookX * lookSens, gp.lookY * lookSens);
 
-        // Attack/Mine: RT trigger (held = continuous mining)
+        // Hotbar: RB/LB (edge detected)
+        if (wasButtonPressed(gp, 5)) {
+          const idx = (selectedSlotRef.current + 1) % 9;
+          setSelectedSlot(idx); selectedSlotRef.current = idx;
+          inventoryRef.current.setSelected(idx);
+        }
+        if (wasButtonPressed(gp, 4)) {
+          const idx = (selectedSlotRef.current - 1 + 9) % 9;
+          setSelectedSlot(idx); selectedSlotRef.current = idx;
+          inventoryRef.current.setSelected(idx);
+        }
+        // D-pad hotbar
+        if (wasButtonPressed(gp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
+        if (wasButtonPressed(gp, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
+        if (wasButtonPressed(gp, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
+        if (wasButtonPressed(gp, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
+
+        // Attack/Mine: RT (hold)
         if (gp.rt) {
-          leftMouseDown = true;
-          handView.triggerAction("swing");
-          // In creative, break immediately
-          if (worldConfigRef.current?.mode === "creative") {
-            breakBlock();
-          } else {
-            // In survival, start mining
-            const hit = player.raycast(6);
-            if (hit.hit && hit.block) {
-              if (!miningBlock || miningBlock.x !== hit.block.x || miningBlock.y !== hit.block.y || miningBlock.z !== hit.block.z) {
-                miningProgress = 0;
-                miningBlock = { ...hit.block };
-              }
-            } else {
-              miningProgress = 0;
-              miningBlock = null;
-            }
-          }
-          // Check for entity attacks
-          const eyeX = player.position.x;
-          const eyeY = player.position.y + 1.5;
-          const eyeZ = player.position.z;
-          const animal = animalManager.findClosest(eyeX, eyeY, eyeZ, 4);
-          const monster = monsterManager.findClosest(eyeX, eyeY, eyeZ, 4);
-          if (animal || monster) {
-            miningProgress = 0;
-            miningBlock = null;
+          if (!leftMouseDown) {
+            leftMouseDown = true;
+            handView.triggerAction("swing");
           }
         } else {
           leftMouseDown = false;
@@ -1307,59 +1321,51 @@ export default function MinecraftGame() {
           miningBlock = null;
         }
 
-        // Place/Interact: X button (edge detected — only once per press)
-        if (wasPressed(gp.x, 2)) {
+        // Place/Interact: X (edge)
+        if (wasButtonPressed(gp, 2)) {
           performRightClickAction();
         }
 
-        // Inventory: Y button (edge detected)
-        if (wasPressed(gp.y, 3)) {
-          document.exitPointerLock();
+        // Inventory: Y (edge)
+        if (wasButtonPressed(gp, 3)) {
           setShowInventory(true);
         }
 
-        // Dragon mount: B button (edge detected)
-        if (wasPressed(gp.b, 1)) {
-          const dragon2 = dragonManager.getActiveDragon();
-          if (dragon2) {
-            if (dragon2.isMounted) {
-              dragon2.toggleMount(player.position);
-              player.position.set(dragon2.position.x + 1, dragon2.position.y, dragon2.position.z);
+        // Dragon mount/dismount: B (edge) — only in survival
+        if (wasButtonPressed(gp, 1) && worldConfigRef.current?.mode === "survival") {
+          const drag = dragonManager.getActiveDragon();
+          if (drag) {
+            if (drag.isMounted) {
+              drag.toggleMount(player.position);
+              player.position.set(drag.position.x + 1, drag.position.y, drag.position.z);
               player.velocity.set(0, 0, 0);
             } else {
-              const dx = dragon2.position.x - player.position.x;
-              const dy = dragon2.position.y - player.position.y;
-              const dz = dragon2.position.z - player.position.z;
-              const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-              if (dist <= 6) {
-                dragon2.toggleMount(player.position);
-              }
+              const d = Math.hypot(drag.position.x - player.position.x, drag.position.z - player.position.z);
+              if (d <= 6) drag.toggleMount(player.position);
             }
           }
         }
 
-        // Pause: Start button (edge detected)
-        if (wasPressed(gp.start, 9)) {
-          document.exitPointerLock();
+        // Dragon stay/follow: Back (edge)
+        if (wasButtonPressed(gp, 8)) {
+          const drag = dragonManager.getActiveDragon();
+          if (drag && !drag.isMounted) drag.isStaying = !drag.isStaying;
         }
 
-        // Dragon stay/follow: Back button (edge detected)
-        if (wasPressed(gp.back, 8)) {
-          const dragon2 = dragonManager.getActiveDragon();
-          if (dragon2 && !dragon2.isMounted) {
-            dragon2.isStaying = !dragon2.isStaying;
-          }
+        // Pause: Start (edge)
+        if (wasButtonPressed(gp, 9)) {
+          // Exit pointer lock if active, or toggle pause
+          if (document.pointerLockElement) document.exitPointerLock();
         }
       }
 
       // === Player update ===
-      // Keyboard mode: requires pointer lock. Controller mode: runs without pointer lock.
+      // Keyboard: requires pointer lock. Controller: works without it.
       const canUpdate = usingController
         ? (!player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest)
         : (document.pointerLockElement === renderer.domElement && !player.isDead());
       if (canUpdate) {
         if (isDragonMounted) {
-          // Apply look only (no physics/movement) when dragon is mounted
           const sensitivity = 0.0022;
           player.yaw -= player.mouseDeltaX * sensitivity;
           player.pitch -= player.mouseDeltaY * sensitivity;
