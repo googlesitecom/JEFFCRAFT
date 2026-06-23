@@ -31,6 +31,24 @@ export enum BlockType {
   Glowstone = 27,
   NetherPortal = 28,
   EndStone = 29,
+  // Building blocks
+  StoneBricks = 40,
+  Slab = 41,
+  Stairs = 42,
+  Fence = 43,
+  WoodenDoor = 44,
+  Bed = 45,
+  Ladder = 46,
+  Sign = 47,
+  Anvil = 48,
+  BrickSlab = 49,
+  WoodSlab = 50,
+  CobblestoneStairs = 51,
+  WoodStairs = 52,
+  BrickStairs = 53,
+  StoneStairs = 54,
+  // Combat items (as blocks for simplicity, rendered as items)
+  CraftingTable2 = 55, // placeholder unused
 }
 
 export type RenderLayer = "opaque" | "cutout" | "translucent";
@@ -44,7 +62,7 @@ export interface BlockDef {
   solid: boolean; // for collisions
 }
 
-export const BLOCKS: Record<BlockType, BlockDef> = {
+export const BLOCKS: Record<number, BlockDef> = {
   [BlockType.Air]: {
     id: BlockType.Air, name: "Air",
     textures: { top: "", bottom: "", side: "" },
@@ -198,6 +216,51 @@ export const BLOCKS: Record<BlockType, BlockDef> = {
   [BlockType.EndStone]: {
     id: BlockType.EndStone, name: "End Stone",
     textures: { top: "end_stone", bottom: "end_stone", side: "end_stone" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.StoneBricks]: {
+    id: BlockType.StoneBricks, name: "Stone Bricks",
+    textures: { top: "stone_bricks", bottom: "stone_bricks", side: "stone_bricks" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.Slab]: {
+    id: BlockType.Slab, name: "Stone Slab",
+    textures: { top: "stone", bottom: "stone", side: "stone_slab" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.Stairs]: {
+    id: BlockType.Stairs, name: "Stone Stairs",
+    textures: { top: "stone", bottom: "stone", side: "stone" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.Fence]: {
+    id: BlockType.Fence, name: "Wood Fence",
+    textures: { top: "planks", bottom: "planks", side: "fence" },
+    layer: "cutout", solid: true,
+  },
+  [BlockType.WoodenDoor]: {
+    id: BlockType.WoodenDoor, name: "Wooden Door",
+    textures: { top: "door_top", bottom: "door_bottom", side: "door_side" },
+    layer: "cutout", solid: false,
+  },
+  [BlockType.Bed]: {
+    id: BlockType.Bed, name: "Bed",
+    textures: { top: "bed_top", bottom: "planks", side: "bed_side" },
+    layer: "cutout", solid: false,
+  },
+  [BlockType.Ladder]: {
+    id: BlockType.Ladder, name: "Ladder",
+    textures: { top: "ladder", bottom: "ladder", side: "ladder" },
+    layer: "cutout", solid: false,
+  },
+  [BlockType.Sign]: {
+    id: BlockType.Sign, name: "Sign",
+    textures: { top: "planks", bottom: "planks", side: "sign_side" },
+    layer: "cutout", solid: false,
+  },
+  [BlockType.Anvil]: {
+    id: BlockType.Anvil, name: "Anvil",
+    textures: { top: "anvil_top", bottom: "iron_block", side: "anvil_side" },
     layer: "opaque", solid: true,
   },
 };

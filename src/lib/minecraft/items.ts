@@ -66,6 +66,24 @@ export enum ItemType {
   FlintAndSteel = 411,
   BlazeRod = 412,
   EnderPearl = 413,
+  // Combat & utility items
+  Bow = 420,
+  Arrow = 421,
+  Bucket = 422,
+  WaterBucket = 423,
+  // Agriculture
+  Wheat = 430,
+  Seeds = 431,
+  Sugar = 432,
+  // Misc materials
+  Flint = 440,
+  Feather = 441,
+  String = 442,
+  Clay = 443,
+  Brick = 444,
+  IronBlock = 450,
+  GoldBlock = 451,
+  DiamondBlock = 452,
 }
 
 export type ToolTier = "wood" | "stone" | "iron" | "diamond" | "gold";
@@ -226,6 +244,24 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   [ItemType.FlintAndSteel]: { id: ItemType.FlintAndSteel, name: "Flint and Steel", icon: "flint_and_steel", maxStack: 1, maxDurability: 65 },
   [ItemType.BlazeRod]: { id: ItemType.BlazeRod, name: "Blaze Rod", icon: "blaze_rod", maxStack: 64 },
   [ItemType.EnderPearl]: { id: ItemType.EnderPearl, name: "Ender Pearl", icon: "ender_eye", maxStack: 64 },
+  // Combat & utility
+  [ItemType.Bow]: { id: ItemType.Bow, name: "Bow", icon: "wood_axe", maxStack: 1, maxDurability: 384 },
+  [ItemType.Arrow]: { id: ItemType.Arrow, name: "Arrow", icon: "stick", maxStack: 64 },
+  [ItemType.Bucket]: { id: ItemType.Bucket, name: "Bucket", icon: "iron_ingot", maxStack: 16 },
+  [ItemType.WaterBucket]: { id: ItemType.WaterBucket, name: "Water Bucket", icon: "iron_ingot", maxStack: 1 },
+  // Agriculture
+  [ItemType.Wheat]: { id: ItemType.Wheat, name: "Wheat", icon: "stick", maxStack: 64 },
+  [ItemType.Seeds]: { id: ItemType.Seeds, name: "Seeds", icon: "stick", maxStack: 64 },
+  [ItemType.Sugar]: { id: ItemType.Sugar, name: "Sugar", icon: "coal", maxStack: 64 },
+  // Misc materials
+  [ItemType.Flint]: { id: ItemType.Flint, name: "Flint", icon: "coal", maxStack: 64 },
+  [ItemType.Feather]: { id: ItemType.Feather, name: "Feather", icon: "stick", maxStack: 64 },
+  [ItemType.String]: { id: ItemType.String, name: "String", icon: "stick", maxStack: 64 },
+  [ItemType.Clay]: { id: ItemType.Clay, name: "Clay", icon: "dirt", maxStack: 64 },
+  [ItemType.Brick]: { id: ItemType.Brick, name: "Brick", icon: "brick", maxStack: 64 },
+  [ItemType.IronBlock]: { id: ItemType.IronBlock, name: "Iron Block", icon: "iron_ingot", maxStack: 64 },
+  [ItemType.GoldBlock]: { id: ItemType.GoldBlock, name: "Gold Block", icon: "gold_ingot", maxStack: 64 },
+  [ItemType.DiamondBlock]: { id: ItemType.DiamondBlock, name: "Diamond Block", icon: "diamond", maxStack: 64 },
 };
 
 // Check if an ID is an item (not a block)

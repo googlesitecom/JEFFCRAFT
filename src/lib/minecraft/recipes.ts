@@ -317,6 +317,80 @@ export const RECIPES: Recipe[] = [
     type: "shapeless", ingredients: [ItemType.BlazeRod, ItemType.EnderPearl],
     result: { id: ItemType.EnderEye, count: 1 }, requiresTable: true,
   },
+  // === BUILDING BLOCKS ===
+  // Stone Bricks: 4 stone in square
+  {
+    type: "shaped", pattern: pat(["SS", "SS"], { S: BlockType.Stone }),
+    result: { id: BlockType.StoneBricks as unknown as ItemType, count: 4 }, requiresTable: true,
+  },
+  // Stone Slab: 3 stone in a row
+  {
+    type: "shaped", pattern: pat(["SSS"], { S: BlockType.Stone }),
+    result: { id: BlockType.Slab as unknown as ItemType, count: 6 }, requiresTable: true,
+  },
+  // Stone Stairs: 6 stone in stair pattern
+  {
+    type: "shaped", pattern: pat(["S..", "SS.", "SSS"], { S: BlockType.Stone }),
+    result: { id: BlockType.Stairs as unknown as ItemType, count: 4 }, requiresTable: true,
+  },
+  // Wood Fence: 4 planks + 2 sticks
+  {
+    type: "shaped", pattern: pat(["PSP", "PSP"], { P: BlockType.Planks, S: ItemType.Stick }),
+    result: { id: BlockType.Fence as unknown as ItemType, count: 3 }, requiresTable: true,
+  },
+  // Wooden Door: 6 planks in 2 columns
+  {
+    type: "shaped", pattern: pat(["PP", "PP", "PP"], { P: BlockType.Planks }),
+    result: { id: BlockType.WoodenDoor as unknown as ItemType, count: 1 }, requiresTable: true,
+  },
+  // Ladder: 7 sticks in H shape
+  {
+    type: "shaped", pattern: pat(["S.S", "SSS", "S.S"], { S: ItemType.Stick }),
+    result: { id: BlockType.Ladder as unknown as ItemType, count: 3 }, requiresTable: true,
+  },
+  // Sign: 6 planks + 1 stick
+  {
+    type: "shaped", pattern: pat(["PPP", "PPP", ".S."], { P: BlockType.Planks, S: ItemType.Stick }),
+    result: { id: BlockType.Sign as unknown as ItemType, count: 3 }, requiresTable: true,
+  },
+  // Anvil: 3 iron blocks + 4 iron ingots
+  {
+    type: "shaped", pattern: pat(["III", "...", "I.I"], { I: ItemType.IronIngot }),
+    result: { id: BlockType.Anvil as unknown as ItemType, count: 1 }, requiresTable: true,
+  },
+  // === COMBAT & UTILITY ===
+  // Bow: 3 sticks + 3 string
+  {
+    type: "shaped", pattern: pat(["S--", "S-R", "S--"], { S: ItemType.Stick, R: ItemType.String }),
+    result: { id: ItemType.Bow, count: 1 }, requiresTable: true,
+  },
+  // Arrow: flint + stick + feather (vertical)
+  {
+    type: "shaped", pattern: pat(["F", "S", "R"], { F: ItemType.Flint, S: ItemType.Stick, R: ItemType.Feather }),
+    result: { id: ItemType.Arrow, count: 4 }, requiresTable: true,
+  },
+  // Bucket: 3 iron ingots in V shape
+  {
+    type: "shaped", pattern: pat(["I.I", ".I."], { I: ItemType.IronIngot }),
+    result: { id: ItemType.Bucket, count: 1 }, requiresTable: true,
+  },
+  // Flint and Steel already exists above
+  // === RESOURCE BLOCKS ===
+  // Iron Block: 9 iron ingots
+  {
+    type: "shaped", pattern: pat(["III", "III", "III"], { I: ItemType.IronIngot }),
+    result: { id: ItemType.IronBlock, count: 1 }, requiresTable: true,
+  },
+  // Gold Block: 9 gold ingots
+  {
+    type: "shaped", pattern: pat(["GGG", "GGG", "GGG"], { G: ItemType.GoldIngot }),
+    result: { id: ItemType.GoldBlock, count: 1 }, requiresTable: true,
+  },
+  // Diamond Block: 9 diamonds
+  {
+    type: "shaped", pattern: pat(["DDD", "DDD", "DDD"], { D: ItemType.Diamond }),
+    result: { id: ItemType.DiamondBlock, count: 1 }, requiresTable: true,
+  },
 ];
 
 // Check if an ingredient matches an item id

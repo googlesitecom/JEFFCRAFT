@@ -60,6 +60,14 @@ const BLOCK_DROPS: Partial<Record<BlockType, { id: number; count: number }>> = {
   [BlockType.SoulSand]: { id: BlockType.SoulSand, count: 1 },
   [BlockType.Glowstone]: { id: BlockType.Glowstone, count: 1 },
   [BlockType.EndStone]: { id: BlockType.EndStone, count: 1 },
+  [BlockType.StoneBricks]: { id: BlockType.StoneBricks, count: 1 },
+  [BlockType.Slab]: { id: BlockType.Slab, count: 1 },
+  [BlockType.Stairs]: { id: BlockType.Stairs, count: 1 },
+  [BlockType.Fence]: { id: BlockType.Fence, count: 1 },
+  [BlockType.WoodenDoor]: { id: BlockType.WoodenDoor, count: 1 },
+  [BlockType.Ladder]: { id: BlockType.Ladder, count: 1 },
+  [BlockType.Sign]: { id: BlockType.Sign, count: 1 },
+  [BlockType.Anvil]: { id: BlockType.Anvil, count: 1 },
 };
 
 // XP dropped per block (Minecraft values, simplified)

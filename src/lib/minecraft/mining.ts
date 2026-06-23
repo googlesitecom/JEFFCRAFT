@@ -44,6 +44,14 @@ export const BLOCK_HARDNESS: Partial<Record<BlockType, number>> = {
   [BlockType.Glowstone]: 8,
   [BlockType.NetherPortal]: 10,
   [BlockType.EndStone]: 30,
+  [BlockType.StoneBricks]: 30,
+  [BlockType.Slab]: 20,
+  [BlockType.Stairs]: 20,
+  [BlockType.Fence]: 15,
+  [BlockType.WoodenDoor]: 15,
+  [BlockType.Ladder]: 3,
+  [BlockType.Sign]: 3,
+  [BlockType.Anvil]: 50,
 };
 
 // Required mining tier for each block (0 = any tool including hand).
