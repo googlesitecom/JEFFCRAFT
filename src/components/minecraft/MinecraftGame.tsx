@@ -20,13 +20,14 @@ import { getSound } from "@/lib/minecraft/sound";
 import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
-import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn } from "@/lib/minecraft/armor";
+import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn, totalDefense } from "@/lib/minecraft/armor";
 import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
 import { NetherWorld } from "@/lib/minecraft/nether";
 import { EndermanManager, Enderman } from "@/lib/minecraft/enderman";
 import { BlazeManager, Blaze } from "@/lib/minecraft/blaze";
 import { EndWorld } from "@/lib/minecraft/end";
 import { EnderDragon } from "@/lib/minecraft/ender-dragon";
+import { InputMode, readGamepad, isGamepadConnected } from "@/lib/minecraft/gamepad";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -92,6 +93,7 @@ interface GameStats {
   breakProgress: number; // 0-1
   xpLevel: number;
   xpProgress: number; // 0-1
+  armorDefense: number; // total armor defense points (for armor bar)
 }
 
 interface WorldConfig {
@@ -111,7 +113,7 @@ export default function MinecraftGame() {
   const [stats, setStats] = useState<GameStats>({
     fps: 0, x: 0, y: 0, z: 0, chunks: 0,
     health: 20, hunger: 20, air: 10, inWater: false, headInWater: false, breakProgress: 0,
-    xpLevel: 0, xpProgress: 0,
+    xpLevel: 0, xpProgress: 0, armorDefense: 0,
   });
   const [iconUrls, setIconUrls] = useState<Record<string, string>>({});
   const iconUrlsRef = useRef<Record<string, string>>({});
@@ -129,6 +131,7 @@ export default function MinecraftGame() {
     fuelProgress: number;
   }>({ input: null, fuel: null, output: null, smeltProgress: 0, fuelProgress: 0 });
   const [showControls, setShowControls] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode>("keyboard");
   const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
@@ -1229,6 +1232,48 @@ export default function MinecraftGame() {
       // === Dragon update (mount or follow player) ===
       const dragon = dragonManager.getActiveDragon();
       const isDragonMounted = dragon?.isMounted ?? false;
+      // === Gamepad input (if controller mode is active) ===
+      if (inputMode === "controller" && !isDragonMounted) {
+        const gp = readGamepad(0);
+        if (gp) {
+          // Movement: map left stick to WASD keys
+          player.setKey("KeyW", gp.moveZ < -0.3);
+          player.setKey("KeyS", gp.moveZ > 0.3);
+          player.setKey("KeyA", gp.moveX < -0.3);
+          player.setKey("KeyD", gp.moveX > 0.3);
+          // Jump
+          player.setKey("Space", gp.jump);
+          // Sprint (left stick click)
+          player.setKey("ShiftLeft", gp.sprint);
+          // Look (right stick)
+          const lookSensitivity = 0.05;
+          player.addMouseDelta(gp.lookX * lookSensitivity * 100, gp.lookY * lookSensitivity * 100);
+          // Hotbar navigation (RB/LB)
+          if (gp.hotbarUp) {
+            const idx = (selectedSlotRef.current + 1) % 9;
+            setSelectedSlot(idx);
+            selectedSlotRef.current = idx;
+            inventoryRef.current.setSelected(idx);
+          }
+          if (gp.hotbarDown) {
+            const idx = (selectedSlotRef.current - 1 + 9) % 9;
+            setSelectedSlot(idx);
+            selectedSlotRef.current = idx;
+            inventoryRef.current.setSelected(idx);
+          }
+          // Attack (RT trigger)
+          if (gp.rightTrigger > 0.5) {
+            leftMouseDown = true;
+          } else {
+            leftMouseDown = false;
+          }
+          // Place (X button)
+          if (gp.place) {
+            performRightClickAction();
+          }
+        }
+      }
+
       // Apply mouse look to player even when mounted (so yaw/pitch sync with camera)
       if (document.pointerLockElement === renderer.domElement && !player.isDead()) {
         // When dragon is mounted, skip normal player movement - the dragon controls position.
@@ -1518,6 +1563,7 @@ export default function MinecraftGame() {
           breakProgress: miningProgress,
           xpLevel: xpStateRef.current.level,
           xpProgress: xpStateRef.current.progressFraction,
+          armorDefense: totalDefense(armorStateRef.current),
         }));
         // Tick HUD to refresh dragon mount indicator
         setHudTick((t) => (t + 1) & 0xffff);
@@ -1740,7 +1786,17 @@ export default function MinecraftGame() {
       {/* Survival stats - centered above hotbar like Minecraft */}
       {mode === "survival" && (
         <>
-          {/* Hearts + hunger row (topmost) */}
+          {/* Armor bar (above hearts, only if wearing armor) */}
+          {stats.armorDefense > 0 && (
+            <div className="absolute bottom-[124px] left-1/2 -translate-x-1/2 z-20 flex flex-row items-end" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
+              <div className="flex gap-px">
+                {Array.from({ length: 10 }).map((_, i) => (
+                  <ArmorIcon key={i} filled={Math.min(2, Math.max(0, stats.armorDefense - i * 2))} />
+                ))}
+              </div>
+            </div>
+          )}
+          {/* Hearts + hunger row */}
           <div className="absolute bottom-[100px] left-1/2 -translate-x-1/2 z-20 flex flex-row items-end" style={{ filter: "drop-shadow(1px 1px 0 #000)" }}>
             {/* Hearts (left of center) */}
             <div className="flex gap-px">
@@ -1902,7 +1958,62 @@ export default function MinecraftGame() {
                 {mode === "survival" && <ControlRow keys="B" desc="Dragón espera/te sigue" />}
                 {mode === "creative" && <ControlRow keys="F" desc="Vuelo" />}
                 <ControlRow keys="Esc" desc="Pausar" />
+                {/* Xbox controller mapping */}
+                {inputMode === "controller" && (
+                  <>
+                    <div className="mt-3 mb-1 text-yellow-300 font-bold text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
+                      ── Control Xbox ──
+                    </div>
+                    <ControlRow keys="Stick Izq" desc="Moverse" />
+                    <ControlRow keys="Stick Der" desc="Mirar" />
+                    <ControlRow keys="A" desc="Saltar" />
+                    <ControlRow keys="RT" desc="Minar / Atacar" />
+                    <ControlRow keys="X" desc="Colocar / Interactuar" />
+                    <ControlRow keys="LB / RB" desc="Cambiar slot" />
+                    <ControlRow keys="Start" desc="Pausar" />
+                  </>
+                )}
               </div>
+              {/* Input mode selector */}
+              <div className="flex gap-2 mb-3 justify-center">
+                <button
+                  onClick={() => setInputMode("keyboard")}
+                  className="px-4 py-2 font-mono font-bold text-sm transition-all"
+                  style={{
+                    backgroundColor: inputMode === "keyboard" ? "#5a8a3a" : "#5a5a5a",
+                    borderTop: "2px solid #7a7a7a",
+                    borderLeft: "2px solid #7a7a7a",
+                    borderBottom: "2px solid #3a3a3a",
+                    borderRight: "2px solid #3a3a3a",
+                    color: "#fff",
+                    textShadow: "1px 1px 0 #000",
+                    imageRendering: "pixelated",
+                  }}
+                >
+                  ⌨ Teclado
+                </button>
+                <button
+                  onClick={() => setInputMode("controller")}
+                  className="px-4 py-2 font-mono font-bold text-sm transition-all"
+                  style={{
+                    backgroundColor: inputMode === "controller" ? "#3a5a8a" : "#5a5a5a",
+                    borderTop: "2px solid #7a7a7a",
+                    borderLeft: "2px solid #7a7a7a",
+                    borderBottom: "2px solid #3a3a3a",
+                    borderRight: "2px solid #3a3a3a",
+                    color: "#fff",
+                    textShadow: "1px 1px 0 #000",
+                    imageRendering: "pixelated",
+                  }}
+                >
+                  🎮 Control Xbox
+                </button>
+              </div>
+              {!isGamepadConnected() && inputMode === "controller" && (
+                <p className="text-center text-xs text-yellow-400 font-mono mb-2">
+                  ⚠ No se detectó un control. Conecta un control Xbox.
+                </p>
+              )}
               <MCMenuButton onClick={() => setShowControls(false)} color="green">← Volver</MCMenuButton>
             </div>
           )}
@@ -2542,26 +2653,66 @@ function ModeCard({
 }
 
 // =============== HUD ICONS ===============
+// Heart icon — improved pixel art with outline, fill, and highlight
 function Heart({ filled }: { filled: number }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
-      <path d="M3,2 L5,2 L5,3 L3,3 Z M5,3 L7,3 L7,4 L5,4 Z M7,4 L9,4 L9,5 L7,5 Z M9,3 L11,3 L11,4 L9,4 Z M11,2 L13,2 L13,3 L11,3 Z M3,3 L2,3 L2,5 L3,5 Z M13,3 L14,3 L14,5 L13,5 Z M2,5 L3,5 L3,6 L2,6 Z M13,5 L14,5 L14,6 L13,6 Z M3,6 L4,6 L4,7 L3,7 Z M12,6 L13,6 L13,7 L12,7 Z M4,7 L5,7 L5,8 L4,8 Z M11,7 L12,7 L12,8 L11,8 Z M5,8 L6,8 L6,9 L5,9 Z M10,8 L11,8 L11,9 L10,9 Z M6,9 L7,9 L7,10 L6,10 Z M9,9 L10,9 L10,10 L9,10 Z M7,10 L8,10 L8,11 L7,11 Z M8,10 L9,10 L9,11 L8,11 Z" fill="#3a0000" />
+    <svg width="20" height="20" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
+      {/* Dark outline (always visible) */}
+      <path d="M3,3 L5,3 L5,4 L3,4 Z M5,4 L7,4 L7,5 L5,5 Z M7,5 L9,5 L9,6 L7,6 Z M9,4 L11,4 L11,5 L9,5 Z M11,3 L13,3 L13,4 L11,4 Z M2,4 L3,4 L3,6 L2,6 Z M13,4 L14,4 L14,6 L13,6 Z M2,6 L3,6 L3,7 L2,7 Z M13,6 L14,6 L14,7 L13,7 Z M3,7 L4,7 L4,8 L3,8 Z M12,7 L13,7 L13,8 L12,8 Z M4,8 L5,8 L5,9 L4,9 Z M11,8 L12,8 L12,9 L11,9 Z M5,9 L6,9 L6,10 L5,10 Z M10,9 L11,9 L11,10 L10,10 Z M6,10 L7,10 L7,11 L6,11 Z M9,10 L10,10 L10,11 L9,11 Z M7,11 L8,11 L8,12 L7,12 Z M8,11 L9,11 L9,12 L8,12 Z" fill="#1a0000" />
+      {/* Half heart (dark red background) */}
       {filled >= 1 && (
-        <path d="M4,3 L5,3 L5,4 L4,4 Z M6,4 L7,4 L7,5 L6,5 Z M8,4 L9,4 L9,5 L8,5 Z M10,3 L11,3 L11,4 L10,4 Z M3,4 L4,4 L4,5 L3,5 Z M12,4 L13,4 L13,5 L12,5 Z M3,5 L4,5 L4,6 L3,6 Z M12,5 L13,5 L13,6 L12,6 Z M4,6 L5,5 L5,6 L4,6 Z M11,6 L12,6 L12,5 L11,5 Z M5,7 L6,7 L6,8 L5,8 Z M10,7 L11,7 L11,8 L10,8 Z M6,8 L7,8 L7,9 L6,9 Z M9,8 L10,8 L10,9 L9,9 Z M7,9 L8,9 L8,10 L7,10 Z M8,9 L9,9 L9,10 L8,10 Z" fill="#ff0000" />
+        <path d="M4,4 L5,4 L5,5 L4,5 Z M5,5 L7,5 L7,6 L5,6 Z M7,6 L8,6 L8,7 L7,7 Z M3,5 L4,5 L4,7 L3,7 Z M4,7 L5,7 L5,8 L4,8 Z M5,8 L6,8 L6,9 L5,9 Z M6,9 L7,9 L7,10 L6,10 Z M7,10 L8,10 L8,11 L7,11 Z" fill="#cc0000" />
+      )}
+      {/* Full heart (bright red + highlight) */}
+      {filled >= 2 && (
+        <>
+          <path d="M8,6 L9,6 L9,7 L8,7 Z M9,5 L11,5 L11,6 L9,6 Z M11,4 L13,4 L13,6 L11,6 Z M12,6 L13,6 L13,7 L12,7 Z M11,7 L12,7 L12,8 L11,8 Z M10,8 L11,8 L11,9 L10,9 Z M9,9 L10,9 L10,10 L9,10 Z M8,10 L9,10 L9,11 L8,11 Z" fill="#ff2222" />
+          {/* Highlight pixels */}
+          <path d="M4,4 L5,4 L5,5 L4,5 Z" fill="#ff6666" />
+          <path d="M3,5 L4,5 L4,6 L3,6 Z" fill="#ff6666" />
+        </>
       )}
     </svg>
   );
 }
 
+// Drumstick (hunger) icon — improved pixel art
 function Drumstick({ filled }: { filled: number }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
-      <path d="M10,2 L12,2 L12,3 L13,3 L13,4 L14,4 L14,5 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,13 L5,13 L5,14 L4,14 L4,13 L3,13 L3,12 L4,12 L4,11 L5,11 L5,10 L6,10 L6,9 L7,9 L7,8 L8,8 L8,7 L9,7 L9,6 L10,6 L10,5 L11,5 L11,4 L10,4 Z" fill="#3a2a00" />
+    <svg width="20" height="20" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
+      {/* Dark outline */}
+      <path d="M9,2 L12,2 L12,3 L13,3 L13,4 L14,4 L14,6 L13,6 L13,7 L12,7 L12,8 L11,8 L11,9 L10,9 L10,10 L9,10 L9,11 L8,11 L8,12 L7,12 L7,13 L6,13 L6,14 L4,14 L4,13 L3,13 L3,11 L4,11 L4,10 L5,10 L5,9 L6,9 L6,8 L7,8 L7,7 L8,7 L8,6 L9,6 Z" fill="#1a1500" />
+      {/* Filled (brown meat) */}
       {filled >= 1 && (
-        <path d="M10,3 L11,3 L11,4 L12,4 L12,5 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,11 L7,11 L7,10 L8,10 L8,9 L9,9 L9,8 L10,8 L10,7 L11,7 L11,6 L12,6 L12,5 L11,5 L11,4 L10,4 Z" fill="#8b4513" />
+        <path d="M10,3 L12,3 L12,4 L13,4 L13,5 L13,6 L12,6 L12,7 L11,7 L11,8 L10,8 L10,9 L9,9 L9,10 L8,10 L8,11 L7,11 L7,12 L6,12 L6,13 L5,13 L5,12 L4,12 L4,11 L5,11 L5,10 L6,10 L6,9 L7,9 L7,8 L8,8 L8,7 L9,7 L9,6 L10,6 L10,5 L11,5 L11,4 L10,4 Z" fill="#8b5e2a" />
       )}
+      {/* Full (lighter brown + bone highlight) */}
       {filled >= 2 && (
-        <path d="M5,12 L6,12 L6,13 L5,13 Z M4,13 L5,13 L5,14 L4,14 Z" fill="#deb887" />
+        <>
+          <path d="M10,4 L11,4 L11,5 L10,5 Z M11,5 L12,5 L12,6 L11,6 Z M9,7 L10,7 L10,8 L9,8 Z M8,9 L9,9 L9,10 L8,10 Z" fill="#b87a3a" />
+          <path d="M5,12 L6,12 L6,13 L5,13 Z M4,13 L5,13 L5,14 L4,14 Z" fill="#deb887" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+// Armor icon — shield shape, gray/silver, shown above hearts
+function ArmorIcon({ filled }: { filled: number }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 16 16" style={{ imageRendering: "pixelated" }}>
+      {/* Dark outline */}
+      <path d="M4,2 L12,2 L12,4 L13,4 L13,8 L12,8 L12,10 L11,10 L11,12 L10,12 L10,13 L6,13 L6,12 L5,12 L5,10 L4,10 L4,8 L3,8 L3,4 L4,4 Z" fill="#1a1a1a" />
+      {/* Filled (silver/gray) */}
+      {filled >= 1 && (
+        <path d="M5,3 L11,3 L11,5 L12,5 L12,7 L11,7 L11,9 L10,9 L10,11 L9,11 L9,12 L7,12 L7,11 L6,11 L6,9 L5,9 L5,7 L4,7 L4,5 L5,5 Z" fill="#999999" />
+      )}
+      {/* Full (bright silver + highlight) */}
+      {filled >= 2 && (
+        <>
+          <path d="M6,4 L9,4 L9,5 L6,5 Z M5,5 L6,5 L6,7 L5,7 Z" fill="#cccccc" />
+          <path d="M6,4 L7,4 L7,5 L6,5 Z" fill="#eeeeee" />
+        </>
       )}
     </svg>
   );
