@@ -191,9 +191,9 @@ export default function MinecraftGame() {
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.4;
+    renderer.toneMappingExposure = 1.35;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    // Enable shadows for realistic lighting
+    // Shadows: PCFSoft for smooth edges, 1024 for performance (60fps)
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
@@ -235,30 +235,31 @@ export default function MinecraftGame() {
     sky.frustumCulled = false;
     scene.add(sky);
 
-    // === Lighting (improved for better visuals with shadows) ===
-    const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+    // === Lighting ===
+    const ambient = new THREE.AmbientLight(0xffffff, 0.45);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xfff4e6, 1.0);
+    const sun = new THREE.DirectionalLight(0xfff4e6, 1.1);
     sun.position.set(50, 100, 30);
-    // Shadow settings
+    // Shadow config: 1024px for 60fps, tight frustum around player
     sun.castShadow = true;
-    sun.shadow.mapSize.width = 2048;
-    sun.shadow.mapSize.height = 2048;
-    sun.shadow.camera.near = 0.5;
-    sun.shadow.camera.far = 200;
-    sun.shadow.camera.left = -60;
-    sun.shadow.camera.right = 60;
-    sun.shadow.camera.top = 60;
-    sun.shadow.camera.bottom = -60;
-    sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.04;
+    sun.shadow.mapSize.width = 1024;
+    sun.shadow.mapSize.height = 1024;
+    sun.shadow.camera.near = 1;
+    sun.shadow.camera.far = 150;
+    sun.shadow.camera.left = -40;
+    sun.shadow.camera.right = 40;
+    sun.shadow.camera.top = 40;
+    sun.shadow.camera.bottom = -40;
+    sun.shadow.bias = -0.001;
+    sun.shadow.normalBias = 0.05;
     scene.add(sun);
     scene.add(sun.target);
-    // Fill light for softer shadows
-    const fill = new THREE.DirectionalLight(0xb0c4de, 0.25);
-    fill.position.set(-30, 50, -40);
+    // Fill light: soft blue from opposite direction (sky bounce)
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.3);
+    fill.position.set(-40, 60, -30);
     scene.add(fill);
-    const hemi = new THREE.HemisphereLight(0xbfdfff, 0x6b5a3a, 0.35);
+    // Hemisphere: sky color from above, ground color from below
+    const hemi = new THREE.HemisphereLight(0x88bbff, 0x554433, 0.4);
     scene.add(hemi);
 
     // === Build atlas and shared materials ===
@@ -282,16 +283,16 @@ export default function MinecraftGame() {
       alphaTest: 0.5,
       depthWrite: true,
     });
-    // Translucent material: water — improved with shininess and better alpha
+    // Water material: semi-transparent blue with depth-based color shift
     const transparentMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
       transparent: true,
-      opacity: 0.75,
+      opacity: 0.72,
       side: THREE.DoubleSide,
       depthWrite: false,
-      emissive: 0x113355,
-      emissiveIntensity: 0.15,
+      emissive: 0x0a2244,
+      emissiveIntensity: 0.2,
     });
     // Glass material: alpha blended, depthWrite OFF so you can see through
     const glassMaterial = new THREE.MeshLambertMaterial({
@@ -508,10 +509,11 @@ export default function MinecraftGame() {
       const nightFactor = 1 - dayFactor;
       isNight = nightFactor > 0.5;
 
-      // Sun light intensity (stronger for better shadows)
-      sun.intensity = 1.2 * dayFactor;
-      ambient.intensity = 0.5 * dayFactor + 0.15 * nightFactor;
-      hemi.intensity = 0.35 * dayFactor + 0.1 * nightFactor;
+      // Sun light intensity (stronger day for sharp shadows, dim night)
+      sun.intensity = 1.1 * dayFactor;
+      ambient.intensity = 0.45 * dayFactor + 0.12 * nightFactor;
+      hemi.intensity = 0.4 * dayFactor + 0.08 * nightFactor;
+      fill.intensity = 0.3 * dayFactor;
 
       // Shadow camera follows player so shadows always render around the player
       sun.position.set(
@@ -1282,17 +1284,13 @@ export default function MinecraftGame() {
         player.setKey("Space", gp.a);
         // Sprint: LS click
         player.setKey("ShiftLeft", gp.ls);
-        // Fly down in creative: B (held)
-        if (gp.b && worldConfigRef.current?.mode === "creative") {
-          player.setKey("ControlLeft", true);
-        } else {
-          player.setKey("ControlLeft", false);
-        }
+        // Fly down in creative: LT (left trigger, hold)
+        player.setKey("ControlLeft", gp.lt);
         // Look: right stick
-        const lookSens = 3.5;
+        const lookSens = 400;
         player.addMouseDelta(gp.lookX * lookSens, gp.lookY * lookSens);
 
-        // Hotbar: RB/LB (edge detected)
+        // Hotbar: RB = next, LB = previous (edge detected)
         if (wasButtonPressed(gp, 5)) {
           const idx = (selectedSlotRef.current + 1) % 9;
           setSelectedSlot(idx); selectedSlotRef.current = idx;
@@ -1303,7 +1301,7 @@ export default function MinecraftGame() {
           setSelectedSlot(idx); selectedSlotRef.current = idx;
           inventoryRef.current.setSelected(idx);
         }
-        // D-pad hotbar
+        // D-pad hotbar slots
         if (wasButtonPressed(gp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
         if (wasButtonPressed(gp, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
         if (wasButtonPressed(gp, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
@@ -1321,7 +1319,9 @@ export default function MinecraftGame() {
           miningBlock = null;
         }
 
-        // Place/Interact: X (edge)
+        // Place/Interact: A (edge) — also acts as jump when held, but edge = place
+        // Wait — A is jump (held). Let's use X for place instead.
+        // X = Place/Interact (edge)
         if (wasButtonPressed(gp, 2)) {
           performRightClickAction();
         }
@@ -1331,8 +1331,8 @@ export default function MinecraftGame() {
           setShowInventory(true);
         }
 
-        // Dragon mount/dismount: B (edge) — only in survival
-        if (wasButtonPressed(gp, 1) && worldConfigRef.current?.mode === "survival") {
+        // Dragon mount/dismount: B (edge)
+        if (wasButtonPressed(gp, 1)) {
           const drag = dragonManager.getActiveDragon();
           if (drag) {
             if (drag.isMounted) {
@@ -1354,7 +1354,6 @@ export default function MinecraftGame() {
 
         // Pause: Start (edge)
         if (wasButtonPressed(gp, 9)) {
-          // Exit pointer lock if active, or toggle pause
           if (document.pointerLockElement) document.exitPointerLock();
         }
       }
@@ -2050,15 +2049,16 @@ export default function MinecraftGame() {
                     <div className="mt-3 mb-1 text-yellow-300 font-bold text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
                       ── Control Xbox ──
                     </div>
-                    <ControlRow keys="Stick Izq" desc="Moverse (arriba/abajo/izq/der)" />
-                    <ControlRow keys="Stick Der" desc="Mirar alrededor" />
+                    <ControlRow keys="Stick Izq" desc="Moverse" />
+                    <ControlRow keys="Stick Der" desc="Mirar" />
                     <ControlRow keys="A" desc="Saltar" />
-                    <ControlRow keys="RT" desc="Minar bloque / Atacar (mantener)" />
-                    <ControlRow keys="X" desc="Colocar / Interactuar (presionar)" />
-                    <ControlRow keys="Y" desc="Abrir inventario" />
                     <ControlRow keys="B" desc="Montar/desmontar dragón" />
+                    <ControlRow keys="X" desc="Colocar / Interactuar" />
+                    <ControlRow keys="Y" desc="Inventario" />
+                    <ControlRow keys="RT" desc="Minar / Atacar (mantener)" />
+                    <ControlRow keys="LT" desc="Bajar (creativo)" />
                     <ControlRow keys="LB / RB" desc="Slot anterior / siguiente" />
-                    <ControlRow keys="D-Pad" desc="Slots 1-4 directo" />
+                    <ControlRow keys="D-Pad" desc="Slots 1-4" />
                     <ControlRow keys="LS (click)" desc="Correr" />
                     <ControlRow keys="Back" desc="Dragón espera/sigue" />
                     <ControlRow keys="Start" desc="Pausar" />
