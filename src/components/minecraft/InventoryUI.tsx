@@ -366,7 +366,19 @@ export function InventoryUI({
 
   // Show ALL recipes in the book, regardless of crafting surface
   // Recipes that require a table show a small "T" badge
-  const allRecipes = RECIPES;
+  // Dedupe recipes by result id+count so the recipe book doesn't show duplicates
+  const allRecipes = (() => {
+    const seen = new Set<string>();
+    const unique: Recipe[] = [];
+    for (const r of RECIPES) {
+      const key = r.result.id + "_" + r.result.count;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(r);
+      }
+    }
+    return unique;
+  })();
   const craftableIds = new Set(getAvailableRecipes(inventory, isCraftingTable).map((r) => r.result.id + "_" + r.result.count));
 
   // Creative mode: list all blocks and items

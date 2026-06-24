@@ -202,13 +202,7 @@ export const RECIPES: Recipe[] = [
   },
 
   // === BUILDING BLOCKS ===
-  // Crafting Table from 4 planks (2x2)
-  {
-    type: "shaped",
-    pattern: pat(["PP.", "PP.", "..."], { P: "any_planks" }),
-    result: { id: BlockType.CraftingTable, count: 1 },
-    requiresTable: false,
-  },
+  // (Crafting Table recipe already defined above in TOOLS section — not duplicated here)
   // Furnace from 8 cobblestone (ring shape)
   {
     type: "shaped",
@@ -241,13 +235,7 @@ export const RECIPES: Recipe[] = [
   // Sand -> Sandstone (simplified, 4 sand = 1 sandstone but we'll give sand back)
   // Glass from sand (needs furnace, but we allow crafting for simplicity)
   // 4 gold ingots -> 1 gold block (not implemented yet)
-  // Ladder from 7 sticks
-  {
-    type: "shaped",
-    pattern: pat(["S.S", "S.S", "S.S"], { S: ItemType.Stick }),
-    result: { id: ItemType.Stick, count: 1 }, // simplified: returns a stick (placeholder)
-    requiresTable: true,
-  },
+  // (Ladder recipe is defined below in the BUILDING BLOCKS section — not duplicated here)
 
   // === ARMOR RECIPES ===
   // Copper armor (made from copper ingots dropped by cows)

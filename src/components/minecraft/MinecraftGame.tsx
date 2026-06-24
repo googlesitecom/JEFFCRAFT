@@ -21,6 +21,7 @@ import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
 import { MultiplayerManager, MultiplayerMessage } from "@/lib/minecraft/multiplayer";
+import { PlayerModel } from "@/lib/minecraft/player-model";
 import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn, totalDefense } from "@/lib/minecraft/armor";
 import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
 import { NetherWorld } from "@/lib/minecraft/nether";
@@ -488,6 +489,16 @@ export default function MinecraftGame() {
     dragonManagerRef.current = dragonManager;
     let dragonMountedCamera: { eyeX: number; eyeY: number; eyeZ: number; yaw: number; pitch: number } | null = null;
 
+    // === Multiplayer remote player rendering ===
+    // Map of peer ID → PlayerModel (3D mesh)
+    const remotePlayerModels = new Map<string, PlayerModel>();
+    // Throttle: send local player state every 50ms (20 updates/sec)
+    let mpSendTimer = 0;
+    const MP_SEND_INTERVAL = 0.05; // 50ms
+    // Throttle: prune stale players every 2s
+    let mpPruneTimer = 0;
+    const MP_PRUNE_INTERVAL = 2.0;
+
     // Torch lights
     const torchLights = new Map<string, THREE.PointLight>();
 
@@ -885,6 +896,10 @@ export default function MinecraftGame() {
         return false;
       }
       world.setBlock(px, py, pz, blockType);
+      // Broadcast block placement to multiplayer peers
+      if (multiplayerRef.current?.isConnected()) {
+        multiplayerRef.current.sendBlockPlace(px, py, pz, blockType);
+      }
       rebuildChunkAt(px, pz);
       if (px % CHUNK_SIZE === 0) rebuildChunkAt(px - 1, pz);
       if (px % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(px + 1, pz);
@@ -913,6 +928,10 @@ export default function MinecraftGame() {
       const blockType = world.getBlock(x, y, z);
       if (blockType === BlockType.Bedrock) return false;
       world.setBlock(x, y, z, BlockType.Air);
+      // Broadcast block break to multiplayer peers
+      if (multiplayerRef.current?.isConnected()) {
+        multiplayerRef.current.sendBlockBreak(x, y, z);
+      }
       rebuildChunkAt(x, z);
       if (x % CHUNK_SIZE === 0) rebuildChunkAt(x - 1, z);
       if (x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAt(x + 1, z);
@@ -1689,6 +1708,59 @@ export default function MinecraftGame() {
       // Keep skybox centered on player so it never clips
       sky.position.copy(player.position);
 
+      // === MULTIPLAYER: send local state + render remote players ===
+      const mp = multiplayerRef.current;
+      if (mp && mp.isConnected()) {
+        // Send local player state (throttled to 20Hz)
+        mpSendTimer += dt;
+        if (mpSendTimer >= MP_SEND_INTERVAL) {
+          mpSendTimer = 0;
+          mp.sendPlayerState(player.position, player.yaw, player.pitch);
+        }
+        // Prune stale players (throttled to 0.5Hz)
+        mpPruneTimer += dt;
+        if (mpPruneTimer >= MP_PRUNE_INTERVAL) {
+          mpPruneTimer = 0;
+          mp.pruneStalePlayers();
+        }
+
+        // Render remote players: create/update/dispose meshes
+        const remoteState = mp.remotePlayers;
+        const seenIds = new Set<string>();
+        for (const [peerId, state] of remoteState) {
+          seenIds.add(peerId);
+          let model = remotePlayerModels.get(peerId);
+          if (!model) {
+            // Create new player model
+            model = new PlayerModel(peerId.slice(-8)); // short name = last 8 chars of peer ID
+            scene.add(model.group);
+            remotePlayerModels.set(peerId, model);
+          }
+          // Update model pose
+          // Estimate walking: check if position changed recently (lastSeen is fresh)
+          const isFresh = (Date.now() - state.lastSeen) < 500;
+          const isMoving = isFresh; // assume moving if data is fresh
+          // Walk animation time: increment based on real time
+          const walkT = Date.now() / 1000 * 6;
+          model.update(state.position, state.yaw, state.pitch, walkT, isMoving);
+        }
+        // Remove models for players no longer in remoteState
+        for (const [peerId, model] of remotePlayerModels) {
+          if (!seenIds.has(peerId)) {
+            scene.remove(model.group);
+            model.dispose();
+            remotePlayerModels.delete(peerId);
+          }
+        }
+      } else {
+        // Not connected: clean up any existing remote player models
+        for (const [peerId, model] of remotePlayerModels) {
+          scene.remove(model.group);
+          model.dispose();
+        }
+        remotePlayerModels.clear();
+      }
+
       renderer.render(scene, camera);
 
       // Render first-person hand on top
@@ -1764,6 +1836,17 @@ export default function MinecraftGame() {
       dropManager.dispose();
       dragonManager.dispose();
       dragonManagerRef.current = null;
+      // Dispose remote player models (multiplayer)
+      for (const [peerId, model] of remotePlayerModels) {
+        scene.remove(model.group);
+        model.dispose();
+      }
+      remotePlayerModels.clear();
+      // Disconnect multiplayer
+      if (multiplayerRef.current) {
+        multiplayerRef.current.disconnect();
+        multiplayerRef.current = null;
+      }
       // Stop music
       getSound().stopMusic();
       // Dispose torch lights
@@ -1838,6 +1921,16 @@ export default function MinecraftGame() {
           }
         }
       };
+      // Handle incoming world mutations from clients (block place/break)
+      multiplayerRef.current.onMessage = (msg: MultiplayerMessage) => {
+        const w = worldRef.current;
+        if (!w) return;
+        if (msg.kind === "block-place") {
+          w.setBlock(msg.x, msg.y, msg.z, msg.blockType);
+        } else if (msg.kind === "block-break") {
+          w.setBlock(msg.x, msg.y, msg.z, BlockType.Air);
+        }
+      };
     }
     try {
       await multiplayerRef.current.hostWorld();
@@ -1859,6 +1952,7 @@ export default function MinecraftGame() {
       multiplayerRef.current.onError = (e) => { setMpError(e); setMpStatus(""); };
       multiplayerRef.current.onConnected = () => setMpConnected(true);
       // When we receive a world-seed from host, start the world
+      // Also handle block place/break from host
       multiplayerRef.current.onMessage = (msg: MultiplayerMessage) => {
         if (msg.kind === "world-seed") {
           const config: WorldConfig = {
@@ -1877,6 +1971,12 @@ export default function MinecraftGame() {
           pendingArmorLoadRef.current = null;
           xpStateRef.current.reset();
           armorStateRef.current = emptyArmor();
+        } else if (msg.kind === "block-place") {
+          const w = worldRef.current;
+          if (w) w.setBlock(msg.x, msg.y, msg.z, msg.blockType);
+        } else if (msg.kind === "block-break") {
+          const w = worldRef.current;
+          if (w) w.setBlock(msg.x, msg.y, msg.z, BlockType.Air);
         }
       };
     }

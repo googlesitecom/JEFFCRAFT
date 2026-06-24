@@ -237,6 +237,13 @@ export class MultiplayerManager {
           pitch: msg.pitch,
           lastSeen: Date.now(),
         });
+        // Notify local player that a new remote player appeared
+        this.onPlayerJoined?.(fromId);
+      }
+      // Host: rebroadcast this client's position to all OTHER clients
+      // (so clients can see each other, not just the host)
+      if (this.role === "host" && fromId !== "host") {
+        this.broadcast(msg, fromId);
       }
     } else if (msg.kind === "player-joined") {
       this.onPlayerJoined?.(msg.id);
@@ -245,6 +252,11 @@ export class MultiplayerManager {
       this.onPlayerLeft?.(msg.id);
     } else {
       // Other messages (world-seed, block-place, block-break, chat)
+      // Host: rebroadcast block-place/break/chat to all OTHER clients (relay)
+      if (this.role === "host" && fromId !== "host" &&
+          (msg.kind === "block-place" || msg.kind === "block-break" || msg.kind === "chat")) {
+        this.broadcast(msg, fromId);
+      }
       this.onMessage?.(msg);
     }
   }
