@@ -469,7 +469,7 @@ export class AnimalManager {
   world: World;
   scene: THREE.Scene;
   spawnTimer: number = 0;
-  maxAnimals: number = 30;
+  maxAnimals: number = 12; // reduced from 30 — too many were spawning
   initialSpawnDone: boolean = false;
 
   constructor(world: World, scene: THREE.Scene) {
@@ -480,7 +480,8 @@ export class AnimalManager {
   initialSpawn(centerX: number, centerZ: number) {
     if (this.initialSpawnDone) return;
     this.initialSpawnDone = true;
-    for (let i = 0; i < 8; i++) {
+    // Spawn 4 animals initially (was 8)
+    for (let i = 0; i < 4; i++) {
       this.spawnRandom(centerX, centerZ, 3 + Math.random() * 8);
     }
   }
@@ -509,6 +510,24 @@ export class AnimalManager {
     }
     if (surfaceY < 0) return;
 
+    // === TREE AVOIDANCE ===
+    // Don't spawn if the surface block is a log (animal inside tree trunk)
+    const surfaceBlock = this.world.getBlock(x, surfaceY, z);
+    if (surfaceBlock === BlockType.Wood || surfaceBlock === BlockType.Leaves) return;
+    // Require grass/dirt/sand/snow as spawn surface (animals don't spawn on stone/wood)
+    if (surfaceBlock !== BlockType.Grass && surfaceBlock !== BlockType.Dirt
+        && surfaceBlock !== BlockType.Sand && surfaceBlock !== BlockType.Snow) return;
+    // Check 2 blocks of air above the spawn point (so animals don't spawn under branches/leaves)
+    if (this.world.getBlock(x, surfaceY + 2, z) !== BlockType.Air) return;
+    // Check no leaves in 3x3 area above (within 2 blocks up)
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dy = 1; dy <= 2; dy++) {
+          if (this.world.getBlock(x + dx, surfaceY + dy, z + dz) === BlockType.Leaves) return;
+        }
+      }
+    }
+
     const types: AnimalType[] = ["pig", "cow", "chicken"];
     const type = types[Math.floor(Math.random() * types.length)];
     const animal = new Animal(
@@ -532,11 +551,13 @@ export class AnimalManager {
       this.initialSpawn(playerX, playerZ);
     }
 
+    // Slower spawn rate: every 4 seconds (was 1 second)
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
-      this.spawnTimer = 1;
+      this.spawnTimer = 4;
       this.spawnRandom(playerX, playerZ, 15);
-      if (this.animals.length < this.maxAnimals * 0.7) {
+      // Extra spawn only when well below capacity (was 70%, now 50%)
+      if (this.animals.length < this.maxAnimals * 0.5) {
         this.spawnRandom(playerX, playerZ, 12);
       }
     }
