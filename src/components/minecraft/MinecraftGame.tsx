@@ -2732,11 +2732,11 @@ function MainMenu({
           </div>
         )}
 
-        {/* Splash text at top-center (yellow, bouncing) — positioned to blend with image title */}
+        {/* Splash text at top-center (yellow, bouncing) — slightly left and lower to blend with image title */}
         <span
-          className="absolute top-20 left-1/2 -translate-x-1/2 text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
+          className="absolute top-28 left-[42%] text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
           style={{
-            transform: `translateX(-50%) rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
+            transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
             textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 12px rgba(255,220,0,0.5)",
             transition: "transform 0.1s",
             letterSpacing: "0.05em",
