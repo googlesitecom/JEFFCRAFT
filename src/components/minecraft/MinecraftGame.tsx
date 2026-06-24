@@ -20,6 +20,7 @@ import { getSound } from "@/lib/minecraft/sound";
 import { MonsterManager, Monster } from "@/lib/minecraft/monsters";
 import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
+import { MultiplayerManager, MultiplayerMessage } from "@/lib/minecraft/multiplayer";
 import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn, totalDefense } from "@/lib/minecraft/armor";
 import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
 import { NetherWorld } from "@/lib/minecraft/nether";
@@ -165,6 +166,14 @@ export default function MinecraftGame() {
   const xpStateRef = useRef<XpState>(new XpState());
   const pendingXpLoadRef = useRef<{ level: number; progress: number } | null>(null);
   const [saveMessage, setSaveMessage] = useState<string>("");
+  // Multiplayer state
+  const multiplayerRef = useRef<MultiplayerManager | null>(null);
+  const [mpStatus, setMpStatus] = useState<string>("");
+  const [mpShareCode, setMpShareCode] = useState<string>("");
+  const [mpConnected, setMpConnected] = useState(false);
+  const [mpError, setMpError] = useState<string>("");
+  const [showHostPanel, setShowHostPanel] = useState(false);
+  const showHostPanelRef = useRef(false);
   // Track if the player has already received the level-10 dragon egg reward (per world)
   const dragonEggAwardedRef = useRef<boolean>(false);
   const [dragonNotification, setDragonNotification] = useState<string>("");
@@ -1160,12 +1169,19 @@ export default function MinecraftGame() {
         }
       }
       if (e.code === "Escape") {
-        // If config or controls panel is open, close it instead of exiting pointer lock
+        // If config, controls, or host panel is open, close it instead of exiting pointer lock
         if (showConfigRef.current || showControlsRef.current) {
           setShowConfig(false);
           setShowControls(false);
           showConfigRef.current = false;
           showControlsRef.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        if (showHostPanelRef.current) {
+          setShowHostPanel(false);
+          showHostPanelRef.current = false;
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -1802,6 +1818,90 @@ export default function MinecraftGame() {
     armorStateRef.current = emptyArmor();
   }, []);
 
+  // === MULTIPLAYER ===
+  // Host: open current world to multiplayer (generates a share code)
+  const hostMultiplayer = useCallback(async () => {
+    setMpError("");
+    setMpStatus("Creando mundo...");
+    if (!multiplayerRef.current) {
+      multiplayerRef.current = new MultiplayerManager();
+      multiplayerRef.current.onStatusChange = (s) => setMpStatus(s);
+      multiplayerRef.current.onError = (e) => { setMpError(e); setMpStatus(""); };
+      multiplayerRef.current.onConnected = () => setMpConnected(true);
+      // When a client joins, send them the world seed
+      multiplayerRef.current.onPlayerJoined = (clientId) => {
+        const cfg = worldConfigRef.current;
+        if (cfg) {
+          const conn = multiplayerRef.current!.hostConnections.get(clientId);
+          if (conn) {
+            multiplayerRef.current!.sendWorldSeed(conn, cfg.seed, cfg.name, cfg.mode);
+          }
+        }
+      };
+    }
+    try {
+      await multiplayerRef.current.hostWorld();
+      setMpShareCode(multiplayerRef.current.shareCode);
+      setShowHostPanel(true);
+      showHostPanelRef.current = true;
+    } catch (e: any) {
+      setMpError(e?.message || "Error al abrir el mundo");
+    }
+  }, []);
+
+  // Client: join a host's world using their code
+  const joinMultiplayer = useCallback(async (code: string) => {
+    setMpError("");
+    setMpStatus("Conectando...");
+    if (!multiplayerRef.current) {
+      multiplayerRef.current = new MultiplayerManager();
+      multiplayerRef.current.onStatusChange = (s) => setMpStatus(s);
+      multiplayerRef.current.onError = (e) => { setMpError(e); setMpStatus(""); };
+      multiplayerRef.current.onConnected = () => setMpConnected(true);
+      // When we receive a world-seed from host, start the world
+      multiplayerRef.current.onMessage = (msg: MultiplayerMessage) => {
+        if (msg.kind === "world-seed") {
+          const config: WorldConfig = {
+            name: msg.name,
+            seed: msg.seed,
+            mode: msg.mode as GameMode,
+          };
+          worldConfigRef.current = config;
+          setCurrentWorld(config);
+          setScreen("playing");
+          setIsLoaded(false);
+          setIsDead(false);
+          inventoryRef.current.clear();
+          pendingLoadRef.current = null;
+          pendingXpLoadRef.current = null;
+          pendingArmorLoadRef.current = null;
+          xpStateRef.current.reset();
+          armorStateRef.current = emptyArmor();
+        }
+      };
+    }
+    try {
+      await multiplayerRef.current.joinWorld(code);
+      setMpShareCode(code);
+      setMpConnected(true);
+    } catch (e: any) {
+      setMpError(e?.message || "Error al conectar");
+      setMpStatus("");
+    }
+  }, []);
+
+  // Disconnect from multiplayer
+  const disconnectMultiplayer = useCallback(() => {
+    if (multiplayerRef.current) {
+      multiplayerRef.current.disconnect();
+    }
+    setMpConnected(false);
+    setMpShareCode("");
+    setMpStatus("");
+    setShowHostPanel(false);
+    showHostPanelRef.current = false;
+  }, []);
+
   const handleRespawn = useCallback(() => {
     // On respawn, keep XP and armor at current state (like Minecraft keeps XP level)
     // Save them before the screen change so the game effect can restore them.
@@ -1893,6 +1993,19 @@ export default function MinecraftGame() {
       <CreateWorldScreen
         onCancel={() => setScreen("main-menu")}
         onCreate={startWorld}
+      />
+    );
+  }
+  if (screen === "multiplayer") {
+    return (
+      <MultiplayerScreen
+        onCancel={() => setScreen("main-menu")}
+        onJoin={(code) => {
+          // Join the world with the given code
+          joinMultiplayer(code);
+        }}
+        externalStatus={mpStatus}
+        externalError={mpError}
       />
     );
   }
@@ -2131,9 +2244,72 @@ export default function MinecraftGame() {
                 <MCMenuButton onClick={handleSaveWorld} color="gray" className="flex-1 text-sm">Guardar</MCMenuButton>
                 <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm">Configuración</MCMenuButton>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 mb-2">
                 <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
+                {/* Multiplayer: open current world to other players */}
+                {mpConnected ? (
+                  <MCMenuButton
+                    onClick={() => { setShowHostPanel(true); showHostPanelRef.current = true; }}
+                    color="gray"
+                    className="flex-1 text-sm"
+                  >
+                    Multijugador ✓
+                  </MCMenuButton>
+                ) : (
+                  <MCMenuButton
+                    onClick={hostMultiplayer}
+                    color="gray"
+                    className="flex-1 text-sm"
+                  >
+                    Abrir mundo
+                  </MCMenuButton>
+                )}
               </div>
+              {/* Host panel — shown after hostMultiplayer succeeds */}
+              {showHostPanel && (
+                <div className="mt-3 p-3" style={{
+                  backgroundColor: "rgba(0,0,0,0.7)",
+                  borderTop: "3px solid rgba(110,110,120,0.9)",
+                  borderLeft: "3px solid rgba(110,110,120,0.9)",
+                  borderBottom: "3px solid rgba(0,0,0,0.95)",
+                  borderRight: "3px solid rgba(0,0,0,0.95)",
+                }}>
+                  <p className="text-white font-mono text-xs text-center mb-2" style={{ textShadow: "1px 1px 0 #000" }}>
+                    Comparte este código con tus amigos:
+                  </p>
+                  <p className="text-yellow-300 font-mono font-black text-3xl text-center tracking-[0.3em] mb-2" style={{ textShadow: "2px 2px 0 #000" }}>
+                    {mpShareCode}
+                  </p>
+                  {mpStatus && (
+                    <p className="text-green-400 font-mono text-[10px] text-center mb-2" style={{ textShadow: "1px 1px 0 #000" }}>
+                      {mpStatus}
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <MCMenuButton
+                      onClick={() => {
+                        navigator.clipboard?.writeText(mpShareCode).catch(() => {});
+                      }}
+                      color="gray"
+                      className="flex-1 text-xs"
+                    >
+                      Copiar
+                    </MCMenuButton>
+                    <MCMenuButton
+                      onClick={disconnectMultiplayer}
+                      color="gray"
+                      className="flex-1 text-xs"
+                    >
+                      Cerrar mundo
+                    </MCMenuButton>
+                  </div>
+                </div>
+              )}
+              {mpError && (
+                <p className="mt-2 text-center text-xs text-red-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>
+                  ⚠ {mpError}
+                </p>
+              )}
               {saveMessage && <p className="mt-3 text-center text-xs text-green-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>{saveMessage}</p>}
               <p className="mt-2 text-center text-xs text-stone-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>
                 {mode === "creative" ? "Creativo" : "Survival"} · Pulsa Esc para reanudar
@@ -2795,6 +2971,118 @@ function ControlRow({ keys, desc }: { keys: string; desc: string }) {
     <div className="flex items-center gap-3">
       <span className="font-mono font-bold text-yellow-300 min-w-[140px] text-xs" style={{ textShadow: "1px 1px 0 #000" }}>{keys}</span>
       <span className="text-stone-300 text-xs font-mono flex-1">{desc}</span>
+    </div>
+  );
+}
+
+// =============== MULTIPLAYER SCREEN (enter join code) ===============
+function MultiplayerScreen({
+  onCancel,
+  onJoin,
+  externalStatus,
+  externalError,
+}: {
+  onCancel: () => void;
+  onJoin: (code: string) => void;
+  externalStatus?: string;
+  externalError?: string;
+}) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [connecting, setConnecting] = useState(false);
+
+  // Display external status/error from the parent (live updates during connection)
+  const status = externalStatus || "";
+  const displayError = externalError || error;
+
+  const handleJoin = () => {
+    const trimmed = code.trim().toUpperCase();
+    if (trimmed.length !== 6) {
+      setError("El código debe tener 6 caracteres.");
+      return;
+    }
+    setError("");
+    setConnecting(true);
+    onJoin(trimmed);
+  };
+
+  return (
+    <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
+      {/* Background */}
+      <div className="absolute inset-0" style={{
+        backgroundImage: `url(/IMG_2423.jpeg), url(/IMG_2398.jpeg)`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        opacity: 0.55,
+      }} />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-black/50 to-black/80" />
+
+      <div className="relative z-10 h-full flex flex-col items-center justify-center px-4">
+        <h2 className="text-3xl sm:text-4xl font-black text-white mb-2 text-center" style={{
+          fontFamily: "monospace",
+          textShadow: "0 0 30px rgba(80,140,255,0.5), 3px 3px 0 #0a0a1a, 5px 5px 0 rgba(0,0,0,0.5)",
+          letterSpacing: "0.05em",
+        }}>
+          Multijugador
+        </h2>
+        <p className="text-stone-300 text-sm font-mono mb-6 text-center" style={{ textShadow: "1px 1px 0 #000" }}>
+          Ingresa el código de 6 caracteres que te compartió el host.
+        </p>
+
+        <div className="w-full max-w-xs">
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6))}
+            onKeyDown={(e) => { if (e.key === "Enter" && !connecting) handleJoin(); }}
+            placeholder="ABCDEF"
+            maxLength={6}
+            disabled={connecting}
+            className="w-full text-center text-3xl font-black font-mono text-white tracking-[0.3em] py-3 px-4 mb-4 outline-none"
+            style={{
+              backgroundColor: "rgba(0,0,0,0.7)",
+              borderTop: "3px solid rgba(110,110,120,0.9)",
+              borderLeft: "3px solid rgba(110,110,120,0.9)",
+              borderBottom: "3px solid rgba(0,0,0,0.95)",
+              borderRight: "3px solid rgba(0,0,0,0.95)",
+              imageRendering: "pixelated",
+              textShadow: "2px 2px 0 #000",
+            }}
+          />
+
+          {displayError && (
+            <p className="text-red-400 text-xs font-mono text-center mb-3" style={{ textShadow: "1px 1px 0 #000" }}>
+              ⚠ {displayError}
+            </p>
+          )}
+          {status && !displayError && (
+            <p className="text-yellow-300 text-xs font-mono text-center mb-3" style={{ textShadow: "1px 1px 0 #000" }}>
+              {status}
+            </p>
+          )}
+
+          <div className="flex flex-col gap-2">
+            <MCMenuButton
+              onClick={handleJoin}
+              color="gray"
+              className={connecting ? "opacity-50 cursor-not-allowed" : ""}
+            >
+              {connecting ? "Conectando..." : "Conectar"}
+            </MCMenuButton>
+            <MCMenuButton
+              onClick={() => { if (!connecting) onCancel(); }}
+              color="gray"
+              className={connecting ? "opacity-50 cursor-not-allowed" : ""}
+            >
+              ← Volver
+            </MCMenuButton>
+          </div>
+        </div>
+
+        <p className="absolute bottom-2 left-4 text-white/35 text-xs font-mono">
+          P2P vía PeerJS · Sin servidor dedicado
+        </p>
+      </div>
     </div>
   );
 }
