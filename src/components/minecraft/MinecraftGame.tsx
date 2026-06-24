@@ -139,8 +139,18 @@ export default function MinecraftGame() {
     fuelProgress: number;
   }>({ input: null, fuel: null, output: null, smeltProgress: 0, fuelProgress: 0 });
   const [showControls, setShowControls] = useState(false);
+  const [showConfig, setShowConfig] = useState(false);
+  const showControlsRef = useRef(false);
+  const showConfigRef = useRef(false);
   const [inputMode, setInputMode] = useState<InputMode>("keyboard");
   const inputModeRef = useRef<InputMode>("keyboard");
+  // Sensitivity settings (persisted in refs so the game loop reads them live)
+  const [mouseSens, setMouseSens] = useState(2.2); // 0.5–5.0, default 2.2 (×0.001 in use)
+  const [controllerSensX, setControllerSensX] = useState(2.0); // 0.3–5.0, default 2.0
+  const [controllerSensY, setControllerSensY] = useState(2.0); // 0.3–5.0, default 2.0
+  const mouseSensRef = useRef(2.2);
+  const controllerSensXRef = useRef(2.0);
+  const controllerSensYRef = useRef(2.0);
   const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
@@ -1148,7 +1158,19 @@ export default function MinecraftGame() {
           setTimeout(() => setDragonNotification(""), 3500);
         }
       }
-      if (e.code === "Escape") document.exitPointerLock();
+      if (e.code === "Escape") {
+        // If config or controls panel is open, close it instead of exiting pointer lock
+        if (showConfigRef.current || showControlsRef.current) {
+          setShowConfig(false);
+          setShowControls(false);
+          showConfigRef.current = false;
+          showControlsRef.current = false;
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        document.exitPointerLock();
+      }
       if (e.code === "Space" || e.code === "ArrowUp" || e.code === "ArrowDown") {
         e.preventDefault();
       }
@@ -1328,9 +1350,10 @@ export default function MinecraftGame() {
         player.setKey("ShiftLeft", gp.ls);
         // Fly down in creative: LT (left trigger, hold)
         player.setKey("ControlLeft", gp.lt);
-        // Look: right stick
-        const lookSens = 400;
-        player.addMouseDelta(gp.lookX * lookSens, gp.lookY * lookSens);
+        // Look: right stick — uses live controller sensitivity
+        const lookSensX = controllerSensXRef.current * 200;
+        const lookSensY = controllerSensYRef.current * 200;
+        player.addMouseDelta(gp.lookX * lookSensX, gp.lookY * lookSensY);
 
         // Hotbar: RB = next, LB = previous (edge detected)
         if (wasButtonPressed(gp, 5)) {
@@ -1407,7 +1430,7 @@ export default function MinecraftGame() {
         : (document.pointerLockElement === renderer.domElement && !player.isDead());
       if (canUpdate) {
         if (isDragonMounted) {
-          const sensitivity = 0.0022;
+          const sensitivity = mouseSensRef.current * 0.001;
           player.yaw -= player.mouseDeltaX * sensitivity;
           player.pitch -= player.mouseDeltaY * sensitivity;
           const maxPitch = Math.PI / 2 - 0.01;
@@ -2089,7 +2112,7 @@ export default function MinecraftGame() {
       {/* Pause overlay — Minecraft-style menu */}
       {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && (
         <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.78)", backdropFilter: "blur(2px)" }}>
-          {!showControls ? (
+          {!showControls && !showConfig ? (
             <div className="max-w-sm w-full mx-4" style={{ imageRendering: "pixelated" }}>
               <h1 className="text-center text-3xl sm:text-4xl font-black mb-6 text-white" style={{
                 fontFamily: "monospace",
@@ -2099,20 +2122,100 @@ export default function MinecraftGame() {
               }}>
                 {currentWorld?.name || "JEFFCRAFT"}
               </h1>
-              <div className="flex flex-col gap-2 mb-3">
-                <MCMenuButton onClick={handleStartClick} color="green">Continuar</MCMenuButton>
-                <MCMenuButton onClick={handleExitToMenu} color="red">Salir del mundo</MCMenuButton>
+              <div className="flex flex-col gap-2 mb-2">
+                <MCMenuButton onClick={handleStartClick} color="gray">Continuar</MCMenuButton>
+                <MCMenuButton onClick={handleExitToMenu} color="gray">Salir del mundo</MCMenuButton>
+              </div>
+              <div className="flex gap-2 mb-2">
+                <MCMenuButton onClick={handleSaveWorld} color="gray" className="flex-1 text-sm">Guardar</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm">Configuración</MCMenuButton>
               </div>
               <div className="flex gap-2">
-                <MCMenuButton onClick={handleSaveWorld} color="blue" className="flex-1 text-sm">Guardar</MCMenuButton>
-                <MCMenuButton onClick={() => setShowControls(true)} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
               </div>
               {saveMessage && <p className="mt-3 text-center text-xs text-green-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>{saveMessage}</p>}
               <p className="mt-2 text-center text-xs text-stone-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>
                 {mode === "creative" ? "Creativo" : "Survival"} · Pulsa Esc para reanudar
               </p>
             </div>
+          ) : showConfig ? (
+            /* ===== CONFIGURATION PANEL (sensitivity sliders) ===== */
+            <div className="max-w-md w-full mx-4" style={{ imageRendering: "pixelated" }}>
+              <h2 className="text-center text-2xl font-black mb-4 text-white" style={{
+                fontFamily: "monospace",
+                textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)",
+                letterSpacing: "0.05em",
+              }}>Configuración</h2>
+              <div className="text-left p-4 mb-4 space-y-4" style={{
+                backgroundColor: "rgba(0,0,0,0.7)",
+                borderTop: "3px solid rgba(110,110,120,0.9)",
+                borderLeft: "3px solid rgba(110,110,120,0.9)",
+                borderBottom: "3px solid rgba(0,0,0,0.95)",
+                borderRight: "3px solid rgba(0,0,0,0.95)",
+                boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.1)",
+              }}>
+                {/* Mouse sensitivity */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-white font-mono text-xs font-bold">Sensibilidad del ratón</span>
+                    <span className="text-yellow-300 font-mono text-xs font-bold">{mouseSens.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range" min={0.5} max={5.0} step={0.1}
+                    value={mouseSens}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setMouseSens(v);
+                      mouseSensRef.current = v;
+                    }}
+                    className="w-full"
+                    style={{ accentColor: "#6b6b6b" }}
+                  />
+                </div>
+                {/* Controller X sensitivity */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-white font-mono text-xs font-bold">Sensibilidad control (X)</span>
+                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensX.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range" min={0.3} max={5.0} step={0.1}
+                    value={controllerSensX}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setControllerSensX(v);
+                      controllerSensXRef.current = v;
+                    }}
+                    className="w-full"
+                    style={{ accentColor: "#6b6b6b" }}
+                  />
+                </div>
+                {/* Controller Y sensitivity */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <span className="text-white font-mono text-xs font-bold">Sensibilidad control (Y)</span>
+                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensY.toFixed(1)}</span>
+                  </div>
+                  <input
+                    type="range" min={0.3} max={5.0} step={0.1}
+                    value={controllerSensY}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setControllerSensY(v);
+                      controllerSensYRef.current = v;
+                    }}
+                    className="w-full"
+                    style={{ accentColor: "#6b6b6b" }}
+                  />
+                </div>
+                <p className="text-stone-400 text-[10px] font-mono text-center pt-1">
+                  Los cambios se aplican inmediatamente. Cierra con Esc o el botón.
+                </p>
+              </div>
+              <MCMenuButton onClick={() => { setShowConfig(false); showConfigRef.current = false; }} color="gray">← Volver</MCMenuButton>
+            </div>
           ) : (
+            /* ===== CONTROLS PANEL (existing) ===== */
             <div className="max-w-md w-full mx-4" style={{ imageRendering: "pixelated" }}>
               <h2 className="text-center text-2xl font-black mb-4 text-white" style={{
                 fontFamily: "monospace",
@@ -2203,7 +2306,7 @@ export default function MinecraftGame() {
                   ⚠ No se detectó un control. Conecta un control Xbox.
                 </p>
               )}
-              <MCMenuButton onClick={() => setShowControls(false)} color="green">← Volver</MCMenuButton>
+              <MCMenuButton onClick={() => { setShowControls(false); showControlsRef.current = false; }} color="gray">← Volver</MCMenuButton>
             </div>
           )}
         </div>
@@ -2619,13 +2722,14 @@ function MainMenu({
           </div>
         )}
 
-        {/* Splash text at bottom-right (yellow, bouncing) */}
+        {/* Splash text at top-center (yellow, bouncing) — positioned to blend with image title */}
         <span
-          className="absolute bottom-4 right-6 text-yellow-300 font-bold text-sm sm:text-lg font-mono pointer-events-none"
+          className="absolute top-20 left-1/2 -translate-x-1/2 text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
           style={{
-            transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
-            textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
+            transform: `translateX(-50%) rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
+            textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 12px rgba(255,220,0,0.5)",
             transition: "transform 0.1s",
+            letterSpacing: "0.05em",
           }}
         >
           {SPLASH_TEXTS[splashIndex]}
