@@ -145,12 +145,13 @@ export default function MinecraftGame() {
   const [inputMode, setInputMode] = useState<InputMode>("keyboard");
   const inputModeRef = useRef<InputMode>("keyboard");
   // Sensitivity settings (persisted in refs so the game loop reads them live)
-  const [mouseSens, setMouseSens] = useState(2.2); // 0.5–5.0, default 2.2 (×0.001 in use)
-  const [controllerSensX, setControllerSensX] = useState(2.0); // 0.3–5.0, default 2.0
-  const [controllerSensY, setControllerSensY] = useState(2.0); // 0.3–5.0, default 2.0
-  const mouseSensRef = useRef(2.2);
-  const controllerSensXRef = useRef(2.0);
-  const controllerSensYRef = useRef(2.0);
+  // Wider ranges + lower minimums for better customization
+  const [mouseSens, setMouseSens] = useState(1.5); // 0.1–10.0, default 1.5 (×0.001 in use)
+  const [controllerSensX, setControllerSensX] = useState(1.0); // 0.1–10.0, default 1.0
+  const [controllerSensY, setControllerSensY] = useState(1.0); // 0.1–10.0, default 1.0
+  const mouseSensRef = useRef(1.5);
+  const controllerSensXRef = useRef(1.0);
+  const controllerSensYRef = useRef(1.0);
   const [inventoryVersion, setInventoryVersion] = useState(0); // force re-render of hotbar/inventory
 
   const selectedSlotRef = useRef(0);
@@ -2158,10 +2159,10 @@ export default function MinecraftGame() {
                 <div>
                   <div className="flex justify-between mb-1">
                     <span className="text-white font-mono text-xs font-bold">Sensibilidad del ratón</span>
-                    <span className="text-yellow-300 font-mono text-xs font-bold">{mouseSens.toFixed(1)}</span>
+                    <span className="text-yellow-300 font-mono text-xs font-bold">{mouseSens.toFixed(2)}</span>
                   </div>
                   <input
-                    type="range" min={0.5} max={5.0} step={0.1}
+                    type="range" min={0.1} max={10.0} step={0.05}
                     value={mouseSens}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value);
@@ -2176,10 +2177,10 @@ export default function MinecraftGame() {
                 <div>
                   <div className="flex justify-between mb-1">
                     <span className="text-white font-mono text-xs font-bold">Sensibilidad control (X)</span>
-                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensX.toFixed(1)}</span>
+                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensX.toFixed(2)}</span>
                   </div>
                   <input
-                    type="range" min={0.3} max={5.0} step={0.1}
+                    type="range" min={0.1} max={10.0} step={0.05}
                     value={controllerSensX}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value);
@@ -2194,10 +2195,10 @@ export default function MinecraftGame() {
                 <div>
                   <div className="flex justify-between mb-1">
                     <span className="text-white font-mono text-xs font-bold">Sensibilidad control (Y)</span>
-                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensY.toFixed(1)}</span>
+                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensY.toFixed(2)}</span>
                   </div>
                   <input
-                    type="range" min={0.3} max={5.0} step={0.1}
+                    type="range" min={0.1} max={10.0} step={0.05}
                     value={controllerSensY}
                     onChange={(e) => {
                       const v = parseFloat(e.target.value);
@@ -2209,7 +2210,7 @@ export default function MinecraftGame() {
                   />
                 </div>
                 <p className="text-stone-400 text-[10px] font-mono text-center pt-1">
-                  Los cambios se aplican inmediatamente. Cierra con Esc o el botón.
+                  Rango: 0.1 (muy lento) – 10.0 (muy rápido). Los cambios se aplican inmediatamente.
                 </p>
               </div>
               <MCMenuButton onClick={() => { setShowConfig(false); showConfigRef.current = false; }} color="gray">← Volver</MCMenuButton>
@@ -2732,9 +2733,9 @@ function MainMenu({
           </div>
         )}
 
-        {/* Splash text at top-center (yellow, bouncing) — slightly left and lower to blend with image title */}
+        {/* Splash text — positioned at right side of logo, blended with title image */}
         <span
-          className="absolute top-28 left-[42%] text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
+          className="absolute top-[30%] left-[58%] text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
           style={{
             transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
             textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 12px rgba(255,220,0,0.5)",

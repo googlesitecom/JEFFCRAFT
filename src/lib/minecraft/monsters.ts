@@ -522,7 +522,7 @@ export class MonsterManager {
   world: World;
   scene: THREE.Scene;
   spawnTimer: number = 0;
-  maxMonsters: number = 15;
+  maxMonsters: number = 8; // reduced from 15 — too many were spawning
 
   constructor(world: World, scene: THREE.Scene) {
     this.world = world;
@@ -532,11 +532,11 @@ export class MonsterManager {
   update(dt: number, playerX: number, playerY: number, playerZ: number, isNight: boolean): { damage: number; fromX: number; fromZ: number }[] {
     const damages: { damage: number; fromX: number; fromZ: number }[] = [];
 
-    // Spawn at night
+    // Spawn at night — slower rate (was 2-5s, now 5-10s)
     if (isNight) {
       this.spawnTimer -= dt;
       if (this.spawnTimer <= 0 && this.monsters.length < this.maxMonsters) {
-        this.spawnTimer = 2 + Math.random() * 3;
+        this.spawnTimer = 5 + Math.random() * 5;
         this.spawnMonster(playerX, playerZ);
       }
     }
@@ -584,6 +584,20 @@ export class MonsterManager {
       }
     }
     if (surfaceY < 0) return;
+
+    // === TREE AVOIDANCE ===
+    const surfaceBlock = this.world.getBlock(x, surfaceY, z);
+    if (surfaceBlock === BlockType.Wood || surfaceBlock === BlockType.Leaves) return;
+    // Require 2 blocks of air above spawn point
+    if (this.world.getBlock(x, surfaceY + 2, z) !== BlockType.Air) return;
+    // No leaves in 3x3 area above
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dy = 1; dy <= 2; dy++) {
+          if (this.world.getBlock(x + dx, surfaceY + dy, z + dz) === BlockType.Leaves) return;
+        }
+      }
+    }
 
     const types: MonsterType[] = ["zombie", "zombie", "spider"]; // zombies more common
     const type = types[Math.floor(Math.random() * types.length)];

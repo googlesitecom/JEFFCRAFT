@@ -123,6 +123,11 @@ export class Animal {
   legBones: THREE.Object3D[] = [];
   headBone: THREE.Object3D | null = null;
   idleTime: number = 0;
+  // Anti-spin: cooldown after turning so the animal commits to a direction
+  turnCooldown: number = 0;
+  // Track last position to detect if stuck (spinning in place)
+  lastPos: THREE.Vector3 = new THREE.Vector3();
+  stuckTimer: number = 0;
 
   constructor(type: AnimalType, world: World, position: THREE.Vector3) {
     this.type = type;
@@ -266,6 +271,9 @@ export class Animal {
     const halfD = this.def.depth / 2;
     const bodyHeight = this.def.height;
 
+    // Decrement turn cooldown
+    if (this.turnCooldown > 0) this.turnCooldown -= dt;
+
     // --- X axis ---
     const oldX = this.position.x;
     this.position.x += this.velocity.x * dt;
@@ -275,9 +283,10 @@ export class Animal {
       // Try to step up 1 block (jump over obstacle)
       if (this.canStepUpFrom(halfW, halfD, bodyHeight) && this.velocity.y <= 0) {
         this.velocity.y = 7;
-      } else {
-        // Can't step up → turn 90-180° (not random, to avoid jitter)
+      } else if (this.turnCooldown <= 0) {
+        // Can't step up → turn 90-180° (with cooldown to prevent spin)
         this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
+        this.turnCooldown = 1.5; // 1.5s cooldown before next turn
       }
     }
 
@@ -289,8 +298,9 @@ export class Animal {
       this.velocity.z = 0;
       if (this.canStepUpFrom(halfW, halfD, bodyHeight) && this.velocity.y <= 0) {
         this.velocity.y = 7;
-      } else {
+      } else if (this.turnCooldown <= 0) {
         this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
+        this.turnCooldown = 1.5;
       }
     }
 
@@ -327,7 +337,7 @@ export class Animal {
     }
 
     // === AVOID walking off cliffs: if moving forward and the block 2 ahead+below is air, turn ===
-    if (moveSpeed > 0 && this.velocity.y === 0) {
+    if (moveSpeed > 0 && this.velocity.y === 0 && this.turnCooldown <= 0) {
       const aheadX = Math.floor(this.position.x + forward.x * 1.2);
       const aheadZ = Math.floor(this.position.z + forward.z * 1.2);
       const belowAheadY = Math.floor(this.position.y) - 1;
@@ -336,6 +346,7 @@ export class Animal {
         this.yaw += (Math.random() < 0.5 ? 1 : -1) * (Math.PI / 2 + Math.random() * 0.5);
         this.velocity.x = 0;
         this.velocity.z = 0;
+        this.turnCooldown = 1.5;
       }
     }
 
@@ -343,6 +354,30 @@ export class Animal {
       this.walkAnimTime += dt * 8;
     }
     this.idleTime += dt;
+
+    // === STUCK DETECTION ===
+    // If the animal hasn't moved more than 0.3 blocks in 2s, force a new direction
+    const movedDist = Math.sqrt(
+      (this.position.x - this.lastPos.x) ** 2 +
+      (this.position.z - this.lastPos.z) ** 2
+    );
+    if (moveSpeed > 0) {
+      if (movedDist < 0.05) {
+        this.stuckTimer += dt;
+        if (this.stuckTimer > 2) {
+          // Force a 180° turn to escape
+          this.yaw += Math.PI + (Math.random() - 0.5) * 0.5;
+          this.turnCooldown = 0.5;
+          this.stuckTimer = 0;
+          this.lastPos.copy(this.position);
+        }
+      } else {
+        this.stuckTimer = 0;
+        this.lastPos.copy(this.position);
+      }
+    } else {
+      this.stuckTimer = 0;
+    }
 
     // Update model position and rotation
     if (this.model) {
