@@ -108,15 +108,15 @@ export function FurnaceUI({
     return () => clearInterval(interval);
   }, []); // empty deps — uses ref directly
 
-  const getIcon = (id: number): string => {
+  const getIcon = (id: number): string | undefined => {
     if (id < 100) {
       const def = BLOCKS[id as BlockType];
-      if (!def) return "";
-      if (id === BlockType.Grass) return iconUrls["grass_side"] ?? "";
-      return iconUrls[def.textures.side] ?? iconUrls[def.textures.top] ?? "";
+      if (!def) return undefined;
+      if (id === BlockType.Grass) return iconUrls["grass_side"] || undefined;
+      return iconUrls[def.textures.side] || iconUrls[def.textures.top] || undefined;
     }
     const def = ITEMS[id as ItemType];
-    return def ? iconUrls[def.icon] ?? "" : "";
+    return def ? (iconUrls[def.icon] || undefined) : undefined;
   };
 
   const getName = (id: number): string => {
@@ -269,16 +269,21 @@ export function FurnaceUI({
         } bg-stone-800/80`}
         style={{ imageRendering: "pixelated" }}
       >
-        {stack && (
-          <>
-            <img src={getIcon(stack.id)} alt={getName(stack.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
-            {stack.count > 1 && (
-              <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
-                {stack.count}
-              </span>
-            )}
-          </>
-        )}
+        {stack && (() => {
+          const icon = getIcon(stack.id);
+          return (
+            <>
+              {icon && (
+                <img src={icon} alt={getName(stack.id)} className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+              )}
+              {stack.count > 1 && (
+                <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
+                  {stack.count}
+                </span>
+              )}
+            </>
+          );
+        })()}
       </div>
     );
   };
@@ -392,7 +397,12 @@ export function FurnaceUI({
             style={{ left: mousePos.x, top: mousePos.y, transform: "translate(-50%, -50%)" }}
           >
             <div className="w-12 h-12 border-2 border-yellow-400 bg-stone-800/90 flex items-center justify-center relative" style={{ imageRendering: "pixelated" }}>
-              <img src={getIcon(heldItem.id)} alt="" className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+              {(() => {
+                const icon = getIcon(heldItem.id);
+                return icon ? (
+                  <img src={icon} alt="" className="w-10 h-10" style={{ imageRendering: "pixelated" }} draggable={false} />
+                ) : null;
+              })()}
               {heldItem.count > 1 && (
                 <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold" style={{ textShadow: "1px 1px 0 #000" }}>
                   {heldItem.count}

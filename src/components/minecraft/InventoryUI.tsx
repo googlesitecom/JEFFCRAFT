@@ -51,16 +51,16 @@ export function InventoryUI({
 
   const result = computeResult(craftGrid);
 
-  // Get icon URL for any id
-  const getIcon = (id: number): string => {
+  // Get icon URL for any id (returns undefined when missing, to avoid empty src warnings)
+  const getIcon = (id: number): string | undefined => {
     if (id < 100) {
       const def = BLOCKS[id as BlockType];
-      if (!def) return "";
-      if (id === BlockType.Grass) return iconUrls["grass_side"] ?? "";
-      return iconUrls[def.textures.side] ?? iconUrls[def.textures.top] ?? "";
+      if (!def) return undefined;
+      if (id === BlockType.Grass) return iconUrls["grass_side"] || undefined;
+      return iconUrls[def.textures.side] || iconUrls[def.textures.top] || undefined;
     }
     const def = ITEMS[id as ItemType];
-    return def ? iconUrls[def.icon] ?? "" : "";
+    return def ? (iconUrls[def.icon] || undefined) : undefined;
   };
 
   const getName = (id: number): string => {
@@ -425,15 +425,18 @@ export function InventoryUI({
         }}
         title={stack ? getName(stack.id) : undefined}
       >
-        {stack && (
-          <>
-            <img
-              src={getIcon(stack.id)}
-              alt={getName(stack.id)}
-              className="w-9 h-9 relative z-10"
-              style={{
-                imageRendering: "pixelated",
-                filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
+        {stack && (() => {
+          const icon = getIcon(stack.id);
+          if (!icon) return null;
+          return (
+            <>
+              <img
+                src={icon}
+                alt={getName(stack.id)}
+                className="w-9 h-9 relative z-10"
+                style={{
+                  imageRendering: "pixelated",
+                  filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
               }}
               draggable={false}
             />
@@ -456,8 +459,9 @@ export function InventoryUI({
                 />
               </div>
             )}
-          </>
-        )}
+            </>
+          );
+        })()}
       </div>
     );
   };
@@ -554,10 +558,13 @@ export function InventoryUI({
                       }}
                       title={equippedId !== null ? ITEMS[equippedId as ItemType]?.name ?? "Armor" : (canEquip ? `Equipar ${slot}` : slot)}
                     >
-                      {equippedId !== null && (
+                      {equippedId !== null && (() => {
+                        const icon = getIcon(equippedId as number);
+                        if (!icon) return null;
+                        return (
                         <>
                           <img
-                            src={getIcon(equippedId as number)}
+                            src={icon}
                             alt={ITEMS[equippedId as ItemType]?.name ?? "armor"}
                             className="w-9 h-9 relative z-10"
                             style={{
@@ -587,7 +594,8 @@ export function InventoryUI({
                             />
                           </div>
                         </>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -660,10 +668,15 @@ export function InventoryUI({
                       boxShadow: "inset 0 0 0 1px rgba(255,247,168,0.4), 0 0 8px rgba(255,205,48,0.4)",
                     }}
                   >
-                    <img src={getIcon(result.id)} alt={getName(result.id)} className="w-9 h-9 relative z-10" style={{
-                      imageRendering: "pixelated",
-                      filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
-                    }} draggable={false} />
+                    {(() => {
+                      const icon = getIcon(result.id);
+                      return icon ? (
+                        <img src={icon} alt={getName(result.id)} className="w-9 h-9 relative z-10" style={{
+                          imageRendering: "pixelated",
+                          filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
+                        }} draggable={false} />
+                      ) : null;
+                    })()}
                     {result.count > 1 && (
                       <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold z-20" style={{
                         textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
@@ -705,6 +718,7 @@ export function InventoryUI({
                 {allRecipes.map((recipe, i) => {
                   const canCraft = craftableIds.has(recipe.result.id + "_" + recipe.result.count);
                   const needsTable = recipe.requiresTable && !isCraftingTable;
+                  const recipeIcon = getIcon(recipe.result.id);
                   return (
                     <button
                       key={i}
@@ -722,10 +736,14 @@ export function InventoryUI({
                       }}
                       title={getName(recipe.result.id) + (needsTable ? " (requiere mesa)" : canCraft ? "" : " (sin materiales)")}
                     >
-                      <img src={getIcon(recipe.result.id)} alt={getName(recipe.result.id)} className="w-9 h-9 relative z-10" style={{
-                        imageRendering: "pixelated",
-                        filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
-                      }} draggable={false} />
+                      {recipeIcon ? (
+                        <img src={recipeIcon} alt={getName(recipe.result.id)} className="w-9 h-9 relative z-10" style={{
+                          imageRendering: "pixelated",
+                          filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
+                        }} draggable={false} />
+                      ) : (
+                        <span className="text-stone-500 text-xs font-mono font-bold">?</span>
+                      )}
                       {canCraft && !needsTable && (
                         <span className="absolute top-0 right-0 w-2 h-2 bg-[#6ade40]" style={{ boxShadow: "0 0 4px rgba(106,222,64,0.8)" }} />
                       )}
@@ -852,10 +870,15 @@ export function InventoryUI({
               borderRight: "2px solid #ffcd30",
               boxShadow: "0 0 12px rgba(255,205,48,0.6)",
             }}>
-              <img src={getIcon(heldItem.id)} alt="" className="w-9 h-9 relative z-10" style={{
-                imageRendering: "pixelated",
-                filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
-              }} draggable={false} />
+              {(() => {
+                const icon = getIcon(heldItem.id);
+                return icon ? (
+                  <img src={icon} alt="" className="w-9 h-9 relative z-10" style={{
+                    imageRendering: "pixelated",
+                    filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))",
+                  }} draggable={false} />
+                ) : null;
+              })()}
               {heldItem.count > 1 && (
                 <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold z-20" style={{
                   textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000",
