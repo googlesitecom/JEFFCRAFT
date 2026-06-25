@@ -293,6 +293,6 @@ export class MultiplayerManager {
   }
 
   isConnected(): boolean {
-    return this.peer !== null && (this.role === "host" ? this.hostConnections.size > 0 : this.clientConnection !== null);
+    return this.peer !== null && this.role !== null;
   }
 }

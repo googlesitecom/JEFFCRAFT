@@ -35,8 +35,8 @@ export const MONSTERS: Record<MonsterType, MonsterDef> = {
     width: 0.6,
     height: 1.8,
     // Zombie.glb: feet at Y=-4 in model space, scale 0.08 → feet at Y=-0.32. Offset +0.32.
-    modelScale: 0.08,
-    modelYOffset: 0.32,
+    modelScale: 0.13,
+    modelYOffset: 0.45,
     modelRotationOffset: Math.PI,
     burnsInSunlight: true,
   },
@@ -51,8 +51,8 @@ export const MONSTERS: Record<MonsterType, MonsterDef> = {
     width: 1.0,
     height: 0.6,
     // Spider.glb: feet at Y=-4 in model space, scale 0.06 → feet at Y=-0.24. Offset +0.24.
-    modelScale: 0.06,
-    modelYOffset: 0.24,
+    modelScale: 0.10,
+    modelYOffset: 0.35,
     modelRotationOffset: Math.PI,
     burnsInSunlight: false,
   },

@@ -954,18 +954,15 @@ export default function MinecraftGame() {
       const existing = world.getBlock(px, py, pz);
       if (existing !== BlockType.Air && existing !== BlockType.Water) return false;
 
-      // In survival: use the selected hotbar item (must be a placeable block)
-      // In creative: use HOTBAR_BLOCKS
+      // In survival AND creative: use the selected hotbar item from inventory
       let blockType: BlockType;
+      const selected = inventoryRef.current.getSelected();
+      if (!selected || selected.id >= 100) return false;
+      blockType = selected.id as BlockType;
+      // Remove one from inventory (in creative, items are infinite — don't consume)
       if (mode === "survival") {
-        const selected = inventoryRef.current.getSelected();
-        if (!selected || selected.id >= 100) return false; // no selected item or it's a tool/food
-        blockType = selected.id as BlockType;
-        // Remove one from inventory
         if (!inventoryRef.current.removeSelected(1)) return false;
         setInventoryVersion((v) => v + 1);
-      } else {
-        blockType = HOTBAR_BLOCKS[selectedSlotRef.current];
       }
 
       const playerMinX = player.position.x - 0.3;
@@ -2487,12 +2484,15 @@ export default function MinecraftGame() {
                 if (stack.id < 100) return BLOCKS[stack.id as BlockType]?.name ?? "Unknown";
                 return ITEMS[stack.id as ItemType]?.name ?? "Unknown";
               })()
-            : BLOCKS[HOTBAR_BLOCKS[selectedSlot]].name}
+            : (inventoryRef.current.slots[selectedSlot]
+                ? (inventoryRef.current.slots[selectedSlot]!.id < 100
+                    ? BLOCKS[inventoryRef.current.slots[selectedSlot]!.id as BlockType]?.name ?? "Unknown"
+                    : ITEMS[inventoryRef.current.slots[selectedSlot]!.id as ItemType]?.name ?? "Unknown")
+                : "(vacío)")
+        }
         </div>
         <div className="mt-1 text-yellow-300/80">{mode === "creative" ? "Creativo" : "Survival"}</div>
-        {mode === "survival" && (
-          <div className="mt-1 text-white/50 text-[10px]">E: Inventario</div>
-        )}
+        <div className="mt-1 text-white/50 text-[10px]">E: Inventario</div>
       </div>
 
       {/* Held item name (5s timer) */}
@@ -2576,12 +2576,13 @@ export default function MinecraftGame() {
       >
         {Array.from({ length: 9 }).map((_, i) => {
           const isSelected = i === selectedSlot;
-          let iconUrl = "";
+          let iconUrl: string | undefined;
           let count = 0;
           let name = "";
           let durFraction: number | null = null;
 
-          if (mode === "survival") {
+          // Both survival and creative use the inventory slots
+          {
             const stack = inventoryRef.current.slots[i];
             if (stack) {
               count = stack.count;
@@ -2590,13 +2591,13 @@ export default function MinecraftGame() {
                 if (def) {
                   name = def.name;
                   const iconName = stack.id === BlockType.Grass ? "grass_side" : (def.textures.side || def.textures.top);
-                  iconUrl = iconUrls[iconName] ?? "";
+                  iconUrl = iconUrls[iconName];
                 }
               } else {
                 const def = ITEMS[stack.id as ItemType];
                 if (def) {
                   name = def.name;
-                  iconUrl = iconUrls[def.icon] ?? "";
+                  iconUrl = iconUrls[def.icon];
                   if (def.maxDurability) {
                     const cur = stack.durability !== undefined ? stack.durability : def.maxDurability;
                     durFraction = Math.max(0, Math.min(1, cur / def.maxDurability));
@@ -2604,13 +2605,6 @@ export default function MinecraftGame() {
                 }
               }
             }
-          } else {
-            const blockType = HOTBAR_BLOCKS[i];
-            const def = BLOCKS[blockType];
-            name = def.name;
-            const iconName = def.textures.side === "grass_side" ? "grass_side" : def.textures.top === "dirt" ? "dirt" : def.textures.top || def.textures.side;
-            iconUrl = iconUrls[iconName] ?? "";
-            count = 0;
           }
 
           return (
