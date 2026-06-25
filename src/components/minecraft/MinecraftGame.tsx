@@ -157,6 +157,81 @@ export default function MinecraftGame() {
   });
   const gfxSettingsRef = useRef(gfxSettings);
   const gfxNeedsRebuildRef = useRef(false);
+  // Spawn point (set by sleeping in bed)
+  const spawnPointRef = useRef<{ x: number; y: number; z: number } | null>(null);
+  // Sign editing state
+  const [signEditing, setSignEditing] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [signText, setSignText] = useState<string[]>(["", "", "", ""]);
+  const signEditingRef = useRef(false);
+  // Bed sleep fade overlay
+  const [sleepFade, setSleepFade] = useState(0);
+  // Door state tracking
+  const openDoorsRef = useRef<Set<string>>(new Set());
+  // Overworld return position (saved before teleporting to Nether)
+  const overworldReturnPos = useRef<{ x: number; y: number; z: number } | null>(null);
+  // End Portal frame eyes
+  const endPortalEyesRef = useRef<Set<string>>(new Set());
+  // Chat system (T key)
+  const [chatOpen, setChatOpen] = useState(false);
+  const chatOpenRef = useRef(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<{ text: string; type: "chat" | "system" }[]>([]);
+  // Weather command ref
+  const weatherCommandRef = useRef<string | null>(null);
+  // Dimension command ref
+  const dimensionCommandRef = useRef<string | null>(null);
+  // Item name display timer
+  const [itemNameVisible, setItemNameVisible] = useState(false);
+  const itemNameTimerRef = useRef<number>(0);
+  const prevHeldItemIdRef = useRef<number | null>(null);
+  // === Chat command processor ===
+  const processChatCommand = useCallback((cmd: string) => {
+    const parts = cmd.toLowerCase().split(/\s+/);
+    const command = parts[0];
+    const addMsg = (text: string) => setChatMessages(prev => [...prev, { text, type: "system" }]);
+    if (command === "/help") {
+      addMsg("=== Comandos ===");
+      addMsg("/time set <day|night|noon|midnight>");
+      addMsg("/gamemode <0|1|creative|survival>");
+      addMsg("/tp <x> <y> <z>");
+      addMsg("/give <item> [count]");
+      addMsg("/heal /feed /weather <clear|rain|thunder>");
+      addMsg("/dimension <overworld|nether|end>");
+      addMsg("/clear");
+    } else if (command === "/time") {
+      if (parts[1] === "set" && parts[2]) {
+        const t = parts[2];
+        if (t === "day") { dayTimeRef.current = 0.3; addMsg("Día"); }
+        else if (t === "night") { dayTimeRef.current = 0.8; addMsg("Noche"); }
+        else if (t === "noon") { dayTimeRef.current = 0.5; addMsg("Mediodía"); }
+        else if (t === "midnight") { dayTimeRef.current = 0.0; addMsg("Medianoche"); }
+        else { const n = parseFloat(t); if (!isNaN(n)) { dayTimeRef.current = n; addMsg("Tiempo: " + n); } }
+      }
+    } else if (command === "/gamemode") {
+      const gm = parts[1];
+      if ((gm === "creative" || gm === "1" || gm === "c") && worldConfigRef.current) {
+        worldConfigRef.current.mode = "creative"; setCurrentWorld({ ...worldConfigRef.current }); addMsg("Creativo");
+      } else if ((gm === "survival" || gm === "0" || gm === "s") && worldConfigRef.current) {
+        worldConfigRef.current.mode = "survival"; setCurrentWorld({ ...worldConfigRef.current }); addMsg("Survival");
+      }
+    } else if (command === "/tp" || command === "/teleport") {
+      const x = parseFloat(parts[1]), y = parseFloat(parts[2]), z = parseFloat(parts[3]);
+      if (!isNaN(x) && !isNaN(y) && !isNaN(z) && playerRef.current) { playerRef.current.position.set(x, y, z); addMsg("TP: " + x + "," + y + "," + z); }
+    } else if (command === "/give") {
+      const itemName = parts[1], count = parts[2] ? parseInt(parts[2]) : 64;
+      if (itemName) {
+        const allItems = [...Object.values(BLOCKS), ...Object.values(ITEMS)] as any[];
+        const found = allItems.find(it => it && it.name && it.name.toLowerCase().replace(/\s+/g, "_") === itemName);
+        if (found) { inventoryRef.current.addItem(found.id, count); setInventoryVersion(v => v + 1); addMsg("Dado: " + found.name + " x" + count); }
+        else addMsg("No encontrado: " + itemName);
+      }
+    } else if (command === "/heal") { if (playerRef.current) { playerRef.current.health = playerRef.current.maxHealth; addMsg("Curado"); } }
+    else if (command === "/feed") { if (playerRef.current) { playerRef.current.hunger = playerRef.current.maxHunger; addMsg("Alimentado"); } }
+    else if (command === "/weather") { if (parts[1] === "clear" || parts[1] === "rain" || parts[1] === "thunder") { weatherCommandRef.current = parts[1]; addMsg("Clima: " + parts[1]); } }
+    else if (command === "/dimension" || command === "/dim") { if (parts[1] === "overworld" || parts[1] === "nether" || parts[1] === "end") { dimensionCommandRef.current = parts[1]; addMsg("Dimensión: " + parts[1]); } }
+    else if (command === "/clear") { inventoryRef.current.clear(); setInventoryVersion(v => v + 1); addMsg("Inventario vaciado"); }
+    else addMsg("Desconocido: " + command);
+  }, []);
   const [inputMode, setInputMode] = useState<InputMode>("keyboard");
   const inputModeRef = useRef<InputMode>("keyboard");
   // Sensitivity settings (persisted in refs so the game loop reads them live)
@@ -911,7 +986,17 @@ export default function MinecraftGame() {
         }
         return false;
       }
+      // Nether: water evaporates
+      if (blockType === BlockType.Water && world.dimension === "nether") { sound.blockSound(BlockType.Stone, "break"); return false; }
       world.setBlock(px, py, pz, blockType);
+      // Lava + Water = Obsidian
+      const checkLW = (bx: number, by: number, bz: number) => {
+        const b = world.getBlock(bx, by, bz);
+        if (b === BlockType.Lava) { for (const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) if (world.getBlock(bx+dx,by+dy,bz+dz) === BlockType.Water) { world.setBlock(bx,by,bz, BlockType.Obsidian); rebuildChunkAt(bx,bz); return; } }
+        else if (b === BlockType.Water) { for (const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) if (world.getBlock(bx+dx,by+dy,bz+dz) === BlockType.Lava) { world.setBlock(bx+dx,by+dy,bz+dz, BlockType.Obsidian); rebuildChunkAt(bx+dx,bz+dz); return; } }
+      };
+      checkLW(px, py, pz);
+      for (const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) checkLW(px+dx, py+dy, pz+dz);
       // Broadcast block placement to multiplayer peers
       if (multiplayerRef.current?.isConnected()) {
         multiplayerRef.current.sendBlockPlace(px, py, pz, blockType);
@@ -1128,13 +1213,23 @@ export default function MinecraftGame() {
     // Track mouse button states for continuous mining
     let leftMouseDown = false;
     let rightMouseDown = false;
+    let portalTeleportCooldown = 0;
+    let fluidFlowTimer = 0;
+    let lastGunShot = 0;
+    // Ender Eye projectiles
+    const enderEyes: Array<{ position: THREE.Vector3; velocity: THREE.Vector3; life: number; mesh: THREE.Mesh }> = [];
+    // Gun bullets
+    interface Bullet { position: THREE.Vector3; velocity: THREE.Vector3; life: number; mesh: THREE.Mesh; light: THREE.PointLight; }
+    const bullets: Bullet[] = [];
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Chat (T key)
+      if (e.code === "KeyT" && document.pointerLockElement) {
+        document.exitPointerLock(); setChatOpen(true); chatOpenRef.current = true; return;
+      }
+      if (chatOpenRef.current) return;
       if (e.code === "KeyE" && document.pointerLockElement) {
-        // Open inventory
-        document.exitPointerLock();
-        setShowInventory(true);
-        return;
+        document.exitPointerLock(); setShowInventory(true); return;
       }
       if (!document.pointerLockElement) return;
       player.setKey(e.code, true);
@@ -1281,6 +1376,103 @@ export default function MinecraftGame() {
           setShowChest(true);
           return;
         }
+        // Bed: sleep at night (or explode in Nether)
+        if (block === BlockType.Bed) {
+          if (world.dimension === "nether") {
+            // Explode
+            const bx = hit.block.x, by = hit.block.y, bz = hit.block.z;
+            for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 3; dy++) for (let dz = -3; dz <= 3; dz++) {
+              if (Math.sqrt(dx*dx+dy*dy+dz*dz) <= 3) { const b = world.getBlock(bx+dx, by+dy, bz+dz); if (b !== BlockType.Air && b !== BlockType.Bedrock) world.setBlock(bx+dx, by+dy, bz+dz, BlockType.Air); }
+            }
+            rebuildChunkAt(bx, bz);
+            const d = Math.sqrt((bx-player.position.x)**2+(by-player.position.y)**2+(bz-player.position.z)**2);
+            if (d < 8) player.damage(30);
+            sound.blockSound(BlockType.Stone, "break");
+            setDragonNotification("¡La cama explotó!"); setTimeout(() => setDragonNotification(""), 3000);
+            return;
+          }
+          const isNight = dayTimeRef.current > 0.6 || dayTimeRef.current < 0.2;
+          if (!isNight) { setDragonNotification("Solo puedes dormir de noche"); setTimeout(() => setDragonNotification(""), 3000); return; }
+          // Check hostile mobs in 8-block radius
+          let hostile = false;
+          for (const m of monsterManager.monsters) if (Math.sqrt((m.position.x-player.position.x)**2+(m.position.y-player.position.y)**2+(m.position.z-player.position.z)**2) < 8) { hostile = true; break; }
+          if (hostile) { setDragonNotification("No puedes dormir, hay monstruos cerca"); setTimeout(() => setDragonNotification(""), 3000); return; }
+          setSleepFade(0.01);
+          spawnPointRef.current = { x: hit.block.x + 1, y: hit.block.y, z: hit.block.z };
+          setTimeout(() => { dayTimeRef.current = 0.3; setSleepFade(0); setDragonNotification("¡Buenos días!"); setTimeout(() => setDragonNotification(""), 3000); }, 1500);
+          return;
+        }
+        // Door: toggle open/closed
+        if (block === BlockType.WoodenDoor) {
+          const key = `${hit.block.x},${hit.block.y},${hit.block.z}`;
+          if (openDoorsRef.current.has(key)) openDoorsRef.current.delete(key); else openDoorsRef.current.add(key);
+          sound.blockSound(BlockType.Wood, "place");
+          return;
+        }
+        // Sign: open editing UI
+        if (block === BlockType.Sign) {
+          document.exitPointerLock();
+          setSignEditing({ x: hit.block.x, y: hit.block.y, z: hit.block.z });
+          setSignText(["", "", "", ""]);
+          signEditingRef.current = true;
+          return;
+        }
+        // EndPortalFrame: place Ender Eye
+        if (block === BlockType.EndPortalFrame) {
+          const sel = inventoryRef.current.getSelected();
+          if (sel && sel.id === ItemType.EnderEye) {
+            const key = `${hit.block.x},${hit.block.y},${hit.block.z}`;
+            if (!endPortalEyesRef.current.has(key)) {
+              endPortalEyesRef.current.add(key);
+              inventoryRef.current.removeSelected(1);
+              setInventoryVersion((v) => v + 1);
+              sound.eat();
+              // Check if portal should activate (all 8 frames have eyes)
+              for (let cdy = -1; cdy <= 1; cdy++) for (let cdx = -1; cdx <= 1; cdx++) for (let cdz = -1; cdz <= 1; cdz++) {
+                const ccx = hit.block.x + cdx, ccy = hit.block.y + cdy, ccz = hit.block.z + cdz;
+                if (world.getBlock(ccx, ccy, ccz) === BlockType.Air) {
+                  let frame = 0, eyes = 0;
+                  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+                    if (dx === 0 && dz === 0) continue;
+                    if (world.getBlock(ccx+dx, ccy, ccz+dz) === BlockType.EndPortalFrame) { frame++; if (endPortalEyesRef.current.has(`${ccx+dx},${ccy},${ccz+dz}`)) eyes++; }
+                  }
+                  if (frame === 8 && eyes === 8) { world.setBlock(ccx, ccy, ccz, BlockType.EndPortal); rebuildChunkAt(ccx, ccz); setDragonNotification("¡Portal del End activado!"); setTimeout(() => setDragonNotification(""), 3000); }
+                }
+              }
+              return;
+            }
+          }
+        }
+        // Nether portal ignition (Flint and Steel or right-click obsidian)
+        if (block === BlockType.Obsidian || block === BlockType.NetherPortal) {
+          const sel = inventoryRef.current.getSelected();
+          const hasFlint = sel && sel.id === ItemType.FlintAndSteel;
+          if (hasFlint || block === BlockType.Obsidian) {
+            if (tryIgnitePortal(hit.block.x, hit.block.y, hit.block.z)) {
+              if (hasFlint) { inventoryRef.current.damageSelected(1); setInventoryVersion((v) => v + 1); }
+              sound.blockSound(BlockType.Glass, "break");
+              return;
+            }
+          }
+        }
+        // Ender Eye throwing
+        if (selected && selected.id === ItemType.EnderEye) {
+          world.computeStrongholdPositionsPublic();
+          const positions = world.strongholdPositions ?? [{ x: 0, z: 0 }];
+          let sx = positions[0].x, sz = positions[0].z, best = Infinity;
+          for (const p of positions) { const d = Math.sqrt((p.x-player.position.x)**2+(p.z-player.position.z)**2); if (d < best) { best = d; sx = p.x; sz = p.z; } }
+          const dx = sx - player.position.x, dz = sz - player.position.z, dist = Math.sqrt(dx*dx+dz*dz);
+          const dirX = dx / dist, dirZ = dz / dist;
+          const eyeStart = new THREE.Vector3(player.position.x, player.position.y + 1.5, player.position.z);
+          const eyeVel = new THREE.Vector3(dirX, 0.3, dirZ).normalize().multiplyScalar(15);
+          const eyeMesh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({ color: 0x1a8a4a }));
+          eyeMesh.position.copy(eyeStart); scene.add(eyeMesh);
+          enderEyes.push({ position: eyeStart.clone(), velocity: eyeVel, life: 3.0, mesh: eyeMesh });
+          inventoryRef.current.removeSelected(1); setInventoryVersion((v) => v + 1); handView.triggerAction("swing"); sound.eat();
+          setDragonNotification("Ojo de Ender lanzado. Distancia: " + Math.floor(dist) + " bloques");
+          setTimeout(() => setDragonNotification(""), 4000);
+          return;
+        }
       }
       // 3. Otherwise, place block
       if (placeBlock()) {
@@ -1295,6 +1487,35 @@ export default function MinecraftGame() {
     const handleMouseDown = (e: MouseEvent) => {
       if (document.pointerLockElement !== renderer.domElement) return;
       if (e.button === 0) {
+        // Gun firing
+        const sel = inventoryRef.current.getSelected();
+        if (sel && sel.id === ItemType.Gun) {
+          const now = Date.now();
+          if (now - lastGunShot > 400) {
+            lastGunShot = now;
+            handView.triggerAction("swing");
+            sound.hit();
+            // Bullet toward crosshair
+            const cp = Math.cos(player.pitch);
+            const fwd = new THREE.Vector3(-Math.sin(player.yaw) * cp, Math.sin(player.pitch), -Math.cos(player.yaw) * cp).normalize();
+            const bs = new THREE.Vector3(player.position.x + fwd.x * 0.5, player.position.y + 1.5 + fwd.y * 0.5, player.position.z + fwd.z * 0.5);
+            const bm = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffdd44 }));
+            bm.position.copy(bs); scene.add(bm);
+            const bl = new THREE.PointLight(0xffaa33, 1.5, 6); bl.position.copy(bs); scene.add(bl);
+            bullets.push({ position: bs.clone(), velocity: fwd.clone().multiplyScalar(80), life: 1.0, mesh: bm, light: bl });
+            // Hit detection (cone test)
+            const eyeX = player.position.x, eyeY = player.position.y + 1.5, eyeZ = player.position.z;
+            const coneCos = 0.98;
+            const hitMob = (mx: number, my: number, mz: number) => { const dx = mx-eyeX, dy = my-eyeY, dz = mz-eyeZ, d = Math.sqrt(dx*dx+dy*dy+dz*dz); return d <= 30 && (dx*fwd.x+dy*fwd.y+dz*fwd.z)/d > coneCos; };
+            const dmg = 8;
+            for (const m of monsterManager.monsters) if (hitMob(m.position.x, m.position.y+0.8, m.position.z)) { const died = m.takeDamage(dmg); if (m.knockback) m.knockback(player.position.x, player.position.z, 6); if (died) { for (const d2 of m.getDrops()) dropManager.spawnDrop(d2.id, d2.count, m.position.x, m.position.y+0.5, m.position.z); monsterManager.removeMonster(m); } break; }
+            for (const a of animalManager.animals) if (hitMob(a.position.x, a.position.y+0.8, a.position.z)) { const died = a.takeDamage(dmg, player.position); if (died) { for (const d2 of a.getDrops()) dropManager.spawnDrop(d2.id, d2.count, a.position.x, a.position.y+0.5, a.position.z); animalManager.removeAnimal(a); } break; }
+            for (const en of endermanManager.endermen) if (hitMob(en.position.x, en.position.y+0.8, en.position.z)) { en.takeDamage(dmg); break; }
+            for (const bz of blazeManager.blazes) if (hitMob(bz.position.x, bz.position.y+0.8, bz.position.z)) { const died = bz.takeDamage(dmg); if (died) { for (const d2 of bz.getDrops()) dropManager.spawnDrop(d2.id, d2.count, bz.position.x, bz.position.y+0.5, bz.position.z); blazeManager.removeBlaze(bz); } break; }
+            inventoryRef.current.damageSelected(0.5);
+          }
+          return;
+        }
         leftMouseDown = true;
         handView.triggerAction("swing");
         // In creative, break immediately. In survival, mining happens in render loop.
@@ -1779,6 +2000,102 @@ export default function MinecraftGame() {
         remotePlayerModels.clear();
       }
 
+      // === DIMENSION COMMAND (from chat /dimension) ===
+      if (dimensionCommandRef.current) {
+        const dim = dimensionCommandRef.current;
+        dimensionCommandRef.current = null;
+        if (dim !== world.dimension) {
+          if (world.dimension === "overworld") overworldReturnPos.current = { x: player.position.x, y: player.position.y, z: player.position.z };
+          world.dimension = dim as any; world.clearAllChunks();
+          for (const [key, meshes] of chunkMeshes) {
+            if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); }
+            if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); }
+            if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); }
+            if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); }
+          }
+          chunkMeshes.clear();
+          if (dim === "overworld") { const r = overworldReturnPos.current; if (r) player.position.set(r.x, r.y, r.z); }
+          else if (dim === "nether") player.position.set(0.5, 40, 0.5);
+          else if (dim === "end") player.position.set(0.5, 52, 0.5);
+        }
+      }
+
+      // === NETHER PORTAL TELEPORTATION ===
+      const pBlockX = Math.floor(player.position.x), pBlockY = Math.floor(player.position.y + 0.5), pBlockZ = Math.floor(player.position.z);
+      if (world.getBlock(pBlockX, pBlockY, pBlockZ) === BlockType.NetherPortal && portalTeleportCooldown <= 0) {
+        portalTeleportCooldown = 3.0;
+        if (world.dimension === "overworld") {
+          overworldReturnPos.current = { x: player.position.x, y: player.position.y, z: player.position.z };
+          world.dimension = "nether"; world.clearAllChunks();
+          for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
+          chunkMeshes.clear();
+          player.position.set(Math.floor(player.position.x / 8) + 0.5, 40, Math.floor(player.position.z / 8) + 0.5);
+          setDragonNotification("Teletransportado al Nether"); setTimeout(() => setDragonNotification(""), 3000);
+        } else if (world.dimension === "nether") {
+          world.dimension = "overworld"; world.clearAllChunks();
+          for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
+          chunkMeshes.clear();
+          const r = overworldReturnPos.current; if (r) player.position.set(r.x, r.y, r.z);
+          setDragonNotification("Volviendo al Overworld"); setTimeout(() => setDragonNotification(""), 3000);
+        }
+      }
+      // End Portal teleportation
+      if (world.getBlock(pBlockX, pBlockY, pBlockZ) === BlockType.EndPortal && portalTeleportCooldown <= 0 && world.dimension === "overworld") {
+        portalTeleportCooldown = 3.0;
+        overworldReturnPos.current = { x: player.position.x, y: player.position.y, z: player.position.z };
+        world.dimension = "end"; world.clearAllChunks();
+        for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
+        chunkMeshes.clear();
+        player.position.set(0.5, 52, 0.5);
+        setDragonNotification("Teletransportado al End"); setTimeout(() => setDragonNotification(""), 3000);
+      }
+      if (portalTeleportCooldown > 0) portalTeleportCooldown -= dt;
+
+      // === END VOID DAMAGE ===
+      if (world.dimension === "end" && player.position.y < -64) player.damage(4 * dt);
+
+      // === FLUID FLOW ===
+      fluidFlowTimer += dt;
+      if (fluidFlowTimer >= 1.0) {
+        fluidFlowTimer = 0;
+        const pX = Math.floor(player.position.x), pY = Math.floor(player.position.y), pZ = Math.floor(player.position.z);
+        for (let dy = -5; dy <= 5; dy++) for (let dx = -8; dx <= 8; dx++) for (let dz = -8; dz <= 8; dz++) {
+          const b = world.getBlockIfLoaded(pX + dx, pY + dy, pZ + dz);
+          if (b === BlockType.Water || b === BlockType.Lava) world.queueFluidUpdate(pX + dx, pY + dy, pZ + dz, b);
+        }
+        if (world.processFluidFlow(100)) { for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const cx = Math.floor((pX + dx * CHUNK_SIZE) / CHUNK_SIZE), cz = Math.floor((pZ + dz * CHUNK_SIZE) / CHUNK_SIZE); if (chunkMeshes.has(`${cx},${cz}`)) buildChunk(cx, cz); } }
+      }
+
+      // === ITEM NAME DISPLAY (5s timer) ===
+      const heldItemId = inventoryRef.current.getSelected()?.id ?? null;
+      if (heldItemId !== prevHeldItemIdRef.current) {
+        prevHeldItemIdRef.current = heldItemId;
+        if (heldItemId !== null) { itemNameTimerRef.current = Date.now() + 5000; setItemNameVisible(true); }
+        else setItemNameVisible(false);
+      }
+      if (itemNameVisible && Date.now() > itemNameTimerRef.current) setItemNameVisible(false);
+
+      // === UPDATE BULLETS ===
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.life -= dt;
+        if (b.life <= 0) { scene.remove(b.mesh); scene.remove(b.light); bullets.splice(i, 1); continue; }
+        b.position.addScaledVector(b.velocity, dt);
+        b.mesh.position.copy(b.position); b.light.position.copy(b.position);
+        const bx2 = Math.floor(b.position.x), by2 = Math.floor(b.position.y), bz2 = Math.floor(b.position.z);
+        if (world.getBlock(bx2, by2, bz2) !== BlockType.Air && world.getBlock(bx2, by2, bz2) !== BlockType.Water) { scene.remove(b.mesh); scene.remove(b.light); bullets.splice(i, 1); }
+      }
+      // === UPDATE ENDER EYES ===
+      for (let i = enderEyes.length - 1; i >= 0; i--) {
+        const eye = enderEyes[i];
+        eye.life -= dt;
+        if (eye.life <= 0) { scene.remove(eye.mesh); enderEyes.splice(i, 1); continue; }
+        eye.velocity.y -= 5 * dt;
+        eye.position.addScaledVector(eye.velocity, dt);
+        eye.mesh.position.copy(eye.position);
+        eye.mesh.rotation.x += dt * 5; eye.mesh.rotation.y += dt * 3;
+      }
+
       // === APPLY SHADER SETTINGS ===
       const gss = gfxSettingsRef.current;
       if (gss.shadersEnabled !== shaderManager.enabled) {
@@ -1800,15 +2117,9 @@ export default function MinecraftGame() {
 
       // Render first-person hand on top
       handView.update(dt);
-      // Update held item based on selected slot
-      let heldItemId: number | null = null;
-      if (worldConfigRef.current?.mode === "survival") {
-        const sel = inventoryRef.current.getSelected();
-        heldItemId = sel ? sel.id : null;
-      } else {
-        heldItemId = HOTBAR_BLOCKS[selectedSlotRef.current];
-      }
-      handView.updateItem(heldItemId);
+      // Update held item based on selected slot (both survival and creative use inventory)
+      const heldItemId2: number | null = inventoryRef.current.getSelected()?.id ?? null;
+      handView.updateItem(heldItemId2);
       handView.render(renderer);
 
       frameCount++;
@@ -2183,6 +2494,14 @@ export default function MinecraftGame() {
           <div className="mt-1 text-white/50 text-[10px]">E: Inventario</div>
         )}
       </div>
+
+      {/* Held item name (5s timer) */}
+      {itemNameVisible && (() => {
+        const stack = inventoryRef.current.slots[selectedSlot];
+        const name = stack ? (stack.id < 100 ? BLOCKS[stack.id as BlockType]?.name ?? "Unknown" : ITEMS[stack.id as ItemType]?.name ?? "Unknown") : "";
+        if (!name) return null;
+        return <div className="absolute bottom-[150px] left-1/2 -translate-x-1/2 z-20 pointer-events-none font-mono text-sm sm:text-base font-bold" style={{ color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}>{name}</div>;
+      })()}
 
       {/* Survival stats - centered above hotbar like Minecraft */}
       {mode === "survival" && (
@@ -2663,6 +2982,38 @@ export default function MinecraftGame() {
         </div>
       )}
 
+      {/* === CHAT (T key) === */}
+      {chatOpen && (
+        <div className="absolute inset-0 z-40 flex items-end justify-center pb-20 pointer-events-none">
+          <div className="w-full max-w-2xl mx-4 pointer-events-auto">
+            <div className="max-h-48 overflow-y-auto mb-2 p-2" style={{ backgroundColor: "rgba(0,0,0,0.6)", borderTop: "2px solid rgba(80,80,80,0.8)", borderLeft: "2px solid rgba(80,80,80,0.8)", borderBottom: "2px solid rgba(0,0,0,0.9)", borderRight: "2px solid rgba(0,0,0,0.9)" }}>
+              {chatMessages.length === 0 ? <p className="text-stone-500 text-xs font-mono">Escribe /help para ver comandos</p> :
+                chatMessages.slice(-8).map((msg, i) => <p key={i} className={`text-xs font-mono mb-0.5 ${msg.type === "system" ? "text-yellow-300" : "text-white"}`} style={{ textShadow: "1px 1px 0 #000" }}>{msg.text}</p>)}
+            </div>
+            <input type="text" value={chatInput} autoFocus onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { const t = chatInput.trim(); if (t) { if (t.startsWith("/")) processChatCommand(t); else { setChatMessages(prev => [...prev, { text: "<Player> " + t, type: "chat" }]); if (multiplayerRef.current?.isConnected()) multiplayerRef.current.sendChat(t); } } setChatInput(""); setChatOpen(false); chatOpenRef.current = false; }
+                else if (e.key === "Escape") { setChatInput(""); setChatOpen(false); chatOpenRef.current = false; }
+              }}
+              placeholder="Mensaje o comando (/help)..." className="w-full px-3 py-2 text-white font-mono text-sm outline-none" style={{ backgroundColor: "rgba(0,0,0,0.8)", borderTop: "2px solid rgba(80,80,80,0.8)", borderLeft: "2px solid rgba(80,80,80,0.8)", borderBottom: "2px solid rgba(0,0,0,0.9)", borderRight: "2px solid rgba(0,0,0,0.9)" }} />
+          </div>
+        </div>
+      )}
+      {/* === SLEEP FADE === */}
+      {sleepFade > 0 && <div className="absolute inset-0 z-50 pointer-events-none bg-black" style={{ opacity: sleepFade }} />}
+      {sleepFade > 0 && sleepFade < 1 && (() => { setTimeout(() => setSleepFade(Math.min(1, sleepFade + 0.05)), 50); return null; })()}
+      {/* === SIGN EDITING === */}
+      {signEditing && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+          <div className="p-4" style={{ backgroundColor: "#c6c6c6", borderTop: "4px solid #fff", borderLeft: "4px solid #fff", borderBottom: "4px solid #373737", borderRight: "4px solid #373737" }}>
+            <h3 className="text-[#2a2a2a] font-mono font-bold text-sm mb-3 text-center">Editar Cartel</h3>
+            <div className="space-y-1 mb-3">
+              {[0,1,2,3].map(line => <input key={line} type="text" value={signText[line]} maxLength={15} onChange={(e) => { const n = [...signText]; n[line] = e.target.value; setSignText(n); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") { setSignEditing(null); signEditingRef.current = false; } }} className="w-48 px-2 py-1 text-sm font-mono outline-none" style={{ backgroundColor: "#8b8b8b", border: "2px solid #555", color: "#000" }} placeholder={`Línea ${line+1}`} autoFocus={line === 0} />)}
+            </div>
+            <button onClick={() => { setSignEditing(null); signEditingRef.current = false; }} className="w-full py-2 text-white font-mono font-bold text-sm" style={{ backgroundColor: "#5a8a3a", border: "2px solid #2a4a1a" }}>Hecho</button>
+          </div>
+        </div>
+      )}
       {/* Death screen */}
       {isDead && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-red-950/70 backdrop-blur-sm">
