@@ -22,6 +22,7 @@ import { XpState } from "@/lib/minecraft/xp";
 import { DragonManager, DragonPet } from "@/lib/minecraft/dragon";
 import { MultiplayerManager, MultiplayerMessage } from "@/lib/minecraft/multiplayer";
 import { PlayerModel } from "@/lib/minecraft/player-model";
+import { ShaderManager } from "@/lib/minecraft/shader-manager";
 import { ArmorSlots, emptyArmor, serializeArmor, deserializeArmor, equipArmor as equipArmorFn, totalDefense } from "@/lib/minecraft/armor";
 import { computeMining, BLOCK_HARDNESS as MINING_BLOCK_HARDNESS } from "@/lib/minecraft/mining";
 import { NetherWorld } from "@/lib/minecraft/nether";
@@ -142,8 +143,20 @@ export default function MinecraftGame() {
   }>({ input: null, fuel: null, output: null, smeltProgress: 0, fuelProgress: 0 });
   const [showControls, setShowControls] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
+  const [showGraphics, setShowGraphics] = useState(false);
   const showControlsRef = useRef(false);
   const showConfigRef = useRef(false);
+  const showGraphicsRef = useRef(false);
+  // === GRAPHICS SETTINGS ===
+  const [gfxSettings, setGfxSettings] = useState({
+    pbr: true, shadows: true, shadowQuality: 1024, fog: true, leavesGlow: true,
+    toneMapping: 1.2, waterReflections: false, realisticSky: false,
+    // Shader system (OFF by default)
+    shadersEnabled: false, shaderBloom: false, shaderSSAO: false,
+    shaderGodRays: false, shaderWaterWaves: false, shaderWind: false, shaderFog: true,
+  });
+  const gfxSettingsRef = useRef(gfxSettings);
+  const gfxNeedsRebuildRef = useRef(false);
   const [inputMode, setInputMode] = useState<InputMode>("keyboard");
   const inputModeRef = useRef<InputMode>("keyboard");
   // Sensitivity settings (persisted in refs so the game loop reads them live)
@@ -488,6 +501,9 @@ export default function MinecraftGame() {
     const dragonManager = new DragonManager(world, scene);
     dragonManagerRef.current = dragonManager;
     let dragonMountedCamera: { eyeX: number; eyeY: number; eyeZ: number; yaw: number; pitch: number } | null = null;
+
+    // === Shader Manager (OptiFine-like post-processing) ===
+    const shaderManager = new ShaderManager(renderer, scene, camera);
 
     // === Multiplayer remote player rendering ===
     // Map of peer ID → PlayerModel (3D mesh)
@@ -1189,11 +1205,13 @@ export default function MinecraftGame() {
       }
       if (e.code === "Escape") {
         // If config, controls, or host panel is open, close it instead of exiting pointer lock
-        if (showConfigRef.current || showControlsRef.current) {
+        if (showConfigRef.current || showControlsRef.current || showGraphicsRef.current) {
           setShowConfig(false);
           setShowControls(false);
+          setShowGraphics(false);
           showConfigRef.current = false;
           showControlsRef.current = false;
+          showGraphicsRef.current = false;
           e.preventDefault();
           e.stopPropagation();
           return;
@@ -1761,7 +1779,24 @@ export default function MinecraftGame() {
         remotePlayerModels.clear();
       }
 
-      renderer.render(scene, camera);
+      // === APPLY SHADER SETTINGS ===
+      const gss = gfxSettingsRef.current;
+      if (gss.shadersEnabled !== shaderManager.enabled) {
+        shaderManager.setEnabled(gss.shadersEnabled);
+        if (gss.shadersEnabled) shaderManager.init();
+      }
+      if (shaderManager.enabled) {
+        shaderManager.updateSetting("bloom", gss.shaderBloom);
+        shaderManager.updateSetting("ssao", gss.shaderSSAO);
+        shaderManager.updateSetting("godRays", gss.shaderGodRays);
+        shaderManager.updateSetting("waterWaves", gss.shaderWaterWaves);
+        shaderManager.updateSetting("windEffect", gss.shaderWind);
+        shaderManager.updateSetting("fog", gss.shaderFog);
+        shaderManager.updateSetting("toneMappingExposure", gss.toneMapping);
+        shaderManager.render();
+      } else {
+        renderer.render(scene, camera);
+      }
 
       // Render first-person hand on top
       handView.update(dt);
@@ -1836,6 +1871,7 @@ export default function MinecraftGame() {
       dropManager.dispose();
       dragonManager.dispose();
       dragonManagerRef.current = null;
+      shaderManager.dispose();
       // Dispose remote player models (multiplayer)
       for (const [peerId, model] of remotePlayerModels) {
         scene.remove(model.group);
@@ -2326,7 +2362,7 @@ export default function MinecraftGame() {
       {/* Pause overlay — Minecraft-style menu */}
       {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && (
         <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.78)", backdropFilter: "blur(2px)" }}>
-          {!showControls && !showConfig ? (
+          {!showControls && !showConfig && !showGraphics ? (
             <div className="max-w-sm w-full mx-4" style={{ imageRendering: "pixelated" }}>
               <h1 className="text-center text-3xl sm:text-4xl font-black mb-6 text-white" style={{
                 fontFamily: "monospace",
@@ -2345,7 +2381,10 @@ export default function MinecraftGame() {
                 <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm">Configuración</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
+                <MCMenuButton onClick={() => { setShowGraphics(true); showGraphicsRef.current = true; }} color="gray" className="flex-1 text-sm">Gráficos</MCMenuButton>
                 <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
+              </div>
+              <div className="flex gap-2 mb-2">
                 {/* Multiplayer: open current world to other players */}
                 {mpConnected ? (
                   <MCMenuButton
@@ -2490,6 +2529,41 @@ export default function MinecraftGame() {
                 </p>
               </div>
               <MCMenuButton onClick={() => { setShowConfig(false); showConfigRef.current = false; }} color="gray">← Volver</MCMenuButton>
+            </div>
+          ) : showGraphics ? (
+            /* ===== GRAPHICS PANEL — compact 2-column grid ===== */
+            <div className="max-w-lg w-full mx-4" style={{ imageRendering: "pixelated" }}>
+              <h2 className="text-center text-2xl font-black mb-3 text-white" style={{ fontFamily: "monospace", textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)", letterSpacing: "0.05em" }}>Gráficos</h2>
+              <div className="p-3 mb-3 max-h-[70vh] overflow-y-auto" style={{ backgroundColor: "rgba(0,0,0,0.7)", borderTop: "3px solid rgba(110,110,120,0.9)", borderLeft: "3px solid rgba(110,110,120,0.9)", borderBottom: "3px solid rgba(0,0,0,0.95)", borderRight: "3px solid rgba(0,0,0,0.95)" }}>
+                <p className="text-green-300 font-mono text-[10px] font-bold mb-2">BÁSICOS</p>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <GfxToggle label="PBR" desc="Materiales realistas" value={gfxSettings.pbr} onChange={(v) => { setGfxSettings(s => ({...s, pbr: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, pbr: v}; gfxNeedsRebuildRef.current = true; }} />
+                  <GfxToggle label="Sombras" desc="Sombras dinámicas" value={gfxSettings.shadows} onChange={(v) => { setGfxSettings(s => ({...s, shadows: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadows: v}; }} />
+                  <GfxToggle label="Niebla" desc="Profundidad de distancia" value={gfxSettings.fog} onChange={(v) => { setGfxSettings(s => ({...s, fog: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, fog: v}; }} />
+                  <GfxToggle label="Hojas brillantes" desc="Subsurface scattering" value={gfxSettings.leavesGlow} onChange={(v) => { setGfxSettings(s => ({...s, leavesGlow: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, leavesGlow: v}; gfxNeedsRebuildRef.current = true; }} />
+                  <GfxToggle label="Reflejos agua" desc="Reflexiones del entorno" value={gfxSettings.waterReflections} onChange={(v) => { setGfxSettings(s => ({...s, waterReflections: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, waterReflections: v}; }} />
+                  <GfxToggle label="Cielo realista" desc="Atardeceres y glow" value={gfxSettings.realisticSky} onChange={(v) => { setGfxSettings(s => ({...s, realisticSky: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, realisticSky: v}; }} />
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-white font-mono text-[10px] font-bold min-w-[80px]">Sombras:</span>
+                  <select value={gfxSettings.shadowQuality} onChange={(e) => { const v = parseInt(e.target.value); setGfxSettings(s => ({...s, shadowQuality: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadowQuality: v}; }} className="bg-stone-800 text-white font-mono text-[10px] px-1 py-0.5 border border-stone-600 flex-1">
+                    <option value={512}>512 Rápido</option><option value={1024}>1024 Medio</option><option value={2048}>2048 Nítido</option>
+                  </select>
+                  <span className="text-white font-mono text-[10px] font-bold min-w-[60px]">Exposición:</span>
+                  <input type="range" min={0.5} max={2.5} step={0.05} value={gfxSettings.toneMapping} onChange={(e) => { const v = parseFloat(e.target.value); setGfxSettings(s => ({...s, toneMapping: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, toneMapping: v}; }} className="flex-1" style={{ accentColor: "#6b6b6b" }} />
+                  <span className="text-yellow-300 font-mono text-[10px] min-w-[30px] text-right">{gfxSettings.toneMapping.toFixed(1)}</span>
+                </div>
+                <div className="pt-2 border-t border-stone-700"><p className="text-cyan-300 font-mono text-[10px] font-bold mb-2">🔮 SHADERS (ULTRA REALISTA)</p></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <GfxToggle label="✨ Activar Shaders" desc="Post-procesamiento completo" value={gfxSettings.shadersEnabled} onChange={(v) => { setGfxSettings(s => ({...s, shadersEnabled: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadersEnabled: v}; }} />
+                  <GfxToggle label="Bloom" desc="Resplandor de luz" value={gfxSettings.shaderBloom} onChange={(v) => { setGfxSettings(s => ({...s, shaderBloom: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderBloom: v}; }} />
+                  <GfxToggle label="SSAO" desc="Sombras en esquinas" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} />
+                  <GfxToggle label="God Rays" desc="Rayos de sol" value={gfxSettings.shaderGodRays} onChange={(v) => { setGfxSettings(s => ({...s, shaderGodRays: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderGodRays: v}; }} />
+                  <GfxToggle label="Ondas agua" desc="Oleaje Gerstner" value={gfxSettings.shaderWaterWaves} onChange={(v) => { setGfxSettings(s => ({...s, shaderWaterWaves: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWaterWaves: v}; }} />
+                  <GfxToggle label="Viento" desc="Movimiento de hojas" value={gfxSettings.shaderWind} onChange={(v) => { setGfxSettings(s => ({...s, shaderWind: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWind: v}; }} />
+                </div>
+              </div>
+              <MCMenuButton onClick={() => { setShowGraphics(false); showGraphicsRef.current = false; }} color="gray">← Volver</MCMenuButton>
             </div>
           ) : (
             /* ===== CONTROLS PANEL (existing) ===== */
@@ -3063,6 +3137,29 @@ function MCMenuButton({ children, onClick, color = "gray", className = "" }: {
       onMouseUp={(e) => { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; }}>
       {children}
     </button>
+  );
+}
+
+// Graphics toggle component
+function GfxToggle({ label, desc, value, onChange }: {
+  label: string; desc: string; value: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex justify-between items-center cursor-pointer" onClick={() => onChange(!value)}>
+      <div>
+        <span className="text-white font-mono text-xs font-bold">{label}</span>
+        <p className="text-stone-500 text-[10px] font-mono">{desc}</p>
+      </div>
+      <div className="w-10 h-5 rounded-sm relative transition-all" style={{
+        backgroundColor: value ? "#4a8a3a" : "#3a3a3a",
+        borderTop: "2px solid " + (value ? "#7aaa5a" : "#555"),
+        borderLeft: "2px solid " + (value ? "#7aaa5a" : "#555"),
+        borderBottom: "2px solid " + (value ? "#2a4a1a" : "#222"),
+        borderRight: "2px solid " + (value ? "#2a4a1a" : "#222"),
+      }}>
+        <div className="absolute top-0.5 w-3.5 h-3.5 transition-all" style={{ left: value ? "18px" : "2px", backgroundColor: "#fff" }} />
+      </div>
+    </div>
   );
 }
 
