@@ -786,6 +786,20 @@ function texEndStone(): ImageData {
   return img;
 }
 
+function texLava(): ImageData {
+  const img = new ImageData(TEX_SIZE, TEX_SIZE);
+  const base = hexToRgb("#cc3300"), bright = hexToRgb("#ff6600"), dark = hexToRgb("#991100"), yellow = hexToRgb("#ffaa00");
+  fill(img, base);
+  const rng = makeRng(77);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const r = rng();
+    if (r < 0.15) setPixel(img, x, y, bright);
+    else if (r < 0.25) setPixel(img, x, y, yellow);
+    else if (r < 0.4) setPixel(img, x, y, dark);
+  }
+  return img;
+}
+
 // === ANIMAL TEXTURES (top-down view for sprites) ===
 function texPig(): ImageData {
   const img = new ImageData(TEX_SIZE, TEX_SIZE);
@@ -923,6 +937,7 @@ export function buildTextureCanvases(): Record<string, HTMLCanvasElement> {
     glowstone: imageDataToCanvas(texGlowstone()),
     nether_portal: imageDataToCanvas(texNetherPortal()),
     end_stone: imageDataToCanvas(texEndStone()),
+    lava: imageDataToCanvas(texLava()),
     pig: imageDataToCanvas(texPig()),
     cow: imageDataToCanvas(texCow()),
     chicken: imageDataToCanvas(texChicken()),

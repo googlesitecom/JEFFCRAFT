@@ -11,6 +11,7 @@ const GRAVITY = 28;
 const JUMP_SPEED = 9.2;
 const WALK_SPEED = 4.7;
 const SPRINT_SPEED = 7.5;
+const CROUCH_SPEED = 2.0;
 const FLY_SPEED = 9;
 const MAX_FALL = 50;
 
@@ -42,6 +43,9 @@ export class Player {
   maxHunger: number = 20;
   air: number = MAX_AIR; // seconds of air remaining
   fallStartY: number = 0;
+  isSprinting: boolean = false;
+  isCrouching: boolean = false;
+  inLava: boolean = false;
 
   // Armor slots (helmet, chestplate, leggings, boots)
   armor: ArmorSlots = emptyArmor();
@@ -174,15 +178,18 @@ export class Player {
     this.inWater = this.isYInWater(this.position.y + 0.2);
     this.headInWater = this.isYInWater(this.position.y + EYE_OFFSET);
 
-    const sprint = this.keys["ShiftLeft"] || this.keys["ShiftRight"];
+    this.isSprinting = !!this.keys["KeyR"] && !this.flying && !this.inWater;
+    this.isCrouching = (this.keys["ShiftLeft"] || this.keys["ShiftRight"]) && !this.flying && !this.isSprinting && !this.inWater;
 
     let speed: number;
     if (this.flying) {
       speed = FLY_SPEED;
     } else if (this.inWater) {
       speed = WATER_SWIM_SPEED;
-    } else if (sprint) {
+    } else if (this.isSprinting) {
       speed = SPRINT_SPEED;
+    } else if (this.isCrouching) {
+      speed = CROUCH_SPEED;
     } else {
       speed = WALK_SPEED;
     }
@@ -295,6 +302,12 @@ export class Player {
       }
     }
 
+    // Lava burn damage
+    const lx = Math.floor(this.position.x), lz = Math.floor(this.position.z);
+    const lfy = Math.floor(this.position.y + 0.2), lhy = Math.floor(this.position.y + EYE_OFFSET);
+    this.inLava = this.world.getBlock(lx, lfy, lz) === BlockType.Lava || this.world.getBlock(lx, lhy, lz) === BlockType.Lava;
+    if (this.inLava && this.mode === "survival") this.damage(4 * dt);
+
     this.updateCamera();
   }
 
@@ -357,9 +370,18 @@ export class Player {
     let camX = this.position.x;
     let camY = this.position.y + EYE_OFFSET;
     let camZ = this.position.z;
+    // Crouch: lower camera
+    if (this.isCrouching) camY -= 0.3;
     let rotX = this.pitch;
     let rotY = this.yaw;
     let rotZ = 0;
+
+    // Sprint: widen FOV
+    const targetFov = this.isSprinting ? 82 : 75;
+    if (this.camera.fov !== targetFov) {
+      this.camera.fov += (targetFov - this.camera.fov) * 0.15;
+      this.camera.updateProjectionMatrix();
+    }
 
     // Damage shake: vibrate the camera when recently hit
     if (this.damageShakeTime > 0) {

@@ -71,6 +71,7 @@ export enum ItemType {
   Arrow = 421,
   Bucket = 422,
   WaterBucket = 423,
+  Gun = 424,
   // Agriculture
   Wheat = 430,
   Seeds = 431,
@@ -249,6 +250,7 @@ export const ITEMS: Record<ItemType, ItemDef> = {
   [ItemType.Arrow]: { id: ItemType.Arrow, name: "Arrow", icon: "arrow", maxStack: 64 },
   [ItemType.Bucket]: { id: ItemType.Bucket, name: "Bucket", icon: "bucket", maxStack: 16 },
   [ItemType.WaterBucket]: { id: ItemType.WaterBucket, name: "Water Bucket", icon: "water_bucket", maxStack: 1 },
+  [ItemType.Gun]: { id: ItemType.Gun, name: "Pistol", icon: "gun", maxStack: 1, maxDurability: 200, attackDamage: 8 },
   // Agriculture
   [ItemType.Wheat]: { id: ItemType.Wheat, name: "Wheat", icon: "wheat", maxStack: 64 },
   [ItemType.Seeds]: { id: ItemType.Seeds, name: "Seeds", icon: "seeds", maxStack: 64 },

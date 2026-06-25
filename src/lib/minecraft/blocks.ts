@@ -31,6 +31,9 @@ export enum BlockType {
   Glowstone = 27,
   NetherPortal = 28,
   EndStone = 29,
+  Lava = 50,
+  EndPortalFrame = 51,
+  EndPortal = 52,
   // Building blocks
   StoneBricks = 40,
   Slab = 41,
@@ -217,6 +220,21 @@ export const BLOCKS: Record<number, BlockDef> = {
     id: BlockType.EndStone, name: "End Stone",
     textures: { top: "end_stone", bottom: "end_stone", side: "end_stone" },
     layer: "opaque", solid: true,
+  },
+  [BlockType.Lava]: {
+    id: BlockType.Lava, name: "Lava",
+    textures: { top: "lava", bottom: "lava", side: "lava" },
+    layer: "translucent", solid: false,
+  },
+  [BlockType.EndPortalFrame]: {
+    id: BlockType.EndPortalFrame, name: "End Portal Frame",
+    textures: { top: "end_portal_frame", bottom: "end_stone", side: "end_portal_frame_side" },
+    layer: "opaque", solid: true,
+  },
+  [BlockType.EndPortal]: {
+    id: BlockType.EndPortal, name: "End Portal",
+    textures: { top: "end_portal", bottom: "end_portal", side: "end_portal" },
+    layer: "translucent", solid: false,
   },
   [BlockType.StoneBricks]: {
     id: BlockType.StoneBricks, name: "Stone Bricks",

@@ -590,6 +590,10 @@ export function buildItemCanvases(): Record<string, HTMLCanvasElement> {
     arrow: imageDataToCanvas(texArrow()),
     bucket: imageDataToCanvas(texBucket()),
     water_bucket: imageDataToCanvas(texWaterBucket()),
+    gun: imageDataToCanvas(texGun()),
+    end_portal_frame: imageDataToCanvas(texEndPortalFrame()),
+    end_portal_frame_side: imageDataToCanvas(texEndPortalFrameSide()),
+    end_portal: imageDataToCanvas(texEndPortal()),
     wheat: imageDataToCanvas(texWheat()),
     seeds: imageDataToCanvas(texSeeds()),
     sugar: imageDataToCanvas(texSugar()),
@@ -730,6 +734,54 @@ function texWaterBucket(): ImageData {
   // Water inside top of bucket
   fillRect(img, 4, 5, 8, 2, water);
   fillRect(img, 4, 5, 8, 1, waterLight);
+  return img;
+}
+
+// Gun (Pistol)
+function texGun(): ImageData {
+  const img = new ImageData(16, 16); clearTransparent(img);
+  const iron = hexToRgb("#484848"), ironLight = hexToRgb("#686868"), ironDark = hexToRgb("#282828"), wood = hexToRgb("#5a3a18");
+  fillRect(img, 2, 4, 10, 3, iron); fillRect(img, 2, 4, 10, 1, ironLight); fillRect(img, 2, 6, 10, 1, ironDark);
+  fillRect(img, 11, 4, 2, 3, ironDark); setPixel(img, 12, 5, ironDark);
+  fillRect(img, 5, 3, 4, 1, iron); setPixel(img, 6, 2, iron);
+  fillRect(img, 3, 7, 8, 3, iron); fillRect(img, 3, 7, 8, 1, ironLight);
+  fillRect(img, 7, 10, 3, 1, iron); setPixel(img, 7, 11, iron); setPixel(img, 9, 11, iron);
+  fillRect(img, 3, 10, 3, 5, wood); fillRect(img, 4, 10, 1, 5, ironDark);
+  setPixel(img, 8, 9, ironDark); return img;
+}
+
+// End Portal Frame (top)
+function texEndPortalFrame(): ImageData {
+  const img = new ImageData(16, 16);
+  const stone = [120,120,120] as [number,number,number], stoneDark = [80,80,80] as [number,number,number];
+  const green = [26,138,74] as [number,number,number], greenDark = [10,74,42] as [number,number,number];
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) setPixel(img, i, j, stone, 255);
+  fillRect(img, 0, 7, 16, 1, stoneDark); fillRect(img, 7, 0, 1, 8, stoneDark);
+  fillRect(img, 3, 8, 1, 8, stoneDark); fillRect(img, 11, 8, 1, 8, stoneDark);
+  fillRect(img, 5, 5, 6, 6, greenDark); fillRect(img, 6, 6, 4, 4, green);
+  return img;
+}
+
+// End Portal Frame (side)
+function texEndPortalFrameSide(): ImageData {
+  const img = new ImageData(16, 16);
+  const stone = [120,120,120] as [number,number,number], stoneDark = [80,80,80] as [number,number,number];
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) setPixel(img, i, j, stone, 255);
+  fillRect(img, 0, 7, 16, 1, stoneDark); fillRect(img, 7, 0, 1, 8, stoneDark);
+  fillRect(img, 3, 8, 1, 8, stoneDark); fillRect(img, 11, 8, 1, 8, stoneDark);
+  return img;
+}
+
+// End Portal (black with green swirl)
+function texEndPortal(): ImageData {
+  const img = new ImageData(16, 16);
+  const black = [0,0,0] as [number,number,number], green = [10,42,26] as [number,number,number], greenLight = [26,74,42] as [number,number,number];
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) setPixel(img, i, j, black, 255);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const dx = x - 8, dy = y - 8, dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < 6 && Math.sin(dist * 2 + (x + y) * 0.5) > 0) setPixel(img, x, y, greenLight);
+    else if (dist < 7) setPixel(img, x, y, green);
+  }
   return img;
 }
 

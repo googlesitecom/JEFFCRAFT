@@ -362,6 +362,11 @@ export const RECIPES: Recipe[] = [
     type: "shaped", pattern: pat(["I.I", ".I."], { I: ItemType.IronIngot }),
     result: { id: ItemType.Bucket, count: 1 }, requiresTable: true,
   },
+  // Pistol: 6 iron + 3 stone
+  {
+    type: "shaped", pattern: pat(["III", "ISS", "ISS"], { I: ItemType.IronIngot, S: BlockType.Cobblestone }),
+    result: { id: ItemType.Gun, count: 1 }, requiresTable: true,
+  },
   // Flint and Steel already exists above
   // === RESOURCE BLOCKS ===
   // Iron Block: 9 iron ingots

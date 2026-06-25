@@ -46,6 +46,8 @@ export class Chunk {
 
 export type BiomeType = "plains" | "forest" | "mountains" | "desert";
 
+export type Dimension = "overworld" | "nether" | "end";
+
 export class World {
   chunks: Map<string, Chunk> = new Map();
   noise2D: ReturnType<typeof createNoise2D>;
@@ -54,7 +56,9 @@ export class World {
   noise2DBiomeTemp: ReturnType<typeof createNoise2D>;
   noise3D: ReturnType<typeof createNoise3D>;
   noise3DTree: ReturnType<typeof createNoise3D>;
+  noise2DVillage: ReturnType<typeof createNoise2D>;
   seed: number;
+  dimension: Dimension = "overworld";
   playerModifications: Map<string, number> = new Map();
   private _trackPlayerMods: boolean = false;
 
@@ -66,6 +70,7 @@ export class World {
     this.noise2DBiomeTemp = createNoise2D(alea(seed + 888));
     this.noise3D = createNoise3D(alea(seed + 555));
     this.noise3DTree = createNoise3D(alea(seed + 31337));
+    this.noise2DVillage = createNoise2D(alea(seed + 99999));
   }
 
   key(cx: number, cz: number): string { return `${cx},${cz}`; }
@@ -208,6 +213,8 @@ export class World {
   // === CHUNK GENERATION ===
   generateChunk(chunk: Chunk) {
     if (chunk.generated) return;
+    if (this.dimension === "nether") { this.generateNetherChunk(chunk); return; }
+    if (this.dimension === "end") { this.generateEndChunk(chunk); return; }
     const x0 = chunk.cx * CHUNK_SIZE;
     const z0 = chunk.cz * CHUNK_SIZE;
 
@@ -375,6 +382,180 @@ export class World {
     }
 
     chunk.decorated = true;
+
+    // Village + Stronghold generation
+    this.tryGenerateVillage(Math.floor(x0 / CHUNK_SIZE), Math.floor(z0 / CHUNK_SIZE));
+    this.tryGenerateStronghold(Math.floor(x0 / CHUNK_SIZE), Math.floor(z0 / CHUNK_SIZE));
+  }
+
+  clearAllChunks() { this.chunks.clear(); }
+
+  // === FLUID FLOW ===
+  fluidUpdateQueue: Array<{ x: number; y: number; z: number; type: BlockType }> = [];
+  queueFluidUpdate(x: number, y: number, z: number, type: BlockType) { this.fluidUpdateQueue.push({ x, y, z, type }); }
+  processFluidFlow(maxSteps: number = 50): boolean {
+    if (this.fluidUpdateQueue.length === 0) return false;
+    let steps = 0;
+    while (this.fluidUpdateQueue.length > 0 && steps < maxSteps) {
+      const { x, y, z, type } = this.fluidUpdateQueue.shift()!;
+      steps++;
+      if (this.getBlockIfLoaded(x, y, z) !== type) continue;
+      if (y > 0) {
+        const below = this.getBlockIfLoaded(x, y - 1, z);
+        if (below === BlockType.Air) { this.setBlock(x, y - 1, z, type); this.queueFluidUpdate(x, y - 1, z, type); continue; }
+      }
+      for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        if (this.getBlockIfLoaded(x+dx, y, z+dz) === BlockType.Air) { this.setBlock(x+dx, y, z+dz, type); this.queueFluidUpdate(x+dx, y, z+dz, type); }
+      }
+    }
+    return true;
+  }
+
+  // === NETHER GENERATION ===
+  private generateNetherChunk(chunk: Chunk) {
+    const x0 = chunk.cx * CHUNK_SIZE, z0 = chunk.cz * CHUNK_SIZE;
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+        const wx = x0 + lx, wz = z0 + lz;
+        const n1 = this.noise2D(wx * 0.05, wz * 0.05), n2 = this.noise2DDetail(wx * 0.1, wz * 0.1);
+        const floorH = Math.floor(30 + n1 * 15 + n2 * 5), ceilH = Math.floor(100 + n2 * 10);
+        for (let y = 0; y < WORLD_HEIGHT; y++) {
+          if (y <= 2 || y >= 125) { chunk.setLocal(lx, y, lz, BlockType.Bedrock); continue; }
+          if (y < floorH) chunk.setLocal(lx, y, lz, BlockType.Netherrack);
+          else if (y === floorH) chunk.setLocal(lx, y, lz, n2 < -0.3 ? BlockType.SoulSand : BlockType.Netherrack);
+          else if (y > ceilH) chunk.setLocal(lx, y, lz, BlockType.Netherrack);
+          else if (y < 32 && n1 < -0.3) chunk.setLocal(lx, y, lz, BlockType.Lava);
+          else chunk.setLocal(lx, y, lz, BlockType.Air);
+        }
+        if (Math.abs(n2) < 0.05 && n1 > 0.3) chunk.setLocal(lx, ceilH - 1, lz, BlockType.Glowstone);
+      }
+    }
+    chunk.generated = true; chunk.decorated = true;
+    // Nether fortress
+    const fn = this.noise2DVillage(chunk.cx * 0.04 + 2000, chunk.cz * 0.04 + 2000);
+    if (fn > 0.75) {
+      const cx = x0 + 8, cz = z0 + 8;
+      let fy = 35;
+      for (let y = 40; y >= 3; y--) { if (chunk.getLocal(8, y, 8) !== BlockType.Air && chunk.getLocal(8, y, 8) !== BlockType.Lava) { fy = y + 1; break; } }
+      this.buildNetherFortress(cx, fy, cz);
+    }
+  }
+
+  private buildNetherFortress(cx: number, baseY: number, cz: number) {
+    const rng = (() => { let s = (cx * 31 + cz * 17 + this.seed * 7) >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();
+    const m = BlockType.Netherrack;
+    const len = 20 + Math.floor(rng() * 15), dir = Math.floor(rng() * 4);
+    let bx = cx, bz = cz;
+    for (let s = 0; s < len; s++) {
+      for (let dw = -2; dw <= 2; dw++) {
+        const tx = dir < 2 ? bx + dw : bx, tz = dir >= 2 ? bz + dw : bz;
+        this.setBlock(tx, baseY - 1, tz, m);
+        for (let dy = 0; dy < 4; dy++) this.setBlock(tx, baseY + dy, tz, BlockType.Air);
+      }
+      if (dir === 0) bx++; else if (dir === 1) bx--; else if (dir === 2) bz++; else bz--;
+    }
+    // Blaze spawner rooms
+    for (let r = 0; r < 2 + Math.floor(rng() * 2); r++) {
+      const rx = cx + Math.floor((rng() - 0.5) * len), rz = cz + Math.floor((rng() - 0.5) * len), ry = baseY + 1;
+      for (let dy = 0; dy < 5; dy++) for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) this.setBlock(rx+dx, ry+dy, rz+dz, BlockType.Air);
+      for (let dy = -1; dy <= 5; dy++) for (let i = -3; i <= 3; i++) { this.setBlock(rx+i, ry+dy, rz-4, m); this.setBlock(rx+i, ry+dy, rz+4, m); this.setBlock(rx-4, ry+dy, rz+i, m); this.setBlock(rx+4, ry+dy, rz+i, m); }
+      this.setBlock(rx, ry, rz, BlockType.Furnace); // Blaze spawner proxy
+      this.setBlock(rx-3, ry+4, rz-3, BlockType.Glowstone); this.setBlock(rx+3, ry+4, rz+3, BlockType.Glowstone);
+      this.setBlock(rx+3, ry, rz-3, BlockType.GoldOre); this.setBlock(rx-3, ry, rz+3, BlockType.IronOre);
+    }
+  }
+
+  // === END GENERATION ===
+  private generateEndChunk(chunk: Chunk) {
+    const x0 = chunk.cx * CHUNK_SIZE, z0 = chunk.cz * CHUNK_SIZE;
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+        const wx = x0 + lx, wz = z0 + lz;
+        const dist = Math.sqrt(wx * wx + wz * wz), n = this.noise2D(wx * 0.02, wz * 0.02);
+        if (dist < 50) { for (let y = 45; y <= 50; y++) chunk.setLocal(lx, y, lz, BlockType.EndStone); }
+        else if (dist > 100 && n > 0.2) { const iy = 50 + Math.floor(n * 20); for (let y = iy; y < iy + 5; y++) if (y < WORLD_HEIGHT) chunk.setLocal(lx, y, lz, BlockType.EndStone); }
+        // Obsidian pillars
+        for (let p = 0; p < 10; p++) {
+          const pa = (p / 10) * Math.PI * 2, pr = 20 + (p % 3) * 5;
+          const px = Math.floor(Math.cos(pa) * pr), pz = Math.floor(Math.sin(pa) * pr);
+          if (wx === px && wz === pz) {
+            const ph = 10 + (p * 7 % 20);
+            for (let y = 50; y < 50 + ph; y++) if (y < WORLD_HEIGHT) chunk.setLocal(lx, y, lz, BlockType.Obsidian);
+            if (50 + ph < WORLD_HEIGHT) chunk.setLocal(lx, 50 + ph, lz, BlockType.Glowstone);
+          }
+        }
+        if (wx === 0 && wz === 0) for (let dy = -2; dy <= 2; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) if (Math.abs(dx)+Math.abs(dz) <= 1) chunk.setLocal(lx, 48+dy, lz, BlockType.Bedrock);
+      }
+    }
+    chunk.generated = true; chunk.decorated = true;
+  }
+
+  // === VILLAGE ===
+  tryGenerateVillage(chunkX: number, chunkZ: number) {
+    const vn = this.noise2DVillage(chunkX * 0.08, chunkZ * 0.08);
+    if (vn < 0.85) return;
+    const cx = chunkX * CHUNK_SIZE + 8, cz = chunkZ * CHUNK_SIZE + 8;
+    let sy = -1;
+    for (let y = WORLD_HEIGHT - 1; y >= 1; y--) { const b = this.getBlockIfLoaded(cx, y, cz); if (b !== undefined && b !== BlockType.Air && b !== BlockType.Water) { sy = y; break; } }
+    if (sy < 5 || this.getBlockIfLoaded(cx, sy, cz) !== BlockType.Grass) return;
+    const num = 3 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < num; i++) {
+      const a = (i / num) * Math.PI * 2, d = 4 + Math.random() * 6;
+      const hx = cx + Math.round(Math.cos(a) * d), hz = cz + Math.round(Math.sin(a) * d);
+      let hy = sy; for (let y = WORLD_HEIGHT - 1; y >= 1; y--) { const b = this.getBlockIfLoaded(hx, y, hz); if (b !== undefined && b !== BlockType.Air && b !== BlockType.Water) { hy = y; break; } }
+      this.buildVillageHouse(hx, hy + 1, hz);
+    }
+  }
+  private buildVillageHouse(cx: number, baseY: number, cz: number) {
+    const minX = cx - 2, maxX = cx + 2, minZ = cz - 2, maxZ = cz + 2;
+    for (let x = minX; x <= maxX; x++) for (let z = minZ; z <= maxZ; z++) this.setBlock(x, baseY - 1, z, BlockType.Planks);
+    for (let y = 0; y < 3; y++) { for (let x = minX; x <= maxX; x++) { if (x === cx && y < 2) continue; this.setBlock(x, baseY+y, minZ, BlockType.Cobblestone); this.setBlock(x, baseY+y, maxZ, BlockType.Cobblestone); } for (let z = minZ; z <= maxZ; z++) { this.setBlock(minX, baseY+y, z, BlockType.Cobblestone); this.setBlock(maxX, baseY+y, z, BlockType.Cobblestone); } }
+    this.setBlock(cx, baseY, maxZ, BlockType.WoodenDoor); this.setBlock(cx, baseY+1, maxZ, BlockType.WoodenDoor);
+    for (let x = minX-1; x <= maxX+1; x++) for (let z = minZ-1; z <= maxZ+1; z++) this.setBlock(x, baseY+3, z, BlockType.Wood);
+    this.setBlock(cx, baseY, cz-1, BlockType.Furnace); this.setBlock(cx+1, baseY, cz-1, BlockType.CraftingTable);
+    this.setBlock(cx-1, baseY-2, cz-1, BlockType.IronOre); this.setBlock(cx+1, baseY-2, cz-1, BlockType.CoalOre);
+    this.setBlock(minX+1, baseY+2, minZ+1, BlockType.Torch); this.setBlock(maxX-1, baseY+2, maxZ-1, BlockType.Torch);
+  }
+
+  // === STRONGHOLD ===
+  strongholdPositions: Array<{ x: number; z: number }> | null = null;
+  computeStrongholdPositionsPublic() {
+    if (this.strongholdPositions) return;
+    const pos: Array<{ x: number; z: number }> = [];
+    const a0 = (this.seed % 360) * Math.PI / 180;
+    for (let i = 0; i < 3; i++) { const a = a0 + (i * 120 * Math.PI / 180); const r = 640 + (this.seed * (i+1) % 512); pos.push({ x: Math.floor(Math.cos(a) * r), z: Math.floor(Math.sin(a) * r) }); }
+    this.strongholdPositions = pos;
+  }
+  tryGenerateStronghold(chunkX: number, chunkZ: number) {
+    this.computeStrongholdPositionsPublic();
+    if (!this.strongholdPositions) return;
+    const cx = chunkX * CHUNK_SIZE + 8, cz = chunkZ * CHUNK_SIZE + 8;
+    for (const p of this.strongholdPositions) { if (Math.abs(cx - p.x) <= 8 && Math.abs(cz - p.z) <= 8) { this.buildStronghold(p.x, 20, p.z); return; } }
+  }
+  private buildStronghold(cx: number, baseY: number, cz: number) {
+    const rng = (() => { let s = (cx * 7919 + cz * 6271 + this.seed) >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; })();
+    // Maze corridors
+    for (let c = 0; c < 5; c++) {
+      const dir = Math.floor(rng() * 4), len = 10 + Math.floor(rng() * 15), h = baseY + Math.floor(rng() * 4);
+      let x = cx, z = cz;
+      for (let s = 0; s < len; s++) {
+        for (let dy = 0; dy < 3; dy++) for (let dw = -1; dw <= 1; dw++) { const tx = dir < 2 ? x + dw : x, tz = dir >= 2 ? z + dw : z; this.setBlock(tx, h+dy, tz, BlockType.Air); }
+        if (dir === 0) x++; else if (dir === 1) x--; else if (dir === 2) z++; else z--;
+      }
+    }
+    // Portal room
+    const pY = 12, pminX = cx - 4, pmaxX = cx + 4, pminZ = cz - 4, pmaxZ = cz + 4;
+    for (let y = 0; y < 5; y++) for (let x = pminX; x <= pmaxX; x++) for (let z = pminZ; z <= pmaxZ; z++) this.setBlock(x, pY+y, z, BlockType.Air);
+    for (let y = -1; y <= 5; y++) { for (let x = pminX-1; x <= pmaxX+1; x++) { this.setBlock(x, pY+y, pminZ-1, BlockType.StoneBricks); this.setBlock(x, pY+y, pmaxZ+1, BlockType.StoneBricks); } for (let z = pminZ-1; z <= pmaxZ+1; z++) { this.setBlock(pminX-1, pY+y, z, BlockType.StoneBricks); this.setBlock(pmaxX+1, pY+y, z, BlockType.StoneBricks); } }
+    for (let x = pminX-1; x <= pmaxX+1; x++) for (let z = pminZ-1; z <= pmaxZ+1; z++) { this.setBlock(x, pY-1, z, BlockType.StoneBricks); this.setBlock(x, pY+5, z, BlockType.StoneBricks); }
+    // Silverfish spawner + End Portal frame
+    this.setBlock(cx, pY, cz - 3, BlockType.Furnace);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { if (dx === 0 && dz === 0) this.setBlock(cx, pY, cz, BlockType.Air); else this.setBlock(cx+dx, pY, cz+dz, BlockType.EndPortalFrame); }
+    this.setBlock(pminX+1, pY+3, pminZ+1, BlockType.Torch); this.setBlock(pmaxX-1, pY+3, pmaxZ-1, BlockType.Torch);
+    // Stairs to surface
+    for (let y = 0; y < 15; y++) { this.setBlock(cx, pY+y, pmaxZ+2, BlockType.Air); this.setBlock(cx, pY+y, pmaxZ+3, BlockType.Air); this.setBlock(cx-1, pY+y, pmaxZ+2, BlockType.StoneBricks); this.setBlock(cx+1, pY+y, pmaxZ+2, BlockType.StoneBricks); }
+    // Loot
+    this.setBlock(pminX+1, pY, pminZ+1, BlockType.DiamondOre); this.setBlock(pmaxX-1, pY, pmaxZ-1, BlockType.IronOre);
   }
 
   // === TREE ===
