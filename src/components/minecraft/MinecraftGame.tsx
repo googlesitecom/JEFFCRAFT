@@ -435,6 +435,12 @@ export default function MinecraftGame() {
       depthWrite: true,
     });
     // Water material: semi-transparent blue with depth-based color shift
+    // Two variants:
+    //   - "plain" Lambert (default): cheap, no shaders required.
+    //   - "shader" WaterShader: realistic waves + fresnel + specular + caustics.
+    //     Used when `gfxSettings.shadersEnabled && shaderWaterWaves` is on. The
+    //     swap happens in the render loop (we re-assign chunkMaterials' water
+    //     material whenever the toggle changes).
     const transparentMaterial = new THREE.MeshLambertMaterial({
       vertexColors: true,
       map: atlas.texture,
@@ -579,6 +585,25 @@ export default function MinecraftGame() {
 
     // === Shader Manager (OptiFine-like post-processing) ===
     const shaderManager = new ShaderManager(renderer, scene, camera);
+
+    // === Realistic water material (lazy-init when first enabled) ===
+    // We keep both materials around and swap them on the live chunk meshes when
+    // the user toggles `shaderWaterWaves`.
+    let waterShaderMat: THREE.ShaderMaterial | null = null;
+    let waterShaderActive = false; // tracks whether chunk meshes currently use the shader
+    function applyWaterShader(useShader: boolean) {
+      if (useShader && !waterShaderMat) {
+        waterShaderMat = shaderManager.createWaterMaterial();
+      }
+      if (useShader === waterShaderActive) return;
+      waterShaderActive = useShader;
+      const targetMat = useShader ? waterShaderMat : transparentMaterial;
+      if (!targetMat) return;
+      // Swap material on every existing chunk's transparent mesh
+      chunkMeshes.forEach((m) => {
+        if (m.transparent) m.transparent.material = targetMat;
+      });
+    }
 
     // === Multiplayer remote player rendering ===
     // Map of peer ID → PlayerModel (3D mesh)
@@ -752,6 +777,10 @@ export default function MinecraftGame() {
         old.glass.geometry.dispose();
       }
       const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, cutoutMaterial, transparentMaterial, glassMaterial);
+      // If the water shader is currently active, swap the material on this fresh chunk too
+      if (waterShaderActive && waterShaderMat && meshes.transparent) {
+        meshes.transparent.material = waterShaderMat;
+      }
       if (meshes.opaque) chunkGroup.add(meshes.opaque);
       if (meshes.cutout) chunkGroup.add(meshes.cutout);
       if (meshes.transparent) chunkGroup.add(meshes.transparent);
@@ -2101,16 +2130,68 @@ export default function MinecraftGame() {
       }
       if (shaderManager.enabled) {
         shaderManager.updateSetting("bloom", gss.shaderBloom);
-        shaderManager.updateSetting("ssao", gss.shaderSSAO);
         shaderManager.updateSetting("godRays", gss.shaderGodRays);
         shaderManager.updateSetting("waterWaves", gss.shaderWaterWaves);
         shaderManager.updateSetting("windEffect", gss.shaderWind);
         shaderManager.updateSetting("fog", gss.shaderFog);
         shaderManager.updateSetting("toneMappingExposure", gss.toneMapping);
+
+        // Compute sun direction in world space (from dayTime — same as updateDayNight)
+        const sunAngle = (dayTime - 0.25) * Math.PI * 2;
+        const sunDirWorld = new THREE.Vector3(
+          Math.cos(sunAngle),
+          Math.sin(sunAngle),
+          0.3
+        ).normalize();
+        // Project sun position to screen space for god rays
+        const sunWorldPos = new THREE.Vector3(
+          player.position.x + Math.cos(sunAngle) * 150,
+          player.position.y + Math.sin(sunAngle) * 150,
+          player.position.z
+        );
+        const sunScreen = sunWorldPos.clone().project(camera);
+        const sunScreenPos = new THREE.Vector2(
+          (sunScreen.x + 1) * 0.5,
+          (sunScreen.y + 1) * 0.5
+        );
+        // Skip god rays if sun is behind the camera
+        const sunVisible = sunScreen.z < 1 && Math.abs(sunScreen.x) < 1.5 && Math.abs(sunScreen.y) < 1.5;
+        const fogColor = (scene.fog as THREE.Fog)?.color ?? new THREE.Color("#87ceeb");
+        const fogNear = (scene.fog as THREE.Fog)?.near ?? 30;
+        const fogFar = (scene.fog as THREE.Fog)?.far ?? 80;
+        shaderManager.updateDynamicUniforms(
+          sunVisible ? sunScreenPos : null,
+          sunDirWorld,
+          camera.position,
+          (scene.background as THREE.Color) ?? new THREE.Color("#87ceeb"),
+          fogColor,
+          fogNear,
+          fogFar
+        );
+
+        // Apply water shader swap if needed (lazy-init, idempotent)
+        applyWaterShader(gss.shaderWaterWaves);
+
         shaderManager.render();
       } else {
+        // Make sure we revert to Lambert water if shaders are disabled
+        applyWaterShader(false);
         renderer.render(scene, camera);
       }
+
+      // Sync hand lighting with day/night cycle so the hand dims at night
+      // and warms when near a torch
+      const _sunAngle = (dayTime - 0.25) * Math.PI * 2;
+      const _sunHeight = Math.sin(_sunAngle);
+      const _dayFactor = Math.max(0, Math.min(1, (_sunHeight + 0.2) / 0.4));
+      // Detect if any torch light is near the player (within 6 blocks)
+      let torchNear = false;
+      for (const tl of torchLights.values()) {
+        if (tl.position.distanceTo(player.position) < 6) { torchNear = true; break; }
+      }
+      handView.setWorldLight(_dayFactor, torchNear);
+      // Tell the hand whether we're actively mining (so it auto-loops the break swing)
+      handView.miningHeld = !!(leftMouseDown && miningBlock && !player.isDead());
 
       // Render first-person hand on top
       handView.update(dt);
@@ -2180,6 +2261,8 @@ export default function MinecraftGame() {
       dragonManager.dispose();
       dragonManagerRef.current = null;
       shaderManager.dispose();
+      // Dispose water shader material (if it was created)
+      if (waterShaderMat) { waterShaderMat.dispose(); waterShaderMat = null; }
       // Dispose remote player models (multiplayer)
       for (const [peerId, model] of remotePlayerModels) {
         scene.remove(model.group);
@@ -2870,7 +2953,7 @@ export default function MinecraftGame() {
                 <div className="grid grid-cols-2 gap-2">
                   <GfxToggle label="✨ Activar Shaders" desc="Post-procesamiento completo" value={gfxSettings.shadersEnabled} onChange={(v) => { setGfxSettings(s => ({...s, shadersEnabled: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadersEnabled: v}; }} />
                   <GfxToggle label="Bloom" desc="Resplandor de luz" value={gfxSettings.shaderBloom} onChange={(v) => { setGfxSettings(s => ({...s, shaderBloom: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderBloom: v}; }} />
-                  <GfxToggle label="SSAO" desc="Sombras en esquinas" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} />
+                  <GfxToggle label="SSAO" desc="Sombras en esquinas (mejor dejar OFF, ya viene color grade)" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} />
                   <GfxToggle label="God Rays" desc="Rayos de sol" value={gfxSettings.shaderGodRays} onChange={(v) => { setGfxSettings(s => ({...s, shaderGodRays: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderGodRays: v}; }} />
                   <GfxToggle label="Ondas agua" desc="Oleaje Gerstner" value={gfxSettings.shaderWaterWaves} onChange={(v) => { setGfxSettings(s => ({...s, shaderWaterWaves: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWaterWaves: v}; }} />
                   <GfxToggle label="Viento" desc="Movimiento de hojas" value={gfxSettings.shaderWind} onChange={(v) => { setGfxSettings(s => ({...s, shaderWind: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWind: v}; }} />
