@@ -265,10 +265,6 @@ export default function MinecraftGame() {
   const [mpConnected, setMpConnected] = useState(false);
   const [mpError, setMpError] = useState<string>("");
   const [showHostPanel, setShowHostPanel] = useState(false);
-  // Click-to-resume overlay — shown when a controller user activates Continuar
-  // (browsers don't accept rAF-polled gamepad presses as user gestures for
-  // requestPointerLock, so we need a real mouse click to resume).
-  const [showClickToResume, setShowClickToResume] = useState(false);
   // Lifted MainMenu state — allows controller navigation of the saved-worlds sub-list
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
@@ -286,7 +282,7 @@ export default function MinecraftGame() {
     screen === "create-world" ||
     screen === "multiplayer" ||
     (screen === "playing" && (
-      showClickToResume || showInventory || showCraftingTable || showFurnace || showChest ||
+      showInventory || showCraftingTable || showFurnace || showChest ||
       showConfig || showControls || showGraphics || showHostPanel || showLoadMenu ||
       (!isLocked && !isDead) // pause overlay open
     )) ||
@@ -2812,17 +2808,18 @@ export default function MinecraftGame() {
   }, [currentWorld]);
 
   const handleStartClick = useCallback(() => {
-    // Browsers require a transient user activation (real mousedown/keydown) for
-    // requestPointerLock(). Gamepad button presses detected via rAF polling do
-    // NOT count as user gestures. So when the user activates "Continuar" via
-    // controller A button, we show a click-to-resume overlay instead of failing
-    // silently. The overlay's click handler then performs the actual pointer lock.
-    if (inputModeRef.current === "controller") {
-      setShowClickToResume(true);
-      return;
-    }
+    // Attempt to re-lock the pointer directly. Some browsers accept this from
+    // a gamepad-polled callback; others require a real mouse click. If the
+    // browser blocks it, the user can click the canvas to re-lock (handled by
+    // handleCanvasClick). We try the request and don't show any overlay.
     const canvas = containerRef.current?.querySelector("canvas");
-    canvas?.requestPointerLock();
+    if (canvas) {
+      const p = canvas.requestPointerLock();
+      // If it returns a promise (newer browsers), catch any rejection silently
+      if (p && typeof (p as any).catch === "function") {
+        (p as Promise<void>).catch(() => {});
+      }
+    }
   }, []);
 
   // === SCREENS ===
@@ -3478,38 +3475,6 @@ export default function MinecraftGame() {
       {!isLoaded && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
           <div className="text-white font-mono text-xl">Generando mundo...</div>
-        </div>
-      )}
-
-      {/* Click-to-resume overlay — shown when a controller user presses Continuar.
-          Works with mouse click OR touch. */}
-      {showClickToResume && (
-        <div
-          className="absolute inset-0 z-[70] flex items-center justify-center cursor-pointer"
-          style={{ backgroundColor: "rgba(0,0,0,0.85)", touchAction: "manipulation" }}
-          onClick={() => {
-            const canvas = containerRef.current?.querySelector("canvas");
-            canvas?.requestPointerLock();
-            setShowClickToResume(false);
-          }}
-          onTouchEnd={(e) => {
-            e.preventDefault();
-            const canvas = containerRef.current?.querySelector("canvas");
-            canvas?.requestPointerLock();
-            setShowClickToResume(false);
-          }}
-        >
-          <div className="text-center" style={{ pointerEvents: "none" }}>
-            <div className="text-white font-mono text-3xl font-black mb-3" style={{ textShadow: "3px 3px 0 #000" }}>
-              ▶ Toca para continuar
-            </div>
-            <div className="text-yellow-300 font-mono text-sm" style={{ textShadow: "1px 1px 0 #000" }}>
-              El navegador requiere un click/tap real para capturar el mouse
-            </div>
-            <div className="text-stone-400 font-mono text-xs mt-2">
-              (Esto no pasa con teclado/ratón)
-            </div>
-          </div>
         </div>
       )}
 
