@@ -562,7 +562,11 @@ export default function MinecraftGame() {
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // Cap pixel ratio at 1.5 for performance. Adaptive scaling is handled in
+    // the render loop (drops to 1.0 if FPS < 40, recovers to 1.5 if FPS > 55).
+    const targetPixelRatio = Math.min(window.devicePixelRatio, 1.5);
+    renderer.setPixelRatio(targetPixelRatio);
+    let currentPixelRatio = targetPixelRatio;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.45;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1922,8 +1926,12 @@ export default function MinecraftGame() {
       const usingController = inputModeRef.current === "controller";
       const gp = usingController ? readGamepad(0) : null;
 
-      // If controller is active and we have a gamepad, use it for everything
-      if (gp && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest) {
+      // If controller is active and we have a gamepad, use it for everything.
+      // IMPORTANT: skip gameplay input when the pause menu is open (pointer
+      // unlocked but not dead and no overlay) — that's when the virtual mouse
+      // is active and RT should NOT mine blocks.
+      const pauseMenuOpen = screen === "playing" && !isLocked && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest;
+      if (gp && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest && !pauseMenuOpen) {
         // Movement: left stick → WASD
         player.setKey("KeyW", gp.moveY < -0.3);
         player.setKey("KeyS", gp.moveY > 0.3);
@@ -2021,9 +2029,11 @@ export default function MinecraftGame() {
       }
 
       // === Player update ===
-      // Keyboard: requires pointer lock. Controller: works without it.
+      // Keyboard: requires pointer lock. Controller: works without it, but
+      // we still pause when the pause menu is open (so the player doesn't
+      // keep moving/falling while the user is navigating the menu).
       const canUpdate = usingController
-        ? (!player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest)
+        ? (!player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest && !pauseMenuOpen)
         : (document.pointerLockElement === renderer.domElement && !player.isDead());
       if (canUpdate) {
         if (isDragonMounted) {
@@ -2519,6 +2529,15 @@ export default function MinecraftGame() {
           fps: newFps,
           chunks: chunkMeshes.size,
         }));
+        // === Adaptive pixel ratio — drop resolution if FPS is low, recover when high ===
+        // This is the single biggest performance lever for fillrate-bound scenes.
+        if (newFps < 35 && currentPixelRatio > 1.0) {
+          currentPixelRatio = 1.0;
+          renderer.setPixelRatio(currentPixelRatio);
+        } else if (newFps > 55 && currentPixelRatio < targetPixelRatio) {
+          currentPixelRatio = targetPixelRatio;
+          renderer.setPixelRatio(currentPixelRatio);
+        }
       }
       posUpdateCounter++;
       if (posUpdateCounter > 8) {
@@ -3346,6 +3365,7 @@ export default function MinecraftGame() {
                     <ControlRow keys="Back" desc="Dragón espera/sigue" />
                     <ControlRow keys="Start" desc="Pausar / Reanudar" />
                     <ControlRow keys="A / B" desc="Confirmar / Volver (en menús)" />
+                    <ControlRow keys="RT (mantener)" desc="Mouse digital (solo en menús)" />
                   </>
                 )}
               </div>
@@ -3434,19 +3454,23 @@ export default function MinecraftGame() {
             <h1 className="text-5xl font-bold mb-6" style={{ fontFamily: "monospace" }}>¡Has muerto!</h1>
             <div className="flex gap-4 justify-center">
               <button
-                onClick={handleRespawn}
+                onClick={(e) => { e.preventDefault(); handleRespawn(); }}
+                onTouchEnd={(e) => { e.preventDefault(); handleRespawn(); }}
                 className={`px-6 py-3 border-2 rounded text-lg font-bold transition-all ${deathNav.selectedIndex === 0 ? "scale-110 bg-green-600 border-green-300 shadow-[0_0_20px_rgba(150,255,150,0.6)]" : "bg-green-700 hover:bg-green-600 border-green-500"}`}
+                style={{ touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}
               >
                 Reaparecer
               </button>
               <button
-                onClick={handleExitToMenu}
+                onClick={(e) => { e.preventDefault(); handleExitToMenu(); }}
+                onTouchEnd={(e) => { e.preventDefault(); handleExitToMenu(); }}
                 className={`px-6 py-3 border-2 rounded text-lg font-bold transition-all ${deathNav.selectedIndex === 1 ? "scale-110 bg-stone-500 border-stone-200 shadow-[0_0_20px_rgba(200,200,200,0.5)]" : "bg-stone-700 hover:bg-stone-600 border-stone-500"}`}
+                style={{ touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}
               >
                 Menú principal
               </button>
             </div>
-            <p className="mt-4 text-stone-300 text-sm font-mono">🎮 A: confirmar · D-Pad: navegar</p>
+            <p className="mt-4 text-stone-300 text-sm font-mono">🎮 A: confirmar · D-Pad: navegar · o toca un botón</p>
           </div>
         </div>
       )}
@@ -3457,23 +3481,30 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* Click-to-resume overlay — shown when a controller user presses Continuar */}
+      {/* Click-to-resume overlay — shown when a controller user presses Continuar.
+          Works with mouse click OR touch. */}
       {showClickToResume && (
         <div
           className="absolute inset-0 z-[70] flex items-center justify-center cursor-pointer"
-          style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
+          style={{ backgroundColor: "rgba(0,0,0,0.85)", touchAction: "manipulation" }}
           onClick={() => {
             const canvas = containerRef.current?.querySelector("canvas");
             canvas?.requestPointerLock();
             setShowClickToResume(false);
           }}
+          onTouchEnd={(e) => {
+            e.preventDefault();
+            const canvas = containerRef.current?.querySelector("canvas");
+            canvas?.requestPointerLock();
+            setShowClickToResume(false);
+          }}
         >
-          <div className="text-center">
+          <div className="text-center" style={{ pointerEvents: "none" }}>
             <div className="text-white font-mono text-3xl font-black mb-3" style={{ textShadow: "3px 3px 0 #000" }}>
-              ▶ Click para continuar
+              ▶ Toca para continuar
             </div>
             <div className="text-yellow-300 font-mono text-sm" style={{ textShadow: "1px 1px 0 #000" }}>
-              El navegador requiere un click real para capturar el mouse
+              El navegador requiere un click/tap real para capturar el mouse
             </div>
             <div className="text-stone-400 font-mono text-xs mt-2">
               (Esto no pasa con teclado/ratón)
@@ -3500,12 +3531,12 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* Virtual digital mouse cursor — shown when the user presses View/Back
-          (Xbox "two squares" button) while a gamepad is connected. */}
+      {/* Virtual digital mouse cursor — shown when the user holds the Right
+          Trigger (RT) while a gamepad is connected. */}
       <VirtualMouseCursor visible={virtualMouse.visible} pos={virtualMouse.pos} />
       {virtualMouse.visible && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[90] px-3 py-1.5 bg-stone-900/90 border-2 border-cyan-500 rounded text-cyan-300 font-mono text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
-          🖱️ Mouse digital · Stick Der: mover · A: click · X: click der · B: salir
+          🖱️ Mouse digital · Stick Der: mover · A: click · X: click der · Suelta RT para salir
         </div>
       )}
 
@@ -3902,14 +3933,26 @@ function MainMenu({
                             {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
                           </div>
                         </div>
-                        <button onClick={() => onLoadWorld(w.name)} className="px-3 py-1 text-white text-xs font-mono font-bold transition-all hover:scale-105" style={{
-                          backgroundColor: "#3a6a2a", borderTop: "2px solid #5a8a3a", borderLeft: "2px solid #5a8a3a",
-                          borderBottom: "2px solid #1a3a0a", borderRight: "2px solid #1a3a0a", imageRendering: "pixelated",
-                        }}>▶ Cargar</button>
-                        <button onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }} className="px-2 py-1 text-white text-xs font-mono transition-all hover:scale-105" style={{
-                          backgroundColor: "#6a2a2a", borderTop: "2px solid #8a3a3a", borderLeft: "2px solid #8a3a3a",
-                          borderBottom: "2px solid #3a1a1a", borderRight: "2px solid #3a1a1a", imageRendering: "pixelated",
-                        }}>✕</button>
+                        <button
+                          onClick={(e) => { e.preventDefault(); onLoadWorld(w.name); }}
+                          onTouchEnd={(e) => { e.preventDefault(); onLoadWorld(w.name); }}
+                          className="px-3 py-1 text-white text-xs font-mono font-bold transition-all hover:scale-105"
+                          style={{
+                            backgroundColor: "#3a6a2a", borderTop: "2px solid #5a8a3a", borderLeft: "2px solid #5a8a3a",
+                            borderBottom: "2px solid #1a3a0a", borderRight: "2px solid #1a3a0a", imageRendering: "pixelated",
+                            touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent",
+                          }}
+                        >▶ Cargar</button>
+                        <button
+                          onClick={(e) => { e.preventDefault(); deleteWorld(w.name); refreshSavedWorlds(); }}
+                          onTouchEnd={(e) => { e.preventDefault(); deleteWorld(w.name); refreshSavedWorlds(); }}
+                          className="px-2 py-1 text-white text-xs font-mono transition-all hover:scale-105"
+                          style={{
+                            backgroundColor: "#6a2a2a", borderTop: "2px solid #8a3a3a", borderLeft: "2px solid #8a3a3a",
+                            borderBottom: "2px solid #3a1a1a", borderRight: "2px solid #3a1a1a", imageRendering: "pixelated",
+                            touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent",
+                          }}
+                        >✕</button>
                       </div>
                     );
                   })}
@@ -3960,6 +4003,7 @@ function MCButton({ children, onClick, primary, disabled, className = "" }: {
 }
 
 // Minecraft-style menu button — gray background, white text, beveled edges
+// Touch-friendly: large tap target, explicit touch handlers, cursor:pointer.
 function MCMenuButton({ children, onClick, color = "gray", className = "", selected = false }: {
   children: React.ReactNode; onClick?: () => void; color?: "green" | "red" | "blue" | "gray"; className?: string; selected?: boolean;
 }) {
@@ -3971,9 +4015,14 @@ function MCMenuButton({ children, onClick, color = "gray", className = "", selec
   const t = selected ? "#bcd0ff" : "#9a9a9a"; // top/left highlight (lighter gray)
   const b = selected ? "#3a4a7a" : "#3a3a3a"; // bottom/right shadow (darker gray)
   const glow = selected ? "rgba(180,210,255,0.85)" : "rgba(255,255,255,0.35)";
+  const handleTap = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    onClick?.();
+  };
   return (
     <button
-      onClick={onClick}
+      onClick={handleTap}
+      onTouchEnd={handleTap}
       className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.03] hover:-translate-y-px active:scale-95 active:translate-y-0 ${selected ? "scale-[1.04] -translate-y-px" : ""} ${className}`}
       style={{
         backgroundColor: bg,
@@ -3986,6 +4035,11 @@ function MCMenuButton({ children, onClick, color = "gray", className = "", selec
         boxShadow: selected
           ? `0 4px 16px ${glow}, 0 0 8px rgba(180,210,255,0.5), inset 1px 1px 0 rgba(255,255,255,0.4)`
           : "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)",
+        touchAction: "manipulation",
+        cursor: "pointer",
+        userSelect: "none",
+        WebkitTapHighlightColor: "transparent",
+        WebkitUserSelect: "none",
       }}
       onMouseEnter={(e) => { if (!selected) { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; } }}
       onMouseLeave={(e) => { if (!selected) { e.currentTarget.style.backgroundColor = bg; e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)"; } }}

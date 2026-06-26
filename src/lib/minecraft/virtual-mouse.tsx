@@ -9,14 +9,17 @@ import {
 } from "./gamepad";
 
 /**
- * Virtual digital mouse — when the user presses the Xbox "View" button (the
- * small button with two squares, button index 8 — same as "Back" on Xbox 360),
- * a digital cursor appears on screen. The right stick moves it, A left-clicks,
- * X right-clicks, B closes the cursor.
+ * Virtual digital mouse — activated by holding the Right Trigger (RT) on the
+ * Xbox controller. While held, a digital cursor appears on screen. The right
+ * stick moves it, A left-clicks, X right-clicks. Releasing RT hides the cursor.
+ *
+ * IMPORTANT: only enabled when the user is NOT in active gameplay, because RT
+ * is the mining/attack trigger during play. The caller passes `enabled=false`
+ * during gameplay.
  *
  * The cursor works by literally moving the OS mouse pointer via synthetic
- * MouseEvent dispatches (mousemove + mousedown + mouseup). This means it works
- * on ANY existing UI without needing to refactor every button.
+ * MouseEvent dispatches (mousemove + mousedown + mouseup + click). This means
+ * it works on ANY existing UI without needing to refactor every button.
  *
  * Why synthetic events work here (when they don't for requestPointerLock):
  * - For HOVER effects: dispatching `mousemove` to `document` triggers CSS
@@ -38,18 +41,28 @@ export interface VirtualMouseState {
 
 export function useVirtualMouse(enabled: boolean) {
   const [visible, setVisible] = useState(false);
-  const [pos, setPos] = useState({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+  const [pos, setPos] = useState({ x: 0, y: 0 });
   const posRef = useRef(pos);
   posRef.current = pos;
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   // Track speed: pixels per second per unit stick input
   const SPEED = 1200;
+  // Initialize position to screen center on first enable
+  const initialized = useRef(false);
 
   useEffect(() => {
     if (!enabled) {
       setVisible(false);
+      initialized.current = false;
       return;
+    }
+    if (!initialized.current) {
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      posRef.current = { x: cx, y: cy };
+      setPos({ x: cx, y: cy });
+      initialized.current = true;
     }
     let raf = 0;
     let lastTime = performance.now();
@@ -59,14 +72,15 @@ export function useVirtualMouse(enabled: boolean) {
       lastTime = now;
       const pad = readGamepad(0);
       if (pad) {
-        // Toggle cursor visibility on View/Back button (index 8)
-        // Note: this same button is used elsewhere for "dragon stay/follow",
-        // so we only toggle when no overlay is open. The caller is responsible
-        // for disabling the hook when overlays are open if needed.
-        if (wasButtonPressedLabelled("vmouse-toggle", pad, 8)) {
-          const newVis = !visibleRef.current;
-          visibleRef.current = newVis;
-          setVisible(newVis);
+        // RT (right trigger, index 7) held = cursor visible.
+        // Use a threshold of 0.3 so a light pull doesn't activate it.
+        const rtHeld = pad.rt;
+        if (rtHeld && !visibleRef.current) {
+          visibleRef.current = true;
+          setVisible(true);
+        } else if (!rtHeld && visibleRef.current) {
+          visibleRef.current = false;
+          setVisible(false);
         }
         if (visibleRef.current) {
           // Move cursor with right stick
@@ -87,16 +101,12 @@ export function useVirtualMouse(enabled: boolean) {
             });
             document.dispatchEvent(me);
           }
-          // A = left click, X = right click, B = close cursor
+          // A = left click, X = right click
           if (wasButtonPressedLabelled("vmouse-click", pad, 0)) {
             dispatchClick(posRef.current.x, posRef.current.y, 0);
           }
           if (wasButtonPressedLabelled("vmouse-click", pad, 2)) {
             dispatchClick(posRef.current.x, posRef.current.y, 2);
-          }
-          if (wasButtonPressedLabelled("vmouse-click", pad, 1)) {
-            visibleRef.current = false;
-            setVisible(false);
           }
         }
       }
@@ -121,12 +131,32 @@ function dispatchClick(x: number, y: number, button: number) {
     cancelable: true,
     view: window,
   };
-  // Sequence: mousedown → mouseup → click (matches real mouse)
+  // Sequence: mousemove → mousedown → mouseup → click (matches real mouse)
+  // The mousemove is important so React's onMouseEnter fires before the click.
+  target.dispatchEvent(new MouseEvent("mousemove", opts));
   target.dispatchEvent(new MouseEvent("mousedown", opts));
   target.dispatchEvent(new MouseEvent("mouseup", opts));
   target.dispatchEvent(new MouseEvent("click", opts));
   if (button === 2) {
     target.dispatchEvent(new MouseEvent("contextmenu", opts));
+  }
+  // Also dispatch a pointer event — React 18+ listens to pointerdown/up for
+  // some components, and PointerEvent is what fires on touch devices.
+  try {
+    const peOpts = {
+      clientX: x,
+      clientY: y,
+      button,
+      buttons: opts.buttons,
+      bubbles: true,
+      cancelable: true,
+      pointerId: 1,
+      pointerType: "mouse",
+    };
+    target.dispatchEvent(new PointerEvent("pointerdown", peOpts));
+    target.dispatchEvent(new PointerEvent("pointerup", peOpts));
+  } catch (e) {
+    // PointerEvent might not be available in older browsers — ignore
   }
 }
 
