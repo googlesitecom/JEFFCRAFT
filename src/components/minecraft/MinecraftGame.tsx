@@ -32,6 +32,7 @@ import { EndWorld } from "@/lib/minecraft/end";
 import { EnderDragon } from "@/lib/minecraft/ender-dragon";
 import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButtonPressed, wasButtonPressedLabelled, wasGamepadConnected, clearAutoDetect, onGamepadConnectionChange, getConnectedGamepadName } from "@/lib/minecraft/gamepad";
 import { useControllerNav } from "@/lib/minecraft/use-controller-nav";
+import { MCSlider, MCToggle, MCSelect, MCAction, useFocusGrid } from "@/lib/minecraft/mc-controls";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -346,25 +347,99 @@ export default function MinecraftGame() {
   });
 
   // === Controller navigation for the pause sub-panels (Config/Graphics/Controls/Host) ===
-  // Each sub-panel only has 1 button (← Volver), so we just listen for B/A.
+  // B/Start handlers for closing sub-panels are wired in the panel-specific
+  // effects below. The Controls and Host panels still use this simple nav
+  // for their single "← Volver" button (A activates it, B/Start also closes).
+  const controlsBackHandler = () => { setShowControls(false); showControlsRef.current = false; };
+  const hostBackHandler = () => { setShowHostPanel(false); showHostPanelRef.current = false; };
   const subPanelNav = useControllerNav({
-    enabled: screen === "playing" && (showConfig || showControls || showGraphics || showHostPanel),
+    enabled: screen === "playing" && (showControls || showHostPanel),
     itemCount: 1,
     columns: 1,
     initialIndex: 0,
     onConfirm: () => {
-      if (showConfigRef.current) { setShowConfig(false); showConfigRef.current = false; }
-      else if (showControlsRef.current) { setShowControls(false); showControlsRef.current = false; }
-      else if (showGraphicsRef.current) { setShowGraphics(false); showGraphicsRef.current = false; }
-      else if (showHostPanelRef.current) { setShowHostPanel(false); showHostPanelRef.current = false; }
+      if (showControlsRef.current) controlsBackHandler();
+      else if (showHostPanelRef.current) hostBackHandler();
     },
     onBack: () => {
-      if (showConfigRef.current) { setShowConfig(false); showConfigRef.current = false; }
-      else if (showControlsRef.current) { setShowControls(false); showControlsRef.current = false; }
-      else if (showGraphicsRef.current) { setShowGraphics(false); showGraphicsRef.current = false; }
-      else if (showHostPanelRef.current) { setShowHostPanel(false); showHostPanelRef.current = false; }
+      if (showControlsRef.current) controlsBackHandler();
+      else if (showHostPanelRef.current) hostBackHandler();
+    },
+    onStart: () => {
+      if (showControlsRef.current) controlsBackHandler();
+      else if (showHostPanelRef.current) hostBackHandler();
     },
   });
+
+  // === Focus grid for the Configuración panel ===
+  // Layout: 3 sliders stacked vertically, then the "← Volver" button
+  // [mouseSens]
+  // [controllerSensX]
+  // [controllerSensY]
+  // [back]
+  const configFocus = useFocusGrid({
+    enabled: screen === "playing" && showConfig,
+    layout: [
+      [{ id: "mouseSens" }],
+      [{ id: "controllerSensX" }],
+      [{ id: "controllerSensY" }],
+      [{ id: "back" }],
+    ],
+  });
+  // Handle B = back when in config panel
+  useEffect(() => {
+    if (!(screen === "playing" && showConfig)) return;
+    let raf = 0;
+    const tick = () => {
+      const pad = readGamepad(0);
+      if (pad) {
+        // B / Start = back
+        if (
+          wasButtonPressedLabelled("config-back", pad, 1) ||
+          wasButtonPressedLabelled("config-back", pad, 9)
+        ) {
+          setShowConfig(false); showConfigRef.current = false;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [screen, showConfig]);
+
+  // === Focus grid for the Gráficos panel ===
+  // Layout: 6 toggles in 2x3 grid, then shadow select + tone slider in 1 row,
+  // then 6 shader toggles in 2x3, then back button
+  const graphicsFocus = useFocusGrid({
+    enabled: screen === "playing" && showGraphics,
+    layout: [
+      [{ id: "pbr" }, { id: "shadows" }, { id: "fog" }],
+      [{ id: "leavesGlow" }, { id: "waterReflections" }, { id: "realisticSky" }],
+      [{ id: "shadowQuality" }, { id: "toneMapping" }],
+      [{ id: "shadersEnabled" }, { id: "shaderBloom" }, { id: "shaderSSAO" }],
+      [{ id: "shaderGodRays" }, { id: "shaderWaterWaves" }, { id: "shaderWind" }],
+      [{ id: "back" }],
+    ],
+  });
+  // B / Start = back when in graphics panel
+  useEffect(() => {
+    if (!(screen === "playing" && showGraphics)) return;
+    let raf = 0;
+    const tick = () => {
+      const pad = readGamepad(0);
+      if (pad) {
+        if (
+          wasButtonPressedLabelled("graphics-back", pad, 1) ||
+          wasButtonPressedLabelled("graphics-back", pad, 9)
+        ) {
+          setShowGraphics(false); showGraphicsRef.current = false;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [screen, showGraphics]);
 
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
@@ -2997,7 +3072,7 @@ export default function MinecraftGame() {
                 textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)",
                 letterSpacing: "0.05em",
               }}>Configuración</h2>
-              <div className="text-left p-4 mb-4 space-y-4" style={{
+              <div className="text-left p-4 mb-4 space-y-2" style={{
                 backgroundColor: "rgba(0,0,0,0.7)",
                 borderTop: "3px solid rgba(110,110,120,0.9)",
                 borderLeft: "3px solid rgba(110,110,120,0.9)",
@@ -3005,65 +3080,51 @@ export default function MinecraftGame() {
                 borderRight: "3px solid rgba(0,0,0,0.95)",
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.1)",
               }}>
-                {/* Mouse sensitivity */}
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-white font-mono text-xs font-bold">Sensibilidad del ratón</span>
-                    <span className="text-yellow-300 font-mono text-xs font-bold">{mouseSens.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range" min={0.1} max={10.0} step={0.05}
-                    value={mouseSens}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setMouseSens(v);
-                      mouseSensRef.current = v;
-                    }}
-                    className="w-full"
-                    style={{ accentColor: "#6b6b6b" }}
-                  />
-                </div>
-                {/* Controller X sensitivity */}
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-white font-mono text-xs font-bold">Sensibilidad control (X)</span>
-                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensX.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range" min={0.1} max={10.0} step={0.05}
-                    value={controllerSensX}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setControllerSensX(v);
-                      controllerSensXRef.current = v;
-                    }}
-                    className="w-full"
-                    style={{ accentColor: "#6b6b6b" }}
-                  />
-                </div>
-                {/* Controller Y sensitivity */}
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-white font-mono text-xs font-bold">Sensibilidad control (Y)</span>
-                    <span className="text-yellow-300 font-mono text-xs font-bold">{controllerSensY.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range" min={0.1} max={10.0} step={0.05}
-                    value={controllerSensY}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setControllerSensY(v);
-                      controllerSensYRef.current = v;
-                    }}
-                    className="w-full"
-                    style={{ accentColor: "#6b6b6b" }}
-                  />
-                </div>
+                <MCSlider
+                  label="Sensibilidad del ratón"
+                  value={mouseSens}
+                  min={0.1}
+                  max={10.0}
+                  step={0.05}
+                  defaultValue={1.5}
+                  focused={configFocus.isFocused("mouseSens")}
+                  onChange={(v) => { setMouseSens(v); mouseSensRef.current = v; }}
+                  format={(v) => v.toFixed(2)}
+                />
+                <MCSlider
+                  label="Sensibilidad control (X)"
+                  value={controllerSensX}
+                  min={0.1}
+                  max={10.0}
+                  step={0.05}
+                  defaultValue={1.0}
+                  focused={configFocus.isFocused("controllerSensX")}
+                  onChange={(v) => { setControllerSensX(v); controllerSensXRef.current = v; }}
+                  format={(v) => v.toFixed(2)}
+                />
+                <MCSlider
+                  label="Sensibilidad control (Y)"
+                  value={controllerSensY}
+                  min={0.1}
+                  max={10.0}
+                  step={0.05}
+                  defaultValue={1.0}
+                  focused={configFocus.isFocused("controllerSensY")}
+                  onChange={(v) => { setControllerSensY(v); controllerSensYRef.current = v; }}
+                  format={(v) => v.toFixed(2)}
+                />
                 <p className="text-stone-400 text-[10px] font-mono text-center pt-1">
                   Rango: 0.1 (muy lento) – 10.0 (muy rápido). Los cambios se aplican inmediatamente.
                 </p>
+                <p className="text-cyan-300 text-[9px] font-mono text-center">
+                  🎮 D-Pad ↑↓ navegar · ◀ ▶ ajustar · A reset · B volver
+                </p>
               </div>
-              <MCMenuButton onClick={() => { setShowConfig(false); showConfigRef.current = false; }} color="gray">← Volver</MCMenuButton>
+              <MCMenuButton
+                onClick={() => { setShowConfig(false); showConfigRef.current = false; }}
+                color="gray"
+                selected={configFocus.isFocused("back")}
+              >← Volver</MCMenuButton>
             </div>
           ) : showGraphics ? (
             /* ===== GRAPHICS PANEL — compact 2-column grid ===== */
@@ -3072,33 +3133,53 @@ export default function MinecraftGame() {
               <div className="p-3 mb-3 max-h-[70vh] overflow-y-auto" style={{ backgroundColor: "rgba(0,0,0,0.7)", borderTop: "3px solid rgba(110,110,120,0.9)", borderLeft: "3px solid rgba(110,110,120,0.9)", borderBottom: "3px solid rgba(0,0,0,0.95)", borderRight: "3px solid rgba(0,0,0,0.95)" }}>
                 <p className="text-green-300 font-mono text-[10px] font-bold mb-2">BÁSICOS</p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <GfxToggle label="PBR" desc="Materiales realistas" value={gfxSettings.pbr} onChange={(v) => { setGfxSettings(s => ({...s, pbr: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, pbr: v}; gfxNeedsRebuildRef.current = true; }} />
-                  <GfxToggle label="Sombras" desc="Sombras dinámicas" value={gfxSettings.shadows} onChange={(v) => { setGfxSettings(s => ({...s, shadows: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadows: v}; }} />
-                  <GfxToggle label="Niebla" desc="Profundidad de distancia" value={gfxSettings.fog} onChange={(v) => { setGfxSettings(s => ({...s, fog: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, fog: v}; }} />
-                  <GfxToggle label="Hojas brillantes" desc="Subsurface scattering" value={gfxSettings.leavesGlow} onChange={(v) => { setGfxSettings(s => ({...s, leavesGlow: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, leavesGlow: v}; gfxNeedsRebuildRef.current = true; }} />
-                  <GfxToggle label="Reflejos agua" desc="Reflexiones del entorno" value={gfxSettings.waterReflections} onChange={(v) => { setGfxSettings(s => ({...s, waterReflections: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, waterReflections: v}; }} />
-                  <GfxToggle label="Cielo realista" desc="Atardeceres y glow" value={gfxSettings.realisticSky} onChange={(v) => { setGfxSettings(s => ({...s, realisticSky: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, realisticSky: v}; }} />
+                  <MCToggle label="PBR" desc="Materiales realistas" value={gfxSettings.pbr} onChange={(v) => { setGfxSettings(s => ({...s, pbr: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, pbr: v}; gfxNeedsRebuildRef.current = true; }} focused={graphicsFocus.isFocused("pbr")} />
+                  <MCToggle label="Sombras" desc="Sombras dinámicas" value={gfxSettings.shadows} onChange={(v) => { setGfxSettings(s => ({...s, shadows: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadows: v}; }} focused={graphicsFocus.isFocused("shadows")} />
+                  <MCToggle label="Niebla" desc="Profundidad de distancia" value={gfxSettings.fog} onChange={(v) => { setGfxSettings(s => ({...s, fog: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, fog: v}; }} focused={graphicsFocus.isFocused("fog")} />
+                  <MCToggle label="Hojas brillantes" desc="Subsurface scattering" value={gfxSettings.leavesGlow} onChange={(v) => { setGfxSettings(s => ({...s, leavesGlow: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, leavesGlow: v}; gfxNeedsRebuildRef.current = true; }} focused={graphicsFocus.isFocused("leavesGlow")} />
+                  <MCToggle label="Reflejos agua" desc="Reflexiones del entorno" value={gfxSettings.waterReflections} onChange={(v) => { setGfxSettings(s => ({...s, waterReflections: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, waterReflections: v}; }} focused={graphicsFocus.isFocused("waterReflections")} />
+                  <MCToggle label="Cielo realista" desc="Atardeceres y glow" value={gfxSettings.realisticSky} onChange={(v) => { setGfxSettings(s => ({...s, realisticSky: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, realisticSky: v}; }} focused={graphicsFocus.isFocused("realisticSky")} />
                 </div>
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="text-white font-mono text-[10px] font-bold min-w-[80px]">Sombras:</span>
-                  <select value={gfxSettings.shadowQuality} onChange={(e) => { const v = parseInt(e.target.value); setGfxSettings(s => ({...s, shadowQuality: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadowQuality: v}; }} className="bg-stone-800 text-white font-mono text-[10px] px-1 py-0.5 border border-stone-600 flex-1">
-                    <option value={512}>512 Rápido</option><option value={1024}>1024 Medio</option><option value={2048}>2048 Nítido</option>
-                  </select>
-                  <span className="text-white font-mono text-[10px] font-bold min-w-[60px]">Exposición:</span>
-                  <input type="range" min={0.5} max={2.5} step={0.05} value={gfxSettings.toneMapping} onChange={(e) => { const v = parseFloat(e.target.value); setGfxSettings(s => ({...s, toneMapping: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, toneMapping: v}; }} className="flex-1" style={{ accentColor: "#6b6b6b" }} />
-                  <span className="text-yellow-300 font-mono text-[10px] min-w-[30px] text-right">{gfxSettings.toneMapping.toFixed(1)}</span>
+                  <MCSelect<number>
+                    label="Sombras"
+                    value={gfxSettings.shadowQuality}
+                    options={[{ value: 512, label: "512 Rápido" }, { value: 1024, label: "1024 Medio" }, { value: 2048, label: "2048 Nítido" }]}
+                    onChange={(v) => { setGfxSettings(s => ({...s, shadowQuality: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadowQuality: v}; }}
+                    focused={graphicsFocus.isFocused("shadowQuality")}
+                  />
+                  <div className="flex-1">
+                    <MCSlider
+                      label="Exposición"
+                      value={gfxSettings.toneMapping}
+                      min={0.5}
+                      max={2.5}
+                      step={0.05}
+                      defaultValue={1.2}
+                      focused={graphicsFocus.isFocused("toneMapping")}
+                      onChange={(v) => { setGfxSettings(s => ({...s, toneMapping: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, toneMapping: v}; }}
+                      format={(v) => v.toFixed(1)}
+                    />
+                  </div>
                 </div>
                 <div className="pt-2 border-t border-stone-700"><p className="text-cyan-300 font-mono text-[10px] font-bold mb-2">🔮 SHADERS (ULTRA REALISTA)</p></div>
                 <div className="grid grid-cols-2 gap-2">
-                  <GfxToggle label="✨ Activar Shaders" desc="Post-procesamiento completo" value={gfxSettings.shadersEnabled} onChange={(v) => { setGfxSettings(s => ({...s, shadersEnabled: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadersEnabled: v}; }} />
-                  <GfxToggle label="Bloom" desc="Resplandor de luz" value={gfxSettings.shaderBloom} onChange={(v) => { setGfxSettings(s => ({...s, shaderBloom: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderBloom: v}; }} />
-                  <GfxToggle label="SSAO" desc="Sombras en esquinas (mejor dejar OFF, ya viene color grade)" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} />
-                  <GfxToggle label="God Rays" desc="Rayos de sol" value={gfxSettings.shaderGodRays} onChange={(v) => { setGfxSettings(s => ({...s, shaderGodRays: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderGodRays: v}; }} />
-                  <GfxToggle label="Ondas agua" desc="Oleaje Gerstner" value={gfxSettings.shaderWaterWaves} onChange={(v) => { setGfxSettings(s => ({...s, shaderWaterWaves: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWaterWaves: v}; }} />
-                  <GfxToggle label="Viento" desc="Movimiento de hojas" value={gfxSettings.shaderWind} onChange={(v) => { setGfxSettings(s => ({...s, shaderWind: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWind: v}; }} />
+                  <MCToggle label="✨ Activar Shaders" desc="Post-procesamiento completo" value={gfxSettings.shadersEnabled} onChange={(v) => { setGfxSettings(s => ({...s, shadersEnabled: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadersEnabled: v}; }} focused={graphicsFocus.isFocused("shadersEnabled")} />
+                  <MCToggle label="Bloom" desc="Resplandor de luz" value={gfxSettings.shaderBloom} onChange={(v) => { setGfxSettings(s => ({...s, shaderBloom: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderBloom: v}; }} focused={graphicsFocus.isFocused("shaderBloom")} />
+                  <MCToggle label="SSAO" desc="Mejor dejar OFF, ya viene color grade" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} focused={graphicsFocus.isFocused("shaderSSAO")} />
+                  <MCToggle label="God Rays" desc="Rayos de sol" value={gfxSettings.shaderGodRays} onChange={(v) => { setGfxSettings(s => ({...s, shaderGodRays: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderGodRays: v}; }} focused={graphicsFocus.isFocused("shaderGodRays")} />
+                  <MCToggle label="Ondas agua" desc="Oleaje Gerstner" value={gfxSettings.shaderWaterWaves} onChange={(v) => { setGfxSettings(s => ({...s, shaderWaterWaves: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWaterWaves: v}; }} focused={graphicsFocus.isFocused("shaderWaterWaves")} />
+                  <MCToggle label="Viento" desc="Movimiento de hojas" value={gfxSettings.shaderWind} onChange={(v) => { setGfxSettings(s => ({...s, shaderWind: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWind: v}; }} focused={graphicsFocus.isFocused("shaderWind")} />
                 </div>
+                <p className="text-cyan-300 text-[9px] font-mono text-center mt-3">
+                  🎮 D-Pad navega grid · A alterna/resetea · ◀ ▶ ajusta slider · B vuelve
+                </p>
               </div>
-              <MCMenuButton onClick={() => { setShowGraphics(false); showGraphicsRef.current = false; }} color="gray">← Volver</MCMenuButton>
+              <MCMenuButton
+                onClick={() => { setShowGraphics(false); showGraphicsRef.current = false; }}
+                color="gray"
+                selected={graphicsFocus.isFocused("back")}
+              >← Volver</MCMenuButton>
             </div>
           ) : (
             /* ===== CONTROLS PANEL (existing) ===== */
@@ -3194,7 +3275,7 @@ export default function MinecraftGame() {
                   ⚠ No se detectó un control. Conecta un control Xbox.
                 </p>
               )}
-              <MCMenuButton onClick={() => { setShowControls(false); showControlsRef.current = false; }} color="gray">← Volver</MCMenuButton>
+              <MCMenuButton onClick={() => { setShowControls(false); showControlsRef.current = false; }} color="gray" selected={subPanelNav.selectedIndex === 0}>← Volver</MCMenuButton>
             </div>
           )}
         </div>
