@@ -30,7 +30,8 @@ import { EndermanManager, Enderman } from "@/lib/minecraft/enderman";
 import { BlazeManager, Blaze } from "@/lib/minecraft/blaze";
 import { EndWorld } from "@/lib/minecraft/end";
 import { EnderDragon } from "@/lib/minecraft/ender-dragon";
-import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButtonPressed, wasGamepadConnected, clearAutoDetect } from "@/lib/minecraft/gamepad";
+import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButtonPressed, wasButtonPressedLabelled, wasGamepadConnected, clearAutoDetect, onGamepadConnectionChange, getConnectedGamepadName } from "@/lib/minecraft/gamepad";
+import { useControllerNav } from "@/lib/minecraft/use-controller-nav";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -277,9 +278,132 @@ export default function MinecraftGame() {
   const pendingArmorLoadRef = useRef<ArmorSlots | null>(null);
   const [, setArmorVersion] = useState(0);
 
+  // === Gamepad connection toast ===
+  // Shows a transient banner when a controller connects or disconnects
+  const [gamepadToast, setGamepadToast] = useState<{ message: string; tone: "connect" | "disconnect" } | null>(null);
+  const gamepadToastTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    const unsub = onGamepadConnectionChange((connected, id) => {
+      // Auto-switch to controller mode when one connects
+      if (connected) {
+        if (inputModeRef.current !== "controller") {
+          inputModeRef.current = "controller";
+          setInputMode("controller");
+          clearAutoDetect();
+        }
+      }
+      // Show toast
+      const name = (id || "").split("(")[0].trim().slice(0, 32) || "Controller";
+      setGamepadToast({
+        message: connected ? `🎮 ${name} conectado` : `🎮 Control desconectado`,
+        tone: connected ? "connect" : "disconnect",
+      });
+      if (gamepadToastTimerRef.current) window.clearTimeout(gamepadToastTimerRef.current);
+      gamepadToastTimerRef.current = window.setTimeout(() => setGamepadToast(null), 3500);
+    });
+    return () => { unsub(); if (gamepadToastTimerRef.current) window.clearTimeout(gamepadToastTimerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // === Controller navigation for the in-game pause overlay ===
+  // Root pause menu has up to 7 buttons (Continuar, Salir, Guardar, Configuración,
+  // Gráficos, Controles, Multijugador/Abrir). The hook moves focus between them
+  // via D-Pad/stick and triggers click on A.
+  const pauseMenuButtons = useRef<Array<() => void>>([]);
+  const pauseMenuNav = useControllerNav({
+    enabled: screen === "playing" && !isLocked && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && !showConfig && !showControls && !showGraphics && !showHostPanel,
+    itemCount: 7,
+    columns: 1,
+    initialIndex: 0,
+    onConfirm: () => { pauseMenuButtons.current[pauseMenuNav.selectedIndex]?.(); },
+    onBack: () => { /* B = Continuar (same as "resume") */ pauseMenuButtons.current[0]?.(); },
+    onStart: () => { /* Start = resume */ pauseMenuButtons.current[0]?.(); },
+  });
+
+  // === Controller navigation for the Main Menu ===
+  // Main menu has 4 buttons: Crear, Cargar, Multijugador, Opciones
+  const mainMenuButtons = useRef<Array<() => void>>([]);
+  const mainMenuNav = useControllerNav({
+    enabled: screen === "main-menu",
+    itemCount: 4,
+    columns: 1,
+    initialIndex: 0,
+    onConfirm: () => { mainMenuButtons.current[mainMenuNav.selectedIndex]?.(); },
+    onBack: () => { /* no-op on main menu */ },
+    onStart: () => { mainMenuButtons.current[0]?.(); },
+  });
+
+  // === Controller navigation for the Death screen ===
+  // 2 buttons: Reaparecer, Menú principal
+  const deathButtons = useRef<Array<() => void>>([]);
+  const deathNav = useControllerNav({
+    enabled: isDead,
+    itemCount: 2,
+    columns: 1,
+    initialIndex: 0,
+    onConfirm: () => { deathButtons.current[deathNav.selectedIndex]?.(); },
+    onBack: () => { /* no-op */ },
+  });
+
+  // === Controller navigation for the pause sub-panels (Config/Graphics/Controls/Host) ===
+  // Each sub-panel only has 1 button (← Volver), so we just listen for B/A.
+  const subPanelNav = useControllerNav({
+    enabled: screen === "playing" && (showConfig || showControls || showGraphics || showHostPanel),
+    itemCount: 1,
+    columns: 1,
+    initialIndex: 0,
+    onConfirm: () => {
+      if (showConfigRef.current) { setShowConfig(false); showConfigRef.current = false; }
+      else if (showControlsRef.current) { setShowControls(false); showControlsRef.current = false; }
+      else if (showGraphicsRef.current) { setShowGraphics(false); showGraphicsRef.current = false; }
+      else if (showHostPanelRef.current) { setShowHostPanel(false); showHostPanelRef.current = false; }
+    },
+    onBack: () => {
+      if (showConfigRef.current) { setShowConfig(false); showConfigRef.current = false; }
+      else if (showControlsRef.current) { setShowControls(false); showControlsRef.current = false; }
+      else if (showGraphicsRef.current) { setShowGraphics(false); showGraphicsRef.current = false; }
+      else if (showHostPanelRef.current) { setShowHostPanel(false); showHostPanelRef.current = false; }
+    },
+  });
+
   useEffect(() => {
     selectedSlotRef.current = selectedSlot;
   }, [selectedSlot]);
+
+  // Sync the pause-menu button handlers (so the controller A-button can fire them)
+  useEffect(() => {
+    pauseMenuButtons.current = [
+      handleStartClick,
+      handleExitToMenu,
+      handleSaveWorld,
+      () => { setShowConfig(true); showConfigRef.current = true; },
+      () => { setShowGraphics(true); showGraphicsRef.current = true; },
+      () => { setShowControls(true); showControlsRef.current = true; },
+      mpConnected ? () => { setShowHostPanel(true); showHostPanelRef.current = true; } : hostMultiplayer,
+    ];
+  });
+
+  // Sync main-menu button handlers
+  // Note: "Cargar mundo" opens a sub-menu inside MainMenu (local state). For full
+  // controller support we'd need to lift that state up. For now, only "Crear" and
+  // "Multijugador" are controller-activated; "Cargar mundo" still needs a mouse click
+  // to open the saved-worlds list.
+  useEffect(() => {
+    mainMenuButtons.current = [
+      () => setScreen("create-world"),
+      () => { /* Cargar mundo — requires sub-menu; use mouse for now */ },
+      () => setScreen("multiplayer"),
+      () => { /* Opciones — disabled */ },
+    ];
+  });
+
+  // Sync death-screen button handlers
+  useEffect(() => {
+    deathButtons.current = [
+      handleRespawn,
+      handleExitToMenu,
+    ];
+  });
 
   useEffect(() => {
     const urls = buildIconDataURLs(buildTextureCanvases());
@@ -1667,11 +1791,23 @@ export default function MinecraftGame() {
           setSelectedSlot(idx); selectedSlotRef.current = idx;
           inventoryRef.current.setSelected(idx);
         }
-        // D-pad hotbar slots
-        if (wasButtonPressed(gp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
-        if (wasButtonPressed(gp, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
-        if (wasButtonPressed(gp, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
-        if (wasButtonPressed(gp, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
+        // D-pad hotbar slots — LB modifier gives access to slots 4-8
+        // Without LB: D-pad Up/Down/Left/Right = slots 0/1/2/3
+        // With LB held: D-pad Up/Down/Left/Right = slots 4/5/6/7, RB = slot 8
+        if (!gp.lb) {
+          if (wasButtonPressed(gp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
+          if (wasButtonPressed(gp, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
+          if (wasButtonPressed(gp, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
+          if (wasButtonPressed(gp, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
+        } else {
+          // LB + D-Pad = slots 4-7
+          if (wasButtonPressedLabelled("hotbar", gp, 12)) { setSelectedSlot(4); selectedSlotRef.current = 4; inventoryRef.current.setSelected(4); }
+          if (wasButtonPressedLabelled("hotbar", gp, 13)) { setSelectedSlot(5); selectedSlotRef.current = 5; inventoryRef.current.setSelected(5); }
+          if (wasButtonPressedLabelled("hotbar", gp, 14)) { setSelectedSlot(6); selectedSlotRef.current = 6; inventoryRef.current.setSelected(6); }
+          if (wasButtonPressedLabelled("hotbar", gp, 15)) { setSelectedSlot(7); selectedSlotRef.current = 7; inventoryRef.current.setSelected(7); }
+          // LB + RB = slot 8 (last)
+          if (wasButtonPressedLabelled("hotbar", gp, 5)) { setSelectedSlot(8); selectedSlotRef.current = 8; inventoryRef.current.setSelected(8); }
+        }
 
         // Attack/Mine: RT (hold)
         if (gp.rt) {
@@ -2493,6 +2629,7 @@ export default function MinecraftGame() {
         iconUrls={iconUrls}
         onCreateWorld={() => setScreen("create-world")}
         onMultiplayer={() => setScreen("multiplayer")}
+        selectedIndex={mainMenuNav.selectedIndex}
         onLoadWorld={(name) => {
           const saved = loadWorld(name);
           if (saved) {
@@ -2769,16 +2906,16 @@ export default function MinecraftGame() {
                 {currentWorld?.name || "JEFFCRAFT"}
               </h1>
               <div className="flex flex-col gap-2 mb-2">
-                <MCMenuButton onClick={handleStartClick} color="gray">Continuar</MCMenuButton>
-                <MCMenuButton onClick={handleExitToMenu} color="gray">Salir del mundo</MCMenuButton>
+                <MCMenuButton onClick={handleStartClick} color="gray" selected={pauseMenuNav.selectedIndex === 0}>Continuar</MCMenuButton>
+                <MCMenuButton onClick={handleExitToMenu} color="gray" selected={pauseMenuNav.selectedIndex === 1}>Salir del mundo</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
-                <MCMenuButton onClick={handleSaveWorld} color="gray" className="flex-1 text-sm">Guardar</MCMenuButton>
-                <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm">Configuración</MCMenuButton>
+                <MCMenuButton onClick={handleSaveWorld} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 2}>Guardar</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 3}>Configuración</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
-                <MCMenuButton onClick={() => { setShowGraphics(true); showGraphicsRef.current = true; }} color="gray" className="flex-1 text-sm">Gráficos</MCMenuButton>
-                <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm">Controles</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowGraphics(true); showGraphicsRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 4}>Gráficos</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 5}>Controles</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
                 {/* Multiplayer: open current world to other players */}
@@ -2787,6 +2924,7 @@ export default function MinecraftGame() {
                     onClick={() => { setShowHostPanel(true); showHostPanelRef.current = true; }}
                     color="gray"
                     className="flex-1 text-sm"
+                    selected={pauseMenuNav.selectedIndex === 6}
                   >
                     Multijugador ✓
                   </MCMenuButton>
@@ -2795,6 +2933,7 @@ export default function MinecraftGame() {
                     onClick={hostMultiplayer}
                     color="gray"
                     className="flex-1 text-sm"
+                    selected={pauseMenuNav.selectedIndex === 6}
                   >
                     Abrir mundo
                   </MCMenuButton>
@@ -3006,10 +3145,12 @@ export default function MinecraftGame() {
                     <ControlRow keys="RT" desc="Minar / Atacar (mantener)" />
                     <ControlRow keys="LT" desc="Bajar (creativo)" />
                     <ControlRow keys="LB / RB" desc="Slot anterior / siguiente" />
-                    <ControlRow keys="D-Pad" desc="Slots 1-4" />
+                    <ControlRow keys="D-Pad" desc="Slots 1-4 (sin LB) / 5-8 (con LB)" />
+                    <ControlRow keys="LB + RB" desc="Slot 9" />
                     <ControlRow keys="LS (click)" desc="Correr" />
                     <ControlRow keys="Back" desc="Dragón espera/sigue" />
-                    <ControlRow keys="Start" desc="Pausar" />
+                    <ControlRow keys="Start" desc="Pausar / Reanudar" />
+                    <ControlRow keys="A / B" desc="Confirmar / Volver (en menús)" />
                   </>
                 )}
               </div>
@@ -3097,13 +3238,20 @@ export default function MinecraftGame() {
           <div className="text-center text-white">
             <h1 className="text-5xl font-bold mb-6" style={{ fontFamily: "monospace" }}>¡Has muerto!</h1>
             <div className="flex gap-4 justify-center">
-              <button onClick={handleRespawn} className="px-6 py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 rounded text-lg font-bold transition-colors">
+              <button
+                onClick={handleRespawn}
+                className={`px-6 py-3 border-2 rounded text-lg font-bold transition-all ${deathNav.selectedIndex === 0 ? "scale-110 bg-green-600 border-green-300 shadow-[0_0_20px_rgba(150,255,150,0.6)]" : "bg-green-700 hover:bg-green-600 border-green-500"}`}
+              >
                 Reaparecer
               </button>
-              <button onClick={handleExitToMenu} className="px-6 py-3 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 rounded text-lg font-bold transition-colors">
+              <button
+                onClick={handleExitToMenu}
+                className={`px-6 py-3 border-2 rounded text-lg font-bold transition-all ${deathNav.selectedIndex === 1 ? "scale-110 bg-stone-500 border-stone-200 shadow-[0_0_20px_rgba(200,200,200,0.5)]" : "bg-stone-700 hover:bg-stone-600 border-stone-500"}`}
+              >
                 Menú principal
               </button>
             </div>
+            <p className="mt-4 text-stone-300 text-sm font-mono">🎮 A: confirmar · D-Pad: navegar</p>
           </div>
         </div>
       )}
@@ -3111,6 +3259,24 @@ export default function MinecraftGame() {
       {!isLoaded && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
           <div className="text-white font-mono text-xl">Generando mundo...</div>
+        </div>
+      )}
+
+      {/* Gamepad connection / disconnection toast */}
+      {gamepadToast && (
+        <div
+          className="absolute top-4 left-1/2 -translate-x-1/2 z-[60] px-5 py-2.5 font-mono text-sm font-bold text-white shadow-xl transition-all"
+          style={{
+            backgroundColor: gamepadToast.tone === "connect" ? "rgba(46, 90, 50, 0.95)" : "rgba(120, 40, 40, 0.95)",
+            borderTop: "3px solid " + (gamepadToast.tone === "connect" ? "#7aaa5a" : "#aa5a5a"),
+            borderLeft: "3px solid " + (gamepadToast.tone === "connect" ? "#7aaa5a" : "#aa5a5a"),
+            borderBottom: "3px solid " + (gamepadToast.tone === "connect" ? "#2a4a1a" : "#4a1a1a"),
+            borderRight: "3px solid " + (gamepadToast.tone === "connect" ? "#2a4a1a" : "#4a1a1a"),
+            imageRendering: "pixelated",
+            textShadow: "1px 1px 0 #000",
+          }}
+        >
+          {gamepadToast.message}
         </div>
       )}
 
@@ -3419,11 +3585,13 @@ const SPLASH_TEXTS = [
 
 function MainMenu({
   iconUrls, onCreateWorld, onMultiplayer, onLoadWorld,
+  selectedIndex,
 }: {
   iconUrls: Record<string, string>;
   onCreateWorld: () => void;
   onMultiplayer: () => void;
   onLoadWorld: (name: string) => void;
+  selectedIndex: number;
 }) {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
@@ -3454,10 +3622,10 @@ function MainMenu({
         {/* Menu buttons — title removed (image already includes it) */}
         {!showLoadMenu ? (
           <div className="flex flex-col gap-2 w-full max-w-xs">
-            <MCMenuButton onClick={onCreateWorld} color="gray">Crear nuevo mundo</MCMenuButton>
-            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="gray">Cargar mundo</MCMenuButton>
-            <MCMenuButton onClick={onMultiplayer} color="gray">Multijugador</MCMenuButton>
-            <MCMenuButton onClick={() => {}} color="gray" className="opacity-50 cursor-not-allowed">Opciones</MCMenuButton>
+            <MCMenuButton onClick={onCreateWorld} color="gray" selected={selectedIndex === 0}>Crear nuevo mundo</MCMenuButton>
+            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="gray" selected={selectedIndex === 1}>Cargar mundo</MCMenuButton>
+            <MCMenuButton onClick={onMultiplayer} color="gray" selected={selectedIndex === 2}>Multijugador</MCMenuButton>
+            <MCMenuButton onClick={() => {}} color="gray" className="opacity-50 cursor-not-allowed" selected={selectedIndex === 3}>Opciones</MCMenuButton>
           </div>
         ) : (
           <div className="w-full max-w-sm">
@@ -3546,23 +3714,38 @@ function MCButton({ children, onClick, primary, disabled, className = "" }: {
 }
 
 // Minecraft-style menu button — gray background, white text, beveled edges
-function MCMenuButton({ children, onClick, color = "gray", className = "" }: {
-  children: React.ReactNode; onClick?: () => void; color?: "green" | "red" | "blue" | "gray"; className?: string;
+function MCMenuButton({ children, onClick, color = "gray", className = "", selected = false }: {
+  children: React.ReactNode; onClick?: () => void; color?: "green" | "red" | "blue" | "gray"; className?: string; selected?: boolean;
 }) {
   // All buttons use gray background with white text/detail (color prop is kept for backwards compat but ignored)
-  const bg = "#6b6b6b";
-  const h = "#7b7b7b";
-  const a = "#5b5b5b";
-  const t = "#9a9a9a"; // top/left highlight (lighter gray)
-  const b = "#3a3a3a"; // bottom/right shadow (darker gray)
-  const glow = "rgba(255,255,255,0.35)";
+  // When `selected` is true (controller navigation focus), use a brighter background + glow + scale
+  const bg = selected ? "#8aa8e8" : "#6b6b6b";
+  const h = selected ? "#9ab8f8" : "#7b7b7b";
+  const a = selected ? "#6a88c8" : "#5b5b5b";
+  const t = selected ? "#bcd0ff" : "#9a9a9a"; // top/left highlight (lighter gray)
+  const b = selected ? "#3a4a7a" : "#3a3a3a"; // bottom/right shadow (darker gray)
+  const glow = selected ? "rgba(180,210,255,0.85)" : "rgba(255,255,255,0.35)";
   return (
-    <button onClick={onClick} className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.03] hover:-translate-y-px active:scale-95 active:translate-y-0 ${className}`}
-      style={{ backgroundColor: bg, borderTop: `3px solid ${t}`, borderLeft: `3px solid ${t}`, borderBottom: `3px solid ${b}`, borderRight: `3px solid ${b}`, imageRendering: "pixelated", textShadow: "2px 2px 0 #1a1a1a, -1px -1px 0 #1a1a1a", boxShadow: "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)" }}
-      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; }}
-      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = bg; e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)"; }}
-      onMouseDown={(e) => { e.currentTarget.style.backgroundColor = a; e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.5), inset 1px 1px 3px rgba(0,0,0,0.4)"; }}
-      onMouseUp={(e) => { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; }}>
+    <button
+      onClick={onClick}
+      className={`relative py-3 px-4 font-bold font-mono tracking-wide text-white transition-all hover:scale-[1.03] hover:-translate-y-px active:scale-95 active:translate-y-0 ${selected ? "scale-[1.04] -translate-y-px" : ""} ${className}`}
+      style={{
+        backgroundColor: bg,
+        borderTop: `3px solid ${t}`,
+        borderLeft: `3px solid ${t}`,
+        borderBottom: `3px solid ${b}`,
+        borderRight: `3px solid ${b}`,
+        imageRendering: "pixelated",
+        textShadow: "2px 2px 0 #1a1a1a, -1px -1px 0 #1a1a1a",
+        boxShadow: selected
+          ? `0 4px 16px ${glow}, 0 0 8px rgba(180,210,255,0.5), inset 1px 1px 0 rgba(255,255,255,0.4)`
+          : "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)",
+      }}
+      onMouseEnter={(e) => { if (!selected) { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; } }}
+      onMouseLeave={(e) => { if (!selected) { e.currentTarget.style.backgroundColor = bg; e.currentTarget.style.boxShadow = "0 3px 6px rgba(0,0,0,0.5), inset 1px 1px 0 rgba(255,255,255,0.2)"; } }}
+      onMouseDown={(e) => { if (!selected) { e.currentTarget.style.backgroundColor = a; e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.5), inset 1px 1px 3px rgba(0,0,0,0.4)"; } }}
+      onMouseUp={(e) => { if (!selected) { e.currentTarget.style.backgroundColor = h; e.currentTarget.style.boxShadow = `0 4px 12px ${glow}, inset 1px 1px 0 rgba(255,255,255,0.3)`; } }}
+    >
       {children}
     </button>
   );

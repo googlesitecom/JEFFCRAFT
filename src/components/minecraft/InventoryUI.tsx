@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Inventory, ItemStack, HOTBAR_SIZE } from "@/lib/minecraft/inventory";
 import { BlockType, BLOCKS } from "@/lib/minecraft/blocks";
 import { ItemType, ITEMS, isItem } from "@/lib/minecraft/items";
@@ -8,6 +8,7 @@ import { matchRecipe, getAvailableRecipes, RECIPES, Recipe } from "@/lib/minecra
 import { getAllBlockIds } from "@/lib/minecraft/blocks";
 import { getAllItemIds } from "@/lib/minecraft/items";
 import { ArmorSlots, equipArmor, getArmorSlot, serializeArmor, deserializeArmor, emptyArmor } from "@/lib/minecraft/armor";
+import { readGamepad, wasButtonPressedLabelled, isGamepadConnected } from "@/lib/minecraft/gamepad";
 
 interface InventoryUIProps {
   inventory: Inventory;
@@ -393,6 +394,101 @@ export function InventoryUI({
     refresh();
   };
 
+  // === Controller navigation state ===
+  // Selected slot cursor for controller navigation. We support three zones:
+  //   - "main": the 9×3 main inventory (inventory indices 9..35), cursor 0..26
+  //   - "hotbar": the 9×1 hotbar (inventory indices 0..8), cursor 0..8
+  //   - "armor": the 4 vertical armor slots, cursor 0..3
+  // The cursor is initialized on first gamepad poll.
+  const [controllerSlot, setControllerSlot] = useState<number>(0);
+  const [controllerZone, setControllerZone] = useState<"main" | "hotbar" | "armor">("main");
+  const [controllerActive, setControllerActive] = useState(false);
+  const controllerEnabled = isGamepadConnected();
+
+  // Refs so the per-frame loop always sees the latest cursor without needing
+  // to re-create the rAF loop on every state change
+  const slotRef = useRef(controllerSlot);
+  const zoneRef = useRef(controllerZone);
+  slotRef.current = controllerSlot;
+  zoneRef.current = controllerZone;
+
+  // Per-frame gamepad polling for inventory navigation
+  useEffect(() => {
+    if (!controllerEnabled) {
+      setControllerActive(false);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const pad = readGamepad(0);
+      if (pad) {
+        // B / Y / Start = close inventory
+        if (
+          wasButtonPressedLabelled("inv-close", pad, 1) ||
+          wasButtonPressedLabelled("inv-close", pad, 3) ||
+          wasButtonPressedLabelled("inv-close", pad, 9)
+        ) {
+          onClose();
+          return;
+        }
+        if (!controllerActive) setControllerActive(true);
+
+        const dpad = {
+          up: wasButtonPressedLabelled("inv-nav", pad, 12),
+          down: wasButtonPressedLabelled("inv-nav", pad, 13),
+          left: wasButtonPressedLabelled("inv-nav", pad, 14),
+          right: wasButtonPressedLabelled("inv-nav", pad, 15),
+        };
+        if (dpad.left || dpad.right || dpad.up || dpad.down) {
+          const cols = 9;
+          const zone = zoneRef.current;
+          const idx = slotRef.current;
+          if (zone === "main") {
+            const row = Math.floor(idx / cols);
+            const col = idx % cols;
+            let nr = row, nc = col;
+            if (dpad.left) nc = (col - 1 + cols) % cols;
+            if (dpad.right) nc = (col + 1) % cols;
+            if (dpad.up) { if (row > 0) nr = row - 1; }
+            if (dpad.down) {
+              if (row === 2) { zoneRef.current = "hotbar"; setControllerZone("hotbar"); slotRef.current = nc; setControllerSlot(nc); }
+              else nr = row + 1;
+            }
+            if (zone === "main") {
+              const newIdx = nr * cols + nc;
+              slotRef.current = newIdx;
+              setControllerSlot(newIdx);
+            }
+          } else if (zone === "hotbar") {
+            let nc = idx;
+            if (dpad.left) nc = (idx - 1 + cols) % cols;
+            if (dpad.right) nc = (idx + 1) % cols;
+            if (dpad.up) { zoneRef.current = "main"; setControllerZone("main"); slotRef.current = 2 * cols + nc; setControllerSlot(2 * cols + nc); }
+            else { slotRef.current = nc; setControllerSlot(nc); }
+          }
+        }
+
+        // A = left-click current slot, X = right-click current slot
+        if (wasButtonPressedLabelled("inv-action", pad, 0)) {
+          const zone = zoneRef.current;
+          const idx = slotRef.current;
+          if (zone === "main") handleSlotClick(idx + 9, false);
+          else if (zone === "hotbar") handleSlotClick(idx, false);
+        }
+        if (wasButtonPressedLabelled("inv-action", pad, 2)) {
+          const zone = zoneRef.current;
+          const idx = slotRef.current;
+          if (zone === "main") handleSlotClick(idx + 9, true);
+          else if (zone === "hotbar") handleSlotClick(idx, true);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [controllerEnabled, controllerActive, onClose]);
+
   // Track mouse position for held item cursor
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   useEffect(() => {
@@ -418,22 +514,28 @@ export function InventoryUI({
         durFraction = Math.max(0, Math.min(1, cur / def.maxDurability));
       }
     }
+    // Controller cursor highlight: bright blue border + glow + slight scale
+    const isControllerCursor = controllerActive && highlight;
     return (
       <div
         key={key}
         onClick={(e) => { e.preventDefault(); if (!disabled) onClick(false); }}
         onContextMenu={(e) => { e.preventDefault(); if (!disabled) onClick(true); }}
-        className={`w-12 h-12 flex items-center justify-center relative cursor-pointer transition-colors ${
+        className={`w-12 h-12 flex items-center justify-center relative cursor-pointer transition-all ${
           disabled ? "cursor-not-allowed" : "hover:brightness-110"
-        }`}
+        } ${isControllerCursor ? "scale-110 z-20" : ""}`}
         style={{
           imageRendering: "pixelated",
-          backgroundColor: disabled ? "#6b6b6b" : "#8b8b8b",
-          borderTop: highlight ? "2px solid #fff7a8" : "2px solid #c6c6c6",
-          borderLeft: highlight ? "2px solid #fff7a8" : "2px solid #c6c6c6",
-          borderBottom: highlight ? "2px solid #fff7a8" : "2px solid #373737",
-          borderRight: highlight ? "2px solid #fff7a8" : "2px solid #373737",
-          boxShadow: highlight ? "inset 0 0 0 1px rgba(255,255,255,0.4)" : "inset 1px 1px 0 rgba(255,255,255,0.15)",
+          backgroundColor: disabled ? "#6b6b6b" : isControllerCursor ? "#b8d0ff" : "#8b8b8b",
+          borderTop: highlight ? (isControllerCursor ? "2px solid #4a8aff" : "2px solid #fff7a8") : "2px solid #c6c6c6",
+          borderLeft: highlight ? (isControllerCursor ? "2px solid #4a8aff" : "2px solid #fff7a8") : "2px solid #c6c6c6",
+          borderBottom: highlight ? (isControllerCursor ? "2px solid #4a8aff" : "2px solid #fff7a8") : "2px solid #373737",
+          borderRight: highlight ? (isControllerCursor ? "2px solid #4a8aff" : "2px solid #fff7a8") : "2px solid #373737",
+          boxShadow: isControllerCursor
+            ? "0 0 12px rgba(100,150,255,0.9), inset 0 0 0 1px rgba(255,255,255,0.6)"
+            : highlight
+              ? "inset 0 0 0 1px rgba(255,255,255,0.4)"
+              : "inset 1px 1px 0 rgba(255,255,255,0.15)",
         }}
         title={stack ? getName(stack.id) : undefined}
       >
@@ -836,7 +938,8 @@ export function InventoryUI({
                 {renderSlot(
                   stack,
                   (isRight) => handleSlotClick(i + HOTBAR_SIZE, isRight),
-                  `inv-${i}`
+                  `inv-${i}`,
+                  controllerActive && controllerZone === "main" && controllerSlot === i
                 )}
               </div>
             ))}
@@ -860,7 +963,7 @@ export function InventoryUI({
                   stack,
                   (isRight) => handleSlotClick(i, isRight),
                   `hot-${i}`,
-                  i === inventory.selectedHotbar
+                  i === inventory.selectedHotbar || (controllerActive && controllerZone === "hotbar" && controllerSlot === i)
                 )}
               </div>
             ))}
@@ -907,6 +1010,11 @@ export function InventoryUI({
           <span className="text-[#2a6a2a] font-bold"> Click der</span>: recoger mitad/colocar 1 ·
           <span className="text-[#2a6a2a] font-bold"> Click en resultado</span>: craftear
         </p>
+        {controllerActive && (
+          <p className="text-[#3a5a8a] text-xs font-mono text-center pb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>
+            🎮 D-Pad: mover cursor · A: click izq · X: click der · B/Y: cerrar · Zona: {controllerZone} #{controllerSlot}
+          </p>
+        )}
       </div>
     </div>
   );
