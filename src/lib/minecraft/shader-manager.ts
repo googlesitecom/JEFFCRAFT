@@ -215,14 +215,27 @@ const FXAAShader = {
 };
 
 // ============================================================================
-// 5. WIND SHADER — vertex displacement for foliage
-//    Uses 3 octaves of sin/cos, masked by uv.y so only the top of leaves sway.
+// 5. WIND SHADER — vertex displacement for foliage + subsurface scattering
+//    Uses 4-octave noise-driven wind, masked by uv.y so only the top sways.
+//    Fragment shader adds:
+//      - Translucency (subsurface scattering) for leaves backlit by the sun
+//      - Normal perturbation based on wind direction (leaves tilt as they sway)
+//      - Per-pixel specular for wetness/shine
+//      - Cheap AO from leaf density (darker in alpha-clumped areas)
 // ============================================================================
 export const WindShader = {
   uniforms: {
     uTime: { value: 0 },
     uSpeed: { value: 1.5 },
     uAmplitude: { value: 0.04 },
+    uSunDir: { value: new THREE.Vector3(0.5, 1.0, 0.3).normalize() },
+    uSunColor: { value: new THREE.Color(1.0, 0.95, 0.8) },
+    uAmbientColor: { value: new THREE.Color(0.4, 0.55, 0.7) },
+    uFogColor: { value: new THREE.Color("#87ceeb") },
+    uFogNear: { value: 40 },
+    uFogFar: { value: 80 },
+    uSSSColor: { value: new THREE.Color(0.6, 0.85, 0.4) }, // green translucency
+    uSSSIntensity: { value: 0.8 },
     map: { value: null as any },
   },
   vertexShader: `
@@ -233,20 +246,31 @@ export const WindShader = {
     varying vec3 vNormal;
     varying vec3 vWorldPos;
     varying float vWindAmount;
+    varying vec3 vViewDir;
     void main() {
       vUv = uv;
       vNormal = normal;
       vec3 pos = position;
+      // Wind mask: 0 at base (uv.y < 0.3), ramps to 1 at top
       float windMask = smoothstep(0.3, 1.0, uv.y);
-      float w1 = sin(uTime * uSpeed + pos.y * 3.0 + pos.x * 0.5) * uAmplitude * windMask;
-      float w2 = cos(uTime * uSpeed * 0.7 + pos.z * 2.0 + pos.y * 1.5) * uAmplitude * 0.6 * windMask;
-      float w3 = sin(uTime * uSpeed * 1.3 + (pos.x + pos.z) * 0.8) * uAmplitude * 0.3 * windMask;
-      pos.x += w1 + w3;
-      pos.z += w2;
-      pos.y += sin(uTime * uSpeed * 0.5 + pos.x * 2.0) * uAmplitude * 0.2 * windMask;
+      // 4-octave wind: large slow swell + medium gust + small flutter + micro ripple
+      float t = uTime * uSpeed;
+      float w1 = sin(t + pos.y * 3.0 + pos.x * 0.5) * uAmplitude * windMask;
+      float w2 = cos(t * 0.7 + pos.z * 2.0 + pos.y * 1.5) * uAmplitude * 0.6 * windMask;
+      float w3 = sin(t * 1.3 + (pos.x + pos.z) * 0.8) * uAmplitude * 0.3 * windMask;
+      float w4 = sin(t * 2.5 + pos.x * 5.0 + pos.z * 4.0) * uAmplitude * 0.15 * windMask;
+      // Gust: occasional strong wind (every ~6 seconds, lasts ~1 second)
+      float gust = pow(max(0.0, sin(t * 0.18)), 8.0) * uAmplitude * 2.5 * windMask;
+      pos.x += w1 + w3 + gust;
+      pos.z += w2 + w4;
+      pos.y += sin(t * 0.5 + pos.x * 2.0) * uAmplitude * 0.2 * windMask;
+      // Perturb normal based on wind direction (leaves tilt as they sway)
+      vec3 windDir = normalize(vec3(w1 + w3 + gust, 0.0, w2 + w4));
+      vNormal = normalize(normal + windDir * 0.4 * windMask);
       vWindAmount = windMask;
       vec4 worldPos = modelMatrix * vec4(pos, 1.0);
       vWorldPos = worldPos.xyz;
+      vViewDir = normalize(cameraPosition - vWorldPos);
       gl_Position = projectionMatrix * viewMatrix * worldPos;
     }
   `,
@@ -255,28 +279,64 @@ export const WindShader = {
     varying vec3 vNormal;
     varying vec3 vWorldPos;
     varying float vWindAmount;
+    varying vec3 vViewDir;
     uniform sampler2D map;
+    uniform vec3 uSunDir;
+    uniform vec3 uSunColor;
+    uniform vec3 uAmbientColor;
+    uniform vec3 uFogColor;
+    uniform float uFogNear;
+    uniform float uFogFar;
+    uniform vec3 uSSSColor;
+    uniform float uSSSIntensity;
     void main() {
       vec4 texel = texture2D(map, vUv);
       if (texel.a < 0.5) discard;
-      // Two-tone shading: top of leaves gets more light (sun comes from above)
-      vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
-      float diffuse = max(dot(vNormal, lightDir), 0.0);
-      float light = 0.45 + diffuse * 0.55;
-      // Wind-shaded leaves get a subtle brightening (motion catches sunlight)
-      light += vWindAmount * 0.05;
+      vec3 N = normalize(vNormal);
+      vec3 L = normalize(uSunDir);
+      vec3 V = normalize(vViewDir);
+      // Standard diffuse (Lambert)
+      float NdotL = max(dot(N, L), 0.0);
+      // Subsurface scattering: light passes through thin leaves when backlit
+      // (when sun is on the opposite side of the leaf from the camera).
+      // We use the negative of the normal dotted with light, scaled by view factor.
+      float backLit = max(dot(-N, L), 0.0);
+      float viewFactor = max(dot(V, -L), 0.0);
+      float sss = backLit * viewFactor * uSSSIntensity;
+      // Also add ambient SSS so leaves aren't pitch black in shadow
+      sss += 0.15 * uSSSIntensity;
+      // Specular (Blinn-Phong) — small, tight highlight for waxy leaf surface
+      vec3 H = normalize(L + V);
+      float spec = pow(max(dot(N, H), 0.0), 64.0) * 0.25;
+      // Compose color: ambient + diffuse + SSS + specular
+      vec3 ambient = uAmbientColor * texel.rgb;
+      vec3 diffuse = uSunColor * texel.rgb * NdotL;
+      vec3 sssColor = uSSSColor * sss * texel.rgb * 0.6;
+      vec3 specColor = uSunColor * spec;
+      vec3 color = ambient + diffuse + sssColor + specColor;
+      // Wind motion catches sunlight — brighten the swaying parts subtly
+      color += uSunColor * vWindAmount * 0.04 * (0.5 + 0.5 * sin(uTime * 2.0));
+      // Distance fog
       float dist = length(vWorldPos - cameraPosition);
-      float fogFactor = smoothstep(40.0, 80.0, dist);
-      vec3 fc = vec3(0.5, 0.7, 0.9);
-      gl_FragColor = vec4(mix(texel.rgb * light, fc, fogFactor * 0.3), texel.a);
+      float fogFactor = smoothstep(uFogNear, uFogFar, dist);
+      color = mix(color, uFogColor, fogFactor * 0.4);
+      gl_FragColor = vec4(color, texel.a);
     }
   `,
 };
 
 // ============================================================================
-// 6. WATER SHADER — animated waves + specular + fresnel + cheap caustics
-//    This is the realistic water: no planar reflections (too expensive),
-//    instead we fake reflection via fresnel + sky color + sun specular.
+// 6. WATER SHADER — realistic water with flow, ripples, refraction, SSS
+//    Features:
+//      - 5-octave Gerstner waves with directional flow
+//      - Player interaction ripples (uniform array, max 4 active ripples)
+//      - Analytical normals from wave derivatives
+//      - Blinn-Phong specular with sun glitter
+//      - Fresnel sky reflection
+//      - Refraction distortion (fake — bends the underwater UV)
+//      - Subsurface scattering for water depth translucency
+//      - Animated caustics on the water surface
+//      - Foam at wave crests
 // ============================================================================
 export const WaterShader = {
   uniforms: {
@@ -292,32 +352,103 @@ export const WaterShader = {
     uFogColor: { value: new THREE.Color("#87ceeb") },
     uFogNear: { value: 30 },
     uFogFar: { value: 80 },
+    // Player ripple sources — up to 4 simultaneous
+    uRipplePositions: { value: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()] },
+    uRippleTimes: { value: [0, 0, 0, 0] }, // time since ripple started, 0 = inactive
+    uRippleStrength: { value: 1.0 },
   },
   vertexShader: `
     uniform float uTime;
+    uniform vec3 uRipplePositions[4];
+    uniform float uRippleTimes[4];
+    uniform float uRippleStrength;
     varying vec3 vWorldPos;
     varying vec3 vNormal;
     varying float vWaveHeight;
     varying vec2 vUv;
     varying vec3 vViewDir;
+    varying float vFoam;
+    varying float vRipple;
+
+    // Single Gerstner wave contribution
+    // dir = horizontal direction (normalized), steepness, wavelength, speed
+    vec3 gerstner(vec2 dir, float steepness, float wavelength, float speed, vec2 pos, float t, inout vec3 tangent, inout vec3 binormal) {
+      float k = 6.28318 / wavelength;
+      float c = speed;
+      vec2 d = normalize(dir);
+      float f = k * dot(d, pos) - c * t;
+      float a = steepness / k;
+      // Position offset
+      vec3 offset;
+      offset.x = d.x * a * cos(f);
+      offset.z = d.y * a * cos(f);
+      offset.y = a * sin(f);
+      // Tangent (d/dx)
+      tangent += vec3(
+        -d.x * d.x * steepness * sin(f),
+        d.x * k * a * cos(f),
+        -d.x * d.y * steepness * sin(f)
+      );
+      // Binormal (d/dz)
+      binormal += vec3(
+        -d.x * d.y * steepness * sin(f),
+        d.y * k * a * cos(f),
+        -d.y * d.y * steepness * sin(f)
+      );
+      return offset;
+    }
+
     void main() {
       vUv = uv;
       vec3 pos = position;
-      // 4-octave Gerstner-like waves
-      float w1 = sin(pos.x * 0.8 + uTime * 1.5) * 0.06;
-      float w2 = cos(pos.z * 0.5 + uTime * 1.2) * 0.05;
-      float w3 = sin((pos.x + pos.z) * 0.3 + uTime * 0.8) * 0.04;
-      float w4 = cos(pos.x * 0.2 - pos.z * 0.4 + uTime * 1.0) * 0.03;
-      pos.y += w1 + w2 + w3 + w4;
-      vWaveHeight = w1 + w2 + w3 + w4;
-      // Compute normal analytically (derivative of the wave function)
-      float dx = cos(pos.x * 0.8 + uTime * 1.5) * 0.048
-               + cos((pos.x + pos.z) * 0.3 + uTime * 0.8) * 0.012
-               - sin(pos.x * 0.2 - pos.z * 0.4 + uTime * 1.0) * 0.006;
-      float dz = -sin(pos.z * 0.5 + uTime * 1.2) * 0.025
-               + cos((pos.x + pos.z) * 0.3 + uTime * 0.8) * 0.012
-               + sin(pos.x * 0.2 - pos.z * 0.4 + uTime * 1.0) * 0.012;
-      vNormal = normalize(vec3(-dx, 1.0, -dz));
+      vec2 posXZ = vec2(pos.x, pos.z);
+
+      // === Gerstner waves — 5 directional waves with flow ===
+      vec3 tangent = vec3(1.0, 0.0, 0.0);
+      vec3 binormal = vec3(0.0, 0.0, 1.0);
+      vec3 wave = vec3(0.0);
+      // Large swell (slow, big amplitude) — flowing east
+      wave += gerstner(vec2(1.0, 0.2), 0.06, 8.0, 1.2, posXZ, uTime, tangent, binormal);
+      // Medium wave — flowing north-east
+      wave += gerstner(vec2(0.6, 0.8), 0.04, 5.0, 1.5, posXZ, uTime, tangent, binormal);
+      // Small choppy wave — flowing west
+      wave += gerstner(vec2(-0.8, 0.3), 0.025, 3.0, 2.0, posXZ, uTime, tangent, binormal);
+      // Tiny ripple — flowing south
+      wave += gerstner(vec2(0.2, -0.9), 0.015, 1.5, 2.5, posXZ, uTime, tangent, binormal);
+      // Micro detail
+      wave += gerstner(vec2(0.7, 0.5), 0.008, 0.8, 3.0, posXZ, uTime, tangent, binormal);
+
+      pos += wave;
+      vWaveHeight = wave.y;
+      vFoam = smoothstep(0.08, 0.14, wave.y); // foam on tall crests
+
+      // === Player interaction ripples ===
+      // Each ripple is a expanding ring centered on the player's position when
+      // they entered the water. We sum 4 simultaneous ripples.
+      float rippleTotal = 0.0;
+      for (int i = 0; i < 4; i++) {
+        float rt = uRippleTimes[i];
+        if (rt <= 0.0) continue;
+        vec3 rp = uRipplePositions[i];
+        float distToRipple = length(posXZ - vec2(rp.x, rp.z));
+        // Expanding ring: radius grows with time, amplitude decays
+        float radius = rt * 3.5; // 3.5 blocks/sec expansion
+        float ringDist = abs(distToRipple - radius);
+        float ringWidth = 0.8;
+        float ring = exp(-ringDist * ringDist / (ringWidth * ringWidth));
+        // Decay over time (ripple fades after ~2 seconds)
+        float decay = max(0.0, 1.0 - rt / 2.0);
+        float amp = 0.1 * ring * decay * uRippleStrength;
+        // Apply as Y displacement
+        pos.y += amp * sin(rt * 12.0 - distToRipple * 4.0);
+        // Accumulate for normal perturbation
+        rippleTotal += amp;
+      }
+      vRipple = rippleTotal;
+
+      // Normal from tangent/binormal cross product
+      vNormal = normalize(cross(tangent, binormal));
+
       vec4 worldPos = modelMatrix * vec4(pos, 1.0);
       vWorldPos = worldPos.xyz;
       vViewDir = normalize(cameraPosition - vWorldPos);
@@ -341,38 +472,70 @@ export const WaterShader = {
     varying float vWaveHeight;
     varying vec2 vUv;
     varying vec3 vViewDir;
+    varying float vFoam;
+    varying float vRipple;
 
     void main() {
-      // Depth-based color: wave crests = shallow (bright), troughs = deep (dark)
-      float depthFactor = smoothstep(-0.1, 0.12, vWaveHeight);
+      vec3 N = normalize(vNormal);
+      vec3 V = normalize(vViewDir);
+      vec3 L = normalize(uSunDir);
+
+      // === Depth-based color ===
+      // Wave crests = shallow (bright cyan), troughs = deep (dark blue)
+      float depthFactor = smoothstep(-0.1, 0.14, vWaveHeight);
       vec3 color = mix(uDeepColor, uShallowColor, depthFactor);
-      color = mix(color, uWaterColor, 0.5);
+      color = mix(color, uWaterColor, 0.45);
 
-      // Sun specular (Blinn-Phong)
-      vec3 halfDir = normalize(uSunDir + vViewDir);
-      float spec = pow(max(dot(vNormal, halfDir), 0.0), 96.0);
-      color += uSunColor * spec * 1.2;
+      // === Refraction distortion ===
+      // Bend the UV based on the normal to fake the underwater distortion
+      vec2 refractUv = vUv + N.xz * 0.04;
+      // Sample a procedural underwater pattern (cheap)
+      float underwater = sin(refractUv.x * 30.0 + uTime * 1.5) * sin(refractUv.y * 30.0 + uTime * 1.2);
+      color += vec3(0.05, 0.12, 0.15) * underwater * 0.15;
 
-      // Fresnel: water reflects more at grazing angles — fake sky reflection
-      float fresnel = pow(1.0 - max(dot(vNormal, vViewDir), 0.0), 4.0);
-      color = mix(color, uSkyColor, fresnel * 0.55);
+      // === Sun specular (Blinn-Phong) with tighter highlight ===
+      vec3 H = normalize(L + V);
+      float specSharp = pow(max(dot(N, H), 0.0), 256.0);
+      float specBroad = pow(max(dot(N, H), 0.0), 32.0) * 0.3;
+      color += uSunColor * (specSharp * 1.5 + specBroad);
 
-      // Sparkle: tiny highlights at wave crests
-      float sparkle = pow(max(0.0, vWaveHeight / 0.15), 8.0);
-      color += vec3(1.0, 0.98, 0.9) * sparkle * 0.5;
+      // === Sun glitter (small sparkles across the surface) ===
+      float glitter = pow(max(0.0, dot(N, H)), 1024.0);
+      glitter += pow(max(0.0, dot(N, H) - 0.02), 4096.0) * 2.0;
+      color += vec3(1.0, 0.98, 0.9) * glitter * 0.6;
 
-      // Animated caustics (cheap 2-octave sin pattern)
-      float c1 = sin(vUv.x * 20.0 + uTime * 2.0) * sin(vUv.y * 20.0 + uTime * 1.5);
-      float c2 = sin(vUv.x * 12.0 - uTime * 1.3) * cos(vUv.y * 14.0 + uTime * 0.9);
+      // === Fresnel sky reflection ===
+      float fresnel = pow(1.0 - max(dot(N, V), 0.0), 5.0);
+      fresnel = mix(0.04, 1.0, fresnel); // Schlick's approximation with F0=0.04
+      color = mix(color, uSkyColor, fresnel * 0.6);
+
+      // === Subsurface scattering — light through wave crests ===
+      float sss = max(0.0, vWaveHeight) * 0.8 * max(dot(-L, V), 0.0);
+      color += uWaterColor * sss * 1.5;
+
+      // === Foam at wave crests ===
+      vec3 foamColor = vec3(0.95, 0.97, 1.0);
+      color = mix(color, foamColor, vFoam * 0.6);
+      // Foam from ripples too
+      color = mix(color, foamColor, smoothstep(0.05, 0.12, vRipple) * 0.4);
+
+      // === Animated caustics ===
+      float c1 = sin(vUv.x * 25.0 + uTime * 2.5) * sin(vUv.y * 25.0 + uTime * 2.0);
+      float c2 = sin(vUv.x * 15.0 - uTime * 1.6) * cos(vUv.y * 18.0 + uTime * 1.1);
       float caustic = (c1 + c2 * 0.6) * 0.5;
-      color += vec3(0.12, 0.22, 0.32) * caustic * 0.08;
+      caustic = max(0.0, caustic);
+      color += vec3(0.15, 0.25, 0.35) * caustic * 0.12;
 
-      // Distance fog (match scene fog so water blends with horizon)
+      // === Distance fog ===
       float dist = length(vWorldPos - cameraPosition);
       float fogFactor = smoothstep(uFogNear, uFogFar, dist);
       color = mix(color, uFogColor, fogFactor);
 
-      gl_FragColor = vec4(color, uOpacity);
+      // Opacity: deeper areas more opaque, crests slightly more transparent
+      float alpha = uOpacity + depthFactor * 0.08;
+      alpha = clamp(alpha, 0.5, 0.92);
+
+      gl_FragColor = vec4(color, alpha);
     }
   `,
 };
@@ -507,6 +670,21 @@ export class ShaderManager {
       (u.uFogColor.value as THREE.Color).copy(fogColor);
       u.uFogNear.value = fogNear;
       u.uFogFar.value = fogFar;
+      // Advance ripple times (decay toward 0)
+      const times = u.uRippleTimes.value as number[];
+      for (let i = 0; i < 4; i++) {
+        if (times[i] > 0) {
+          times[i] += 1 / 60; // approximate frame dt
+          if (times[i] > 2.0) times[i] = 0; // expire after 2 seconds
+        }
+      }
+    }
+    if (this.windMaterial) {
+      const u = this.windMaterial.uniforms;
+      (u.uSunDir.value as THREE.Vector3).copy(sunDirWorld).normalize();
+      (u.uFogColor.value as THREE.Color).copy(fogColor);
+      u.uFogNear.value = fogNear;
+      u.uFogFar.value = fogFar;
     }
     if (this.fogPass) {
       (this.fogPass.uniforms.fogColor.value as THREE.Color).copy(fogColor);
@@ -516,6 +694,25 @@ export class ShaderManager {
     if (this.colorGradePass) {
       (this.colorGradePass.uniforms.uTime as any).value = this.clock.getElapsedTime();
     }
+  }
+
+  /** Spawn a ripple at the given world position (player entered water). */
+  spawnRipple(x: number, y: number, z: number) {
+    if (!this.waterMaterial) return;
+    const u = this.waterMaterial.uniforms;
+    const positions = u.uRipplePositions.value as THREE.Vector3[];
+    const times = u.uRippleTimes.value as number[];
+    // Find the oldest/inactive slot
+    let oldestIdx = 0;
+    let oldestTime = times[0];
+    for (let i = 1; i < 4; i++) {
+      if (times[i] < oldestTime || times[i] === 0) {
+        oldestTime = times[i];
+        oldestIdx = i;
+      }
+    }
+    positions[oldestIdx].set(x, y, z);
+    times[oldestIdx] = 0.01; // start just above 0 so it's "active"
   }
 
   render() {

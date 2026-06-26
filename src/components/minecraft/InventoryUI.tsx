@@ -395,13 +395,18 @@ export function InventoryUI({
   };
 
   // === Controller navigation state ===
-  // Selected slot cursor for controller navigation. We support three zones:
-  //   - "main": the 9×3 main inventory (inventory indices 9..35), cursor 0..26
-  //   - "hotbar": the 9×1 hotbar (inventory indices 0..8), cursor 0..8
-  //   - "armor": the 4 vertical armor slots, cursor 0..3
-  // The cursor is initialized on first gamepad poll.
+  // Zones:
+  //   - "main":     9×3 main inventory (indices 9..35), cursor 0..26
+  //   - "hotbar":   9×1 hotbar (indices 0..8), cursor 0..8
+  //   - "armor":    4 vertical armor slots, cursor 0..3
+  //   - "craft":    3×3 crafting grid (or 2×2 in inventory mode), cursor 0..8
+  //   - "result":   single craft result slot, cursor 0
+  //   - "recipes":  recipe book grid (variable size), cursor 0..N
+  //   - "creative": creative items grid (variable size), cursor 0..N
   const [controllerSlot, setControllerSlot] = useState<number>(0);
-  const [controllerZone, setControllerZone] = useState<"main" | "hotbar" | "armor">("main");
+  const [controllerZone, setControllerZone] = useState<
+    "main" | "hotbar" | "armor" | "craft" | "result" | "recipes" | "creative"
+  >("main");
   const [controllerActive, setControllerActive] = useState(false);
   const controllerEnabled = isGamepadConnected();
 
@@ -439,6 +444,25 @@ export function InventoryUI({
           left: wasButtonPressedLabelled("inv-nav", pad, 14),
           right: wasButtonPressedLabelled("inv-nav", pad, 15),
         };
+        // LB / RB = cycle zones (left/right through the zone list)
+        const lbPressed = wasButtonPressedLabelled("inv-zone", pad, 4);
+        const rbPressed = wasButtonPressedLabelled("inv-zone", pad, 5);
+        if (lbPressed || rbPressed) {
+          const zones = (showRecipeBook && isCreative)
+            ? ["main", "hotbar", "craft", "result", "recipes", "creative"] as const
+            : showRecipeBook
+              ? ["main", "hotbar", "craft", "result", "recipes"] as const
+              : isCreative
+                ? ["main", "hotbar", "craft", "result", "creative"] as const
+                : ["main", "hotbar", "craft", "result"] as const;
+          const curIdx = zones.indexOf(zoneRef.current as any);
+          const nextIdx = (curIdx + (rbPressed ? 1 : -1) + zones.length) % zones.length;
+          zoneRef.current = zones[nextIdx] as any;
+          setControllerZone(zones[nextIdx] as any);
+          slotRef.current = 0;
+          setControllerSlot(0);
+        }
+
         if (dpad.left || dpad.right || dpad.up || dpad.down) {
           const cols = 9;
           const zone = zoneRef.current;
@@ -449,7 +473,16 @@ export function InventoryUI({
             let nr = row, nc = col;
             if (dpad.left) nc = (col - 1 + cols) % cols;
             if (dpad.right) nc = (col + 1) % cols;
-            if (dpad.up) { if (row > 0) nr = row - 1; }
+            if (dpad.up) {
+              if (row === 0) {
+                // Up from main row 0 → go to craft grid (last row, same col mod 3)
+                zoneRef.current = "craft"; setControllerZone("craft");
+                const craftCol = Math.min(col, 2);
+                const craftRow = isCraftingTable ? 2 : 1;
+                const craftIdx = craftRow * 3 + craftCol;
+                slotRef.current = craftIdx; setControllerSlot(craftIdx);
+              } else nr = row - 1;
+            }
             if (dpad.down) {
               if (row === 2) { zoneRef.current = "hotbar"; setControllerZone("hotbar"); slotRef.current = nc; setControllerSlot(nc); }
               else nr = row + 1;
@@ -465,6 +498,84 @@ export function InventoryUI({
             if (dpad.right) nc = (idx + 1) % cols;
             if (dpad.up) { zoneRef.current = "main"; setControllerZone("main"); slotRef.current = 2 * cols + nc; setControllerSlot(2 * cols + nc); }
             else { slotRef.current = nc; setControllerSlot(nc); }
+          } else if (zone === "craft") {
+            // 3×3 grid (or 2×2 in inventory mode). Cols=3, rows=3 (or 2).
+            const cCols = 3;
+            const cRows = isCraftingTable ? 3 : 2;
+            const row = Math.floor(idx / cCols);
+            const col = idx % cCols;
+            let nr = row, nc = col;
+            if (dpad.left) nc = (col - 1 + cCols) % cCols;
+            if (dpad.right) nc = (col + 1) % cCols;
+            if (dpad.up) {
+              if (row === 0) {
+                // Up from craft row 0 → result slot
+                zoneRef.current = "result"; setControllerZone("result");
+                slotRef.current = 0; setControllerSlot(0);
+              } else nr = row - 1;
+            }
+            if (dpad.down) {
+              if (row === cRows - 1) {
+                // Down from craft last row → main inventory row 0 (closest col)
+                zoneRef.current = "main"; setControllerZone("main");
+                const mainCol = Math.min(col * 3, 8); // map craft col to main col
+                slotRef.current = mainCol; setControllerSlot(mainCol);
+              } else nr = row + 1;
+            }
+            if (zone === "craft") {
+              // Clamp to valid craft rows (skip disabled cells in 2×2 mode)
+              nr = Math.max(0, Math.min(cRows - 1, nr));
+              const newIdx = nr * cCols + nc;
+              slotRef.current = newIdx;
+              setControllerSlot(newIdx);
+            }
+          } else if (zone === "result") {
+            // Single slot — only Down goes back to craft row 0
+            if (dpad.down) {
+              zoneRef.current = "craft"; setControllerZone("craft");
+              slotRef.current = 0; setControllerSlot(0);
+            }
+          } else if (zone === "recipes") {
+            // Variable columns: assume 6 on small, 8 on larger. Use 6 to be safe.
+            const rCols = 6;
+            const rCount = allRecipes.length;
+            const rRows = Math.ceil(rCount / rCols);
+            const row = Math.floor(idx / rCols);
+            const col = idx % rCols;
+            let nr = row, nc = col;
+            if (dpad.left) nc = (col - 1 + rCols) % rCols;
+            if (dpad.right) nc = (col + 1) % rCols;
+            if (dpad.up) nr = (row - 1 + rRows) % rRows;
+            if (dpad.down) nr = (row + 1) % rRows;
+            let newIdx = nr * rCols + nc;
+            if (newIdx >= rCount) newIdx = rCount - 1;
+            if (newIdx < 0) newIdx = 0;
+            slotRef.current = newIdx;
+            setControllerSlot(newIdx);
+          } else if (zone === "creative") {
+            const cCols = 9;
+            const cCount = creativeItems.length;
+            const cRows = Math.ceil(cCount / cCols);
+            const row = Math.floor(idx / cCols);
+            const col = idx % cCols;
+            let nr = row, nc = col;
+            if (dpad.left) nc = (col - 1 + cCols) % cCols;
+            if (dpad.right) nc = (col + 1) % cCols;
+            if (dpad.up) nr = (row - 1 + cRows) % cRows;
+            if (dpad.down) nr = (row + 1) % cRows;
+            let newIdx = nr * cCols + nc;
+            if (newIdx >= cCount) newIdx = cCount - 1;
+            if (newIdx < 0) newIdx = 0;
+            slotRef.current = newIdx;
+            setControllerSlot(newIdx);
+          } else if (zone === "armor") {
+            // 4 vertical slots — only up/down moves
+            const aCount = 4;
+            let ni = idx;
+            if (dpad.up) ni = (idx - 1 + aCount) % aCount;
+            if (dpad.down) ni = (idx + 1) % aCount;
+            slotRef.current = ni;
+            setControllerSlot(ni);
           }
         }
 
@@ -474,12 +585,39 @@ export function InventoryUI({
           const idx = slotRef.current;
           if (zone === "main") handleSlotClick(idx + 9, false);
           else if (zone === "hotbar") handleSlotClick(idx, false);
+          else if (zone === "craft") {
+            const cx = idx % 3, cy = Math.floor(idx / 3);
+            if (isCraftingTable || (cx < 2 && cy < 2)) handleCraftSlotClick(cx, cy, false);
+          } else if (zone === "result") handleTakeResult(false);
+          else if (zone === "recipes") {
+            const r = allRecipes[idx];
+            if (r) {
+              const canCraft = craftableIds.has(r.result.id + "_" + r.result.count);
+              const needsTable = r.requiresTable && !isCraftingTable;
+              if (canCraft && !needsTable) handleRecipeClick(r);
+            }
+          } else if (zone === "creative") {
+            const id = creativeItems[idx];
+            if (id !== undefined) handleCreativeItemClick(id);
+          } else if (zone === "armor") {
+            const slots: ("helmet" | "chestplate" | "leggings" | "boots")[] = ["helmet", "chestplate", "leggings", "boots"];
+            handleArmorSlotClick(slots[idx], false);
+          }
         }
         if (wasButtonPressedLabelled("inv-action", pad, 2)) {
           const zone = zoneRef.current;
           const idx = slotRef.current;
           if (zone === "main") handleSlotClick(idx + 9, true);
           else if (zone === "hotbar") handleSlotClick(idx, true);
+          else if (zone === "craft") {
+            const cx = idx % 3, cy = Math.floor(idx / 3);
+            if (isCraftingTable || (cx < 2 && cy < 2)) handleCraftSlotClick(cx, cy, true);
+          } else if (zone === "result") handleTakeResult(true);
+          else if (zone === "armor") {
+            const slots: ("helmet" | "chestplate" | "leggings" | "boots")[] = ["helmet", "chestplate", "leggings", "boots"];
+            handleArmorSlotClick(slots[idx], true);
+          }
+          // Recipes & creative don't have right-click actions
         }
       }
       raf = requestAnimationFrame(tick);
@@ -487,7 +625,7 @@ export function InventoryUI({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [controllerEnabled, controllerActive, onClose]);
+  }, [controllerEnabled, controllerActive, onClose, isCraftingTable, allRecipes, craftableIds, creativeItems]);
 
   // Track mouse position for held item cursor
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -643,11 +781,12 @@ export function InventoryUI({
             <div className="flex-shrink-0 flex flex-col items-center gap-2">
               {/* Armor slots - functional in survival mode */}
               <div className="flex flex-col gap-1">
-                {(["helmet", "chestplate", "leggings", "boots"] as const).map((slot) => {
+                {(["helmet", "chestplate", "leggings", "boots"] as const).map((slot, armorIdx) => {
                   const slotData = armor?.[slot] ?? null;
                   const equippedId = slotData?.itemId ?? null;
                   const equippedDurability = slotData?.durability ?? -1;
                   const canEquip = armor !== undefined && onArmorChange !== undefined;
+                  const isArmorFocused = controllerActive && controllerZone === "armor" && controllerSlot === armorIdx;
                   // Compute durability fraction for the bar
                   let durFraction = 1;
                   if (equippedId !== null) {
@@ -660,15 +799,17 @@ export function InventoryUI({
                       key={slot}
                       onClick={(e) => { e.preventDefault(); if (canEquip) handleArmorSlotClick(slot, false); }}
                       onContextMenu={(e) => { e.preventDefault(); if (canEquip) handleArmorSlotClick(slot, true); }}
-                      className={`w-12 h-12 flex items-center justify-center relative transition-all ${canEquip ? "hover:brightness-110 cursor-pointer" : ""}`}
+                      className={`w-12 h-12 flex items-center justify-center relative transition-all ${canEquip ? "hover:brightness-110 cursor-pointer" : ""} ${isArmorFocused ? "scale-110 z-20" : ""}`}
                       style={{
                         imageRendering: "pixelated",
-                        backgroundColor: "#8b8b8b",
-                        borderTop: canEquip ? "2px solid #c6c6c6" : "2px solid #555",
-                        borderLeft: canEquip ? "2px solid #c6c6c6" : "2px solid #555",
-                        borderBottom: canEquip ? "2px solid #373737" : "2px solid #555",
-                        borderRight: canEquip ? "2px solid #373737" : "2px solid #555",
-                        boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.15)",
+                        backgroundColor: isArmorFocused ? "#b8d0ff" : "#8b8b8b",
+                        borderTop: isArmorFocused ? "2px solid #4a8aff" : (canEquip ? "2px solid #c6c6c6" : "2px solid #555"),
+                        borderLeft: isArmorFocused ? "2px solid #4a8aff" : (canEquip ? "2px solid #c6c6c6" : "2px solid #555"),
+                        borderBottom: isArmorFocused ? "2px solid #4a8aff" : (canEquip ? "2px solid #373737" : "2px solid #555"),
+                        borderRight: isArmorFocused ? "2px solid #4a8aff" : (canEquip ? "2px solid #373737" : "2px solid #555"),
+                        boxShadow: isArmorFocused
+                          ? "0 0 12px rgba(100,150,255,0.9), inset 0 0 0 1px rgba(255,255,255,0.6)"
+                          : "inset 1px 1px 0 rgba(255,255,255,0.15)",
                       }}
                       title={equippedId !== null ? ITEMS[equippedId as ItemType]?.name ?? "Armor" : (canEquip ? `Equipar ${slot}` : slot)}
                     >
@@ -751,7 +892,7 @@ export function InventoryUI({
                         stack,
                         (isRight) => handleCraftSlotClick(x, y, isRight),
                         `craft-${x}-${y}`,
-                        false,
+                        controllerActive && controllerZone === "craft" && controllerSlot === (y * 3 + x),
                         !isCraftingTable && (x >= 2 || y >= 2)
                       )}
                     </div>
@@ -771,15 +912,17 @@ export function InventoryUI({
                   <div
                     onClick={(e) => { e.preventDefault(); handleTakeResult(e.button === 2); }}
                     onContextMenu={(e) => { e.preventDefault(); handleTakeResult(true); }}
-                    className="w-12 h-12 flex items-center justify-center cursor-pointer transition-all hover:scale-105"
+                    className={`w-12 h-12 flex items-center justify-center cursor-pointer transition-all ${controllerActive && controllerZone === "result" ? "scale-110" : "hover:scale-105"}`}
                     style={{
                       imageRendering: "pixelated",
-                      backgroundColor: "#8b8b8b",
-                      borderTop: "2px solid #fff7a8",
-                      borderLeft: "2px solid #fff7a8",
-                      borderBottom: "2px solid #ffcd30",
-                      borderRight: "2px solid #ffcd30",
-                      boxShadow: "inset 0 0 0 1px rgba(255,247,168,0.4), 0 0 8px rgba(255,205,48,0.4)",
+                      backgroundColor: controllerActive && controllerZone === "result" ? "#b8d0ff" : "#8b8b8b",
+                      borderTop: controllerActive && controllerZone === "result" ? "2px solid #4a8aff" : "2px solid #fff7a8",
+                      borderLeft: controllerActive && controllerZone === "result" ? "2px solid #4a8aff" : "2px solid #fff7a8",
+                      borderBottom: controllerActive && controllerZone === "result" ? "2px solid #4a8aff" : "2px solid #ffcd30",
+                      borderRight: controllerActive && controllerZone === "result" ? "2px solid #4a8aff" : "2px solid #ffcd30",
+                      boxShadow: controllerActive && controllerZone === "result"
+                        ? "0 0 12px rgba(100,150,255,0.9), inset 0 0 0 1px rgba(255,255,255,0.6)"
+                        : "inset 0 0 0 1px rgba(255,247,168,0.4), 0 0 8px rgba(255,205,48,0.4)",
                     }}
                   >
                     {(() => {
@@ -833,18 +976,20 @@ export function InventoryUI({
                   const canCraft = craftableIds.has(recipe.result.id + "_" + recipe.result.count);
                   const needsTable = recipe.requiresTable && !isCraftingTable;
                   const recipeIcon = getIcon(recipe.result.id);
+                  const isRecipeFocused = controllerActive && controllerZone === "recipes" && controllerSlot === i;
                   return (
                     <button
                       key={i}
                       onClick={() => canCraft && !needsTable && handleRecipeClick(recipe)}
-                      className="w-12 h-12 flex items-center justify-center relative transition-all hover:brightness-110"
+                      className={`w-12 h-12 flex items-center justify-center relative transition-all hover:brightness-110 ${isRecipeFocused ? "scale-110 z-20" : ""}`}
                       style={{
                         imageRendering: "pixelated",
-                        backgroundColor: needsTable ? "#6b6b6b" : canCraft ? "#8b8b8b" : "#6b6b6b",
-                        borderTop: needsTable ? "2px solid #3a5a8a" : canCraft ? "2px solid #6ade40" : "2px solid #555",
-                        borderLeft: needsTable ? "2px solid #3a5a8a" : canCraft ? "2px solid #6ade40" : "2px solid #555",
-                        borderBottom: needsTable ? "2px solid #1a2a4a" : canCraft ? "2px solid #2a6a2a" : "2px solid #373737",
-                        borderRight: needsTable ? "2px solid #1a2a4a" : canCraft ? "2px solid #2a6a2a" : "2px solid #373737",
+                        backgroundColor: isRecipeFocused ? "#b8d0ff" : (needsTable ? "#6b6b6b" : canCraft ? "#8b8b8b" : "#6b6b6b"),
+                        borderTop: isRecipeFocused ? "2px solid #4a8aff" : (needsTable ? "2px solid #3a5a8a" : canCraft ? "2px solid #6ade40" : "2px solid #555"),
+                        borderLeft: isRecipeFocused ? "2px solid #4a8aff" : (needsTable ? "2px solid #3a5a8a" : canCraft ? "2px solid #6ade40" : "2px solid #555"),
+                        borderBottom: isRecipeFocused ? "2px solid #4a8aff" : (needsTable ? "2px solid #1a2a4a" : canCraft ? "2px solid #2a6a2a" : "2px solid #373737"),
+                        borderRight: isRecipeFocused ? "2px solid #4a8aff" : (needsTable ? "2px solid #1a2a4a" : canCraft ? "2px solid #2a6a2a" : "2px solid #373737"),
+                        boxShadow: isRecipeFocused ? "0 0 12px rgba(100,150,255,0.9)" : "none",
                         cursor: (canCraft && !needsTable) ? "pointer" : "help",
                         opacity: (!canCraft && !needsTable) ? 0.6 : 1,
                       }}
@@ -892,22 +1037,24 @@ export function InventoryUI({
               borderRight: "2px solid #c6c6c6",
               imageRendering: "pixelated",
             }}>
-              {creativeItems.map((id) => {
+              {creativeItems.map((id, ci) => {
                 const icon = getIcon(id);
                 const name = getName(id);
                 if (!icon) return null;
+                const isCreativeFocused = controllerActive && controllerZone === "creative" && controllerSlot === ci;
                 return (
                   <button
                     key={id}
                     onClick={() => handleCreativeItemClick(id)}
-                    className="w-12 h-12 flex items-center justify-center cursor-pointer transition-all hover:scale-105"
+                    className={`w-12 h-12 flex items-center justify-center cursor-pointer transition-all hover:scale-105 ${isCreativeFocused ? "scale-110 z-20" : ""}`}
                     style={{
                       imageRendering: "pixelated",
-                      backgroundColor: "#8b8b8b",
-                      borderTop: "2px solid #c6c6c6",
-                      borderLeft: "2px solid #c6c6c6",
-                      borderBottom: "2px solid #373737",
-                      borderRight: "2px solid #373737",
+                      backgroundColor: isCreativeFocused ? "#b8d0ff" : "#8b8b8b",
+                      borderTop: isCreativeFocused ? "2px solid #4a8aff" : "2px solid #c6c6c6",
+                      borderLeft: isCreativeFocused ? "2px solid #4a8aff" : "2px solid #c6c6c6",
+                      borderBottom: isCreativeFocused ? "2px solid #4a8aff" : "2px solid #373737",
+                      borderRight: isCreativeFocused ? "2px solid #4a8aff" : "2px solid #373737",
+                      boxShadow: isCreativeFocused ? "0 0 12px rgba(100,150,255,0.9)" : "none",
                     }}
                     title={name}
                   >
@@ -1012,7 +1159,7 @@ export function InventoryUI({
         </p>
         {controllerActive && (
           <p className="text-[#3a5a8a] text-xs font-mono text-center pb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>
-            🎮 D-Pad: mover cursor · A: click izq · X: click der · B/Y: cerrar · Zona: {controllerZone} #{controllerSlot}
+            🎮 D-Pad: mover cursor · A: click izq · X: click der · LB/RB: cambiar zona · B/Y: cerrar · Zona: {controllerZone} #{controllerSlot}
           </p>
         )}
       </div>

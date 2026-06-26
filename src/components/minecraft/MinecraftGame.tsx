@@ -33,6 +33,7 @@ import { EnderDragon } from "@/lib/minecraft/ender-dragon";
 import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButtonPressed, wasButtonPressedLabelled, wasGamepadConnected, clearAutoDetect, onGamepadConnectionChange, getConnectedGamepadName } from "@/lib/minecraft/gamepad";
 import { useControllerNav } from "@/lib/minecraft/use-controller-nav";
 import { MCSlider, MCToggle, MCSelect, MCAction, useFocusGrid } from "@/lib/minecraft/mc-controls";
+import { useVirtualMouse, VirtualMouseCursor } from "@/lib/minecraft/virtual-mouse";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -264,6 +265,34 @@ export default function MinecraftGame() {
   const [mpConnected, setMpConnected] = useState(false);
   const [mpError, setMpError] = useState<string>("");
   const [showHostPanel, setShowHostPanel] = useState(false);
+  // Click-to-resume overlay — shown when a controller user activates Continuar
+  // (browsers don't accept rAF-polled gamepad presses as user gestures for
+  // requestPointerLock, so we need a real mouse click to resume).
+  const [showClickToResume, setShowClickToResume] = useState(false);
+  // Lifted MainMenu state — allows controller navigation of the saved-worlds sub-list
+  const [showLoadMenu, setShowLoadMenu] = useState(false);
+  const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
+  const refreshSavedWorlds = useCallback(() => setSavedWorlds(listSavedWorlds()), []);
+
+  // === Virtual digital mouse — activated with the View/Back button (Xbox "two
+  // squares" button, index 8). Right stick moves the cursor, A left-clicks, X
+  // right-clicks, B closes. Works on ANY UI element by dispatching synthetic
+  // MouseEvents to the element under the cursor.
+  // Enabled when: a gamepad is connected AND the user is NOT in active gameplay
+  // (i.e., when any overlay or menu is open). During gameplay, the right stick
+  // is used for camera look, so we don't intercept it.
+  const vmouseEnabled = isGamepadConnected() && (
+    screen === "main-menu" ||
+    screen === "create-world" ||
+    screen === "multiplayer" ||
+    (screen === "playing" && (
+      showClickToResume || showInventory || showCraftingTable || showFurnace || showChest ||
+      showConfig || showControls || showGraphics || showHostPanel || showLoadMenu ||
+      (!isLocked && !isDead) // pause overlay open
+    )) ||
+    isDead
+  );
+  const virtualMouse = useVirtualMouse(vmouseEnabled);
   const showHostPanelRef = useRef(false);
   // Track if the player has already received the level-10 dragon egg reward (per world)
   const dragonEggAwardedRef = useRef<boolean>(false);
@@ -325,13 +354,27 @@ export default function MinecraftGame() {
   // Main menu has 4 buttons: Crear, Cargar, Multijugador, Opciones
   const mainMenuButtons = useRef<Array<() => void>>([]);
   const mainMenuNav = useControllerNav({
-    enabled: screen === "main-menu",
+    enabled: screen === "main-menu" && !showLoadMenu,
     itemCount: 4,
     columns: 1,
     initialIndex: 0,
     onConfirm: () => { mainMenuButtons.current[mainMenuNav.selectedIndex]?.(); },
     onBack: () => { /* no-op on main menu */ },
     onStart: () => { mainMenuButtons.current[0]?.(); },
+  });
+
+  // === Controller navigation for the "Cargar mundo" sub-list ===
+  // Dynamic item count = savedWorlds.length (clamped to >=1 so the hook works
+  // even when the list is empty — pressing A then does nothing).
+  const loadMenuButtons = useRef<Array<() => void>>([]);
+  const loadMenuNav = useControllerNav({
+    enabled: screen === "main-menu" && showLoadMenu,
+    itemCount: Math.max(1, savedWorlds.length),
+    columns: 1,
+    initialIndex: 0,
+    onConfirm: () => { loadMenuButtons.current[loadMenuNav.selectedIndex]?.(); },
+    onBack: () => { setShowLoadMenu(false); },
+    onStart: () => { setShowLoadMenu(false); },
   });
 
   // === Controller navigation for the Death screen ===
@@ -459,17 +502,31 @@ export default function MinecraftGame() {
   });
 
   // Sync main-menu button handlers
-  // Note: "Cargar mundo" opens a sub-menu inside MainMenu (local state). For full
-  // controller support we'd need to lift that state up. For now, only "Crear" and
-  // "Multijugador" are controller-activated; "Cargar mundo" still needs a mouse click
-  // to open the saved-worlds list.
+  // Note: "Cargar mundo" opens a sub-menu (lifted state). When the user activates
+  // it, we refresh the saved worlds list and set showLoadMenu=true. The sub-list
+  // has its own nav hook (loadMenuNav).
   useEffect(() => {
     mainMenuButtons.current = [
       () => setScreen("create-world"),
-      () => { /* Cargar mundo — requires sub-menu; use mouse for now */ },
+      () => { refreshSavedWorlds(); setShowLoadMenu(true); },
       () => setScreen("multiplayer"),
       () => { /* Opciones — disabled */ },
     ];
+  });
+
+  // Sync load-menu button handlers (one per saved world)
+  useEffect(() => {
+    loadMenuButtons.current = savedWorlds.map((w) => () => {
+      // onLoadWorld logic — duplicated here so the controller can trigger it
+      const saved = loadWorld(w.name);
+      if (saved) {
+        worldConfigRef.current = { name: saved.name, seed: saved.seed, mode: saved.mode };
+        setCurrentWorld({ name: saved.name, seed: saved.seed, mode: saved.mode });
+        setScreen("playing");
+        setShowLoadMenu(false);
+        setIsLoaded(false);
+      }
+    });
   });
 
   // Sync death-screen button handlers
@@ -585,9 +642,9 @@ export default function MinecraftGame() {
     scene.add(sky);
 
     // === Lighting (PBR-tuned for physically correct mode) ===
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.55);
     scene.add(ambient);
-    const sun = new THREE.DirectionalLight(0xfff4e6, 3.2);
+    const sun = new THREE.DirectionalLight(0xfff4e6, 3.5);
     sun.position.set(50, 100, 30);
     // Shadow config: 2048px for crisper shadows, tight frustum around player
     sun.castShadow = true;
@@ -599,18 +656,22 @@ export default function MinecraftGame() {
     sun.shadow.camera.right = 50;
     sun.shadow.camera.top = 50;
     sun.shadow.camera.bottom = -50;
-    sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.04;
-    sun.shadow.radius = 4; // soft shadow radius (VSM)
+    sun.shadow.bias = -0.0003;
+    sun.shadow.normalBias = 0.05;
+    sun.shadow.radius = 6; // softer shadow radius (VSM) for realistic penumbra
     scene.add(sun);
     scene.add(sun.target);
     // Fill light: soft blue from opposite direction (sky bounce)
-    const fill = new THREE.DirectionalLight(0x88aaff, 0.9);
+    const fill = new THREE.DirectionalLight(0x88aaff, 1.1);
     fill.position.set(-40, 60, -30);
     scene.add(fill);
     // Hemisphere: sky color from above, ground color from below
-    const hemi = new THREE.HemisphereLight(0x88bbff, 0x554433, 1.2);
+    const hemi = new THREE.HemisphereLight(0x88bbff, 0x554433, 1.4);
     scene.add(hemi);
+    // Subtle bounce light from below — simulates indirect bounce from ground
+    const bounce = new THREE.DirectionalLight(0x8a7a5a, 0.3);
+    bounce.position.set(0, -30, 0);
+    scene.add(bounce);
 
     // === Build atlas and shared materials ===
     resetAtlas();
@@ -804,6 +865,24 @@ export default function MinecraftGame() {
       });
     }
 
+    // === Realistic wind material for foliage (leaves) — lazy-init ===
+    // When `shaderWind` is enabled, swap the cutout material (used for leaves)
+    // for the wind ShaderMaterial which adds vertex displacement + SSS.
+    let windShaderMat: THREE.ShaderMaterial | null = null;
+    let windShaderActive = false;
+    function applyWindShader(useShader: boolean) {
+      if (useShader && !windShaderMat) {
+        windShaderMat = shaderManager.createWindMaterial(atlas.texture);
+      }
+      if (useShader === windShaderActive) return;
+      windShaderActive = useShader;
+      const targetMat = useShader ? windShaderMat : cutoutMaterial;
+      if (!targetMat) return;
+      chunkMeshes.forEach((m) => {
+        if (m.cutout) m.cutout.material = targetMat;
+      });
+    }
+
     // === Multiplayer remote player rendering ===
     // Map of peer ID → PlayerModel (3D mesh)
     const remotePlayerModels = new Map<string, PlayerModel>();
@@ -898,10 +977,11 @@ export default function MinecraftGame() {
       isNight = nightFactor > 0.5;
 
       // Sun light intensity (stronger day for sharp shadows, dim night)
-      sun.intensity = 1.1 * dayFactor;
-      ambient.intensity = 0.45 * dayFactor + 0.12 * nightFactor;
-      hemi.intensity = 0.4 * dayFactor + 0.08 * nightFactor;
-      fill.intensity = 0.3 * dayFactor;
+      sun.intensity = 3.5 * dayFactor;
+      ambient.intensity = 0.55 * dayFactor + 0.18 * nightFactor;
+      hemi.intensity = 1.4 * dayFactor + 0.15 * nightFactor;
+      fill.intensity = 1.1 * dayFactor + 0.2 * nightFactor;
+      bounce.intensity = 0.3 * dayFactor;
 
       // Shadow camera follows player so shadows always render around the player
       sun.position.set(
@@ -979,6 +1059,10 @@ export default function MinecraftGame() {
       // If the water shader is currently active, swap the material on this fresh chunk too
       if (waterShaderActive && waterShaderMat && meshes.transparent) {
         meshes.transparent.material = waterShaderMat;
+      }
+      // If the wind shader is currently active, swap the cutout material too
+      if (windShaderActive && windShaderMat && meshes.cutout) {
+        meshes.cutout.material = windShaderMat;
       }
       if (meshes.opaque) chunkGroup.add(meshes.opaque);
       if (meshes.cutout) chunkGroup.add(meshes.cutout);
@@ -1811,6 +1895,7 @@ export default function MinecraftGame() {
     let rafId = 0;
     let posUpdateCounter = 0;
     let waterAnimTime = 0;
+    let rippleSpawnTimer = 0; // throttle for water ripples when player is in water
 
     const animate = () => {
       rafId = requestAnimationFrame(animate);
@@ -2382,12 +2467,25 @@ export default function MinecraftGame() {
 
         // Apply water shader swap if needed (lazy-init, idempotent)
         applyWaterShader(gss.shaderWaterWaves);
+        // Apply wind shader swap for foliage (leaves)
+        applyWindShader(gss.shaderWind);
 
         shaderManager.render();
       } else {
-        // Make sure we revert to Lambert water if shaders are disabled
+        // Make sure we revert to Lambert water/wind if shaders are disabled
         applyWaterShader(false);
+        applyWindShader(false);
         renderer.render(scene, camera);
+      }
+
+      // Spawn ripples when the player enters or moves through water
+      if (player.inWater && waterShaderMat) {
+        // Throttle: spawn a ripple every ~0.3s while in water
+        rippleSpawnTimer -= dt;
+        if (rippleSpawnTimer <= 0) {
+          shaderManager.spawnRipple(player.position.x, player.position.y, player.position.z);
+          rippleSpawnTimer = 0.3;
+        }
       }
 
       // Sync hand lighting with day/night cycle so the hand dims at night
@@ -2474,6 +2572,8 @@ export default function MinecraftGame() {
       shaderManager.dispose();
       // Dispose water shader material (if it was created)
       if (waterShaderMat) { waterShaderMat.dispose(); waterShaderMat = null; }
+      // Dispose wind shader material (if it was created)
+      if (windShaderMat) { windShaderMat.dispose(); windShaderMat = null; }
       // Dispose remote player models (multiplayer)
       for (const [peerId, model] of remotePlayerModels) {
         scene.remove(model.group);
@@ -2693,6 +2793,15 @@ export default function MinecraftGame() {
   }, [currentWorld]);
 
   const handleStartClick = useCallback(() => {
+    // Browsers require a transient user activation (real mousedown/keydown) for
+    // requestPointerLock(). Gamepad button presses detected via rAF polling do
+    // NOT count as user gestures. So when the user activates "Continuar" via
+    // controller A button, we show a click-to-resume overlay instead of failing
+    // silently. The overlay's click handler then performs the actual pointer lock.
+    if (inputModeRef.current === "controller") {
+      setShowClickToResume(true);
+      return;
+    }
     const canvas = containerRef.current?.querySelector("canvas");
     canvas?.requestPointerLock();
   }, []);
@@ -2705,6 +2814,11 @@ export default function MinecraftGame() {
         onCreateWorld={() => setScreen("create-world")}
         onMultiplayer={() => setScreen("multiplayer")}
         selectedIndex={mainMenuNav.selectedIndex}
+        showLoadMenu={showLoadMenu}
+        setShowLoadMenu={setShowLoadMenu}
+        savedWorlds={savedWorlds}
+        refreshSavedWorlds={refreshSavedWorlds}
+        loadMenuSelectedIndex={loadMenuNav.selectedIndex}
         onLoadWorld={(name) => {
           const saved = loadWorld(name);
           if (saved) {
@@ -3343,6 +3457,31 @@ export default function MinecraftGame() {
         </div>
       )}
 
+      {/* Click-to-resume overlay — shown when a controller user presses Continuar */}
+      {showClickToResume && (
+        <div
+          className="absolute inset-0 z-[70] flex items-center justify-center cursor-pointer"
+          style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
+          onClick={() => {
+            const canvas = containerRef.current?.querySelector("canvas");
+            canvas?.requestPointerLock();
+            setShowClickToResume(false);
+          }}
+        >
+          <div className="text-center">
+            <div className="text-white font-mono text-3xl font-black mb-3" style={{ textShadow: "3px 3px 0 #000" }}>
+              ▶ Click para continuar
+            </div>
+            <div className="text-yellow-300 font-mono text-sm" style={{ textShadow: "1px 1px 0 #000" }}>
+              El navegador requiere un click real para capturar el mouse
+            </div>
+            <div className="text-stone-400 font-mono text-xs mt-2">
+              (Esto no pasa con teclado/ratón)
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Gamepad connection / disconnection toast */}
       {gamepadToast && (
         <div
@@ -3358,6 +3497,15 @@ export default function MinecraftGame() {
           }}
         >
           {gamepadToast.message}
+        </div>
+      )}
+
+      {/* Virtual digital mouse cursor — shown when the user presses View/Back
+          (Xbox "two squares" button) while a gamepad is connected. */}
+      <VirtualMouseCursor visible={virtualMouse.visible} pos={virtualMouse.pos} />
+      {virtualMouse.visible && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[90] px-3 py-1.5 bg-stone-900/90 border-2 border-cyan-500 rounded text-cyan-300 font-mono text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
+          🖱️ Mouse digital · Stick Der: mover · A: click · X: click der · B: salir
         </div>
       )}
 
@@ -3667,19 +3815,24 @@ const SPLASH_TEXTS = [
 function MainMenu({
   iconUrls, onCreateWorld, onMultiplayer, onLoadWorld,
   selectedIndex,
+  // Lifted state — allows the parent to drive controller navigation
+  showLoadMenu, setShowLoadMenu,
+  savedWorlds, refreshSavedWorlds,
+  loadMenuSelectedIndex,
 }: {
   iconUrls: Record<string, string>;
   onCreateWorld: () => void;
   onMultiplayer: () => void;
   onLoadWorld: (name: string) => void;
   selectedIndex: number;
+  showLoadMenu: boolean;
+  setShowLoadMenu: (v: boolean) => void;
+  savedWorlds: { name: string; savedAt: number; mode: string }[];
+  refreshSavedWorlds: () => void;
+  loadMenuSelectedIndex: number;
 }) {
-  const [showLoadMenu, setShowLoadMenu] = useState(false);
-  const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
   const [splashIndex] = useState(() => Math.floor(Math.random() * SPLASH_TEXTS.length));
   const [panOffset, setPanOffset] = useState(0);
-
-  const refreshSavedWorlds = () => setSavedWorlds(listSavedWorlds());
 
   useEffect(() => {
     const interval = setInterval(() => setPanOffset((p) => (p + 0.3) % 100), 50);
@@ -3727,36 +3880,48 @@ function MainMenu({
                 </p>
               ) : (
                 <div className="flex flex-col gap-1">
-                  {savedWorlds.map((w) => (
-                    <div key={w.name} className="flex gap-2 items-center p-2 hover:bg-white/10 transition-colors" style={{
-                      backgroundColor: "rgba(35,35,45,0.7)",
-                      borderTop: "2px solid rgba(60,60,70,0.5)",
-                      borderLeft: "2px solid rgba(60,60,70,0.5)",
-                      borderBottom: "2px solid rgba(15,15,20,0.7)",
-                      borderRight: "2px solid rgba(15,15,20,0.7)",
-                    }}>
-                      <div className="flex-1">
-                        <div className="text-white font-mono font-bold text-sm">{w.name}</div>
-                        <div className="text-stone-400 text-xs font-mono">
-                          {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
+                  {savedWorlds.map((w, i) => {
+                    const isFocused = i === loadMenuSelectedIndex;
+                    return (
+                      <div
+                        key={w.name}
+                        className="flex gap-2 items-center p-2 transition-all"
+                        style={{
+                          backgroundColor: isFocused ? "rgba(80,120,200,0.6)" : "rgba(35,35,45,0.7)",
+                          borderTop: `2px solid ${isFocused ? "#7aaaff" : "rgba(60,60,70,0.5)"}`,
+                          borderLeft: `2px solid ${isFocused ? "#7aaaff" : "rgba(60,60,70,0.5)"}`,
+                          borderBottom: `2px solid ${isFocused ? "#3a4a7a" : "rgba(15,15,20,0.7)"}`,
+                          borderRight: `2px solid ${isFocused ? "#3a4a7a" : "rgba(15,15,20,0.7)"}`,
+                          boxShadow: isFocused ? "0 0 10px rgba(120,170,255,0.6)" : "none",
+                          transform: isFocused ? "scale(1.02)" : "scale(1)",
+                        }}
+                      >
+                        <div className="flex-1">
+                          <div className="text-white font-mono font-bold text-sm">{isFocused ? "▶ " : ""}{w.name}</div>
+                          <div className="text-stone-400 text-xs font-mono">
+                            {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
+                          </div>
                         </div>
+                        <button onClick={() => onLoadWorld(w.name)} className="px-3 py-1 text-white text-xs font-mono font-bold transition-all hover:scale-105" style={{
+                          backgroundColor: "#3a6a2a", borderTop: "2px solid #5a8a3a", borderLeft: "2px solid #5a8a3a",
+                          borderBottom: "2px solid #1a3a0a", borderRight: "2px solid #1a3a0a", imageRendering: "pixelated",
+                        }}>▶ Cargar</button>
+                        <button onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }} className="px-2 py-1 text-white text-xs font-mono transition-all hover:scale-105" style={{
+                          backgroundColor: "#6a2a2a", borderTop: "2px solid #8a3a3a", borderLeft: "2px solid #8a3a3a",
+                          borderBottom: "2px solid #3a1a1a", borderRight: "2px solid #3a1a1a", imageRendering: "pixelated",
+                        }}>✕</button>
                       </div>
-                      <button onClick={() => onLoadWorld(w.name)} className="px-3 py-1 text-white text-xs font-mono font-bold transition-all hover:scale-105" style={{
-                        backgroundColor: "#3a6a2a", borderTop: "2px solid #5a8a3a", borderLeft: "2px solid #5a8a3a",
-                        borderBottom: "2px solid #1a3a0a", borderRight: "2px solid #1a3a0a", imageRendering: "pixelated",
-                      }}>▶ Cargar</button>
-                      <button onClick={() => { deleteWorld(w.name); refreshSavedWorlds(); }} className="px-2 py-1 text-white text-xs font-mono transition-all hover:scale-105" style={{
-                        backgroundColor: "#6a2a2a", borderTop: "2px solid #8a3a3a", borderLeft: "2px solid #8a3a3a",
-                        borderBottom: "2px solid #3a1a1a", borderRight: "2px solid #3a1a1a", imageRendering: "pixelated",
-                      }}>✕</button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
             <div className="mt-3">
               <MCMenuButton onClick={() => setShowLoadMenu(false)} color="gray" className="w-full text-sm">← Volver</MCMenuButton>
             </div>
+            <p className="text-cyan-300 text-[9px] font-mono text-center mt-2">
+              🎮 D-Pad ↑↓ navega · A carga el mundo enfocado · B vuelve
+            </p>
           </div>
         )}
 
