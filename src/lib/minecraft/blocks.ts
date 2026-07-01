@@ -63,6 +63,7 @@ export interface BlockDef {
   // Render layer: opaque (no alpha), cutout (alpha 0 or 1, alphaTest), translucent (alpha blended)
   layer: RenderLayer;
   solid: boolean; // for collisions
+  gravityAffected?: boolean; // if true, block falls when unsupported (sand, gravel)
 }
 
 export const BLOCKS: Record<number, BlockDef> = {
@@ -104,7 +105,7 @@ export const BLOCKS: Record<number, BlockDef> = {
   [BlockType.Sand]: {
     id: BlockType.Sand, name: "Sand",
     textures: { top: "sand", bottom: "sand", side: "sand" },
-    layer: "opaque", solid: true,
+    layer: "opaque", solid: true, gravityAffected: true,
   },
   [BlockType.Water]: {
     id: BlockType.Water, name: "Water",
@@ -164,7 +165,7 @@ export const BLOCKS: Record<number, BlockDef> = {
   [BlockType.Gravel]: {
     id: BlockType.Gravel, name: "Gravel",
     textures: { top: "gravel", bottom: "gravel", side: "gravel" },
-    layer: "opaque", solid: true,
+    layer: "opaque", solid: true, gravityAffected: true,
   },
   [BlockType.CraftingTable]: {
     id: BlockType.CraftingTable, name: "Crafting Table",

@@ -390,9 +390,32 @@ export class World {
 
   clearAllChunks() { this.chunks.clear(); }
 
-  // === FLUID FLOW ===
+  // === FLUID FLOW (Minecraft-style) ===
+  // Water flows 7 blocks horizontally from source; lava flows 3 blocks.
+  // Fluids fall down infinitely. Source blocks (placed by player or generated)
+  // persist; flowing blocks spread with decreasing "level" (distance from source).
   fluidUpdateQueue: Array<{ x: number; y: number; z: number; type: BlockType }> = [];
   queueFluidUpdate(x: number, y: number, z: number, type: BlockType) { this.fluidUpdateQueue.push({ x, y, z, type }); }
+
+  // Track flow distance per fluid block so it doesn't spread infinitely.
+  // Key: "x,y,z" → flow level (0 = source, 1..7 = distance from source)
+  fluidLevels: Map<string, number> = new Map();
+  fluidLevelKey(x: number, y: number, z: number): string { return `${x},${y},${z}`; }
+  getFluidLevel(x: number, y: number, z: number): number {
+    return this.fluidLevels.get(this.fluidLevelKey(x, y, z)) ?? 0;
+  }
+  setFluidLevel(x: number, y: number, z: number, level: number) {
+    this.fluidLevels.set(this.fluidLevelKey(x, y, z), level);
+  }
+  clearFluidLevel(x: number, y: number, z: number) {
+    this.fluidLevels.delete(this.fluidLevelKey(x, y, z));
+  }
+
+  // Max horizontal flow distance: water = 7, lava = 3 (in overworld)
+  getMaxFlow(type: BlockType): number {
+    return type === BlockType.Lava ? 3 : 7;
+  }
+
   processFluidFlow(maxSteps: number = 50): boolean {
     if (this.fluidUpdateQueue.length === 0) return false;
     let steps = 0;
@@ -400,12 +423,55 @@ export class World {
       const { x, y, z, type } = this.fluidUpdateQueue.shift()!;
       steps++;
       if (this.getBlockIfLoaded(x, y, z) !== type) continue;
+
+      const myLevel = this.getFluidLevel(x, y, z);
+      const maxFlow = this.getMaxFlow(type);
+
+      // 1. Flow down first (always, regardless of level)
       if (y > 0) {
         const below = this.getBlockIfLoaded(x, y - 1, z);
-        if (below === BlockType.Air) { this.setBlock(x, y - 1, z, type); this.queueFluidUpdate(x, y - 1, z, type); continue; }
+        if (below === BlockType.Air) {
+          this.setBlock(x, y - 1, z, type);
+          this.setFluidLevel(x, y - 1, z, 0); // falling fluid is a new source
+          this.queueFluidUpdate(x, y - 1, z, type);
+          continue;
+        }
+        // Flow into water below (water merges with water)
+        if (below === type) continue;
       }
-      for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-        if (this.getBlockIfLoaded(x+dx, y, z+dz) === BlockType.Air) { this.setBlock(x+dx, y, z+dz, type); this.queueFluidUpdate(x+dx, y, z+dz, type); }
+
+      // 2. Flow horizontally (only if not at max distance)
+      if (myLevel < maxFlow) {
+        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
+          const nx = x + dx, nz = z + dz;
+          const neighbor = this.getBlockIfLoaded(nx, y, nz);
+          if (neighbor === BlockType.Air) {
+            // Spread to air
+            this.setBlock(nx, y, nz, type);
+            this.setFluidLevel(nx, y, nz, myLevel + 1);
+            this.queueFluidUpdate(nx, y, nz, type);
+          }
+        }
+      }
+
+      // 3. Remove fluid if it has no support (source above or adjacent source)
+      //    This prevents floating fluid blocks. Check if there's a same-type
+      //    fluid above OR a source-level fluid adjacent. If not, and this is a
+      //    flowing block (level > 0), remove it.
+      if (myLevel > 0) {
+        const above = this.getBlockIfLoaded(x, y + 1, z);
+        let hasSource = false;
+        if (above === type) hasSource = true;
+        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
+          if (this.getBlockIfLoaded(x + dx, y, z + dz) === type) {
+            const nLevel = this.getFluidLevel(x + dx, y, z + dz);
+            if (nLevel < myLevel) { hasSource = true; break; }
+          }
+        }
+        if (!hasSource) {
+          this.setBlock(x, y, z, BlockType.Air);
+          this.clearFluidLevel(x, y, z);
+        }
       }
     }
     return true;

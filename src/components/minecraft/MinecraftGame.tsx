@@ -265,6 +265,11 @@ export default function MinecraftGame() {
   const [mpConnected, setMpConnected] = useState(false);
   const [mpError, setMpError] = useState<string>("");
   const [showHostPanel, setShowHostPanel] = useState(false);
+  // Pause menu visibility — unified state that works for both keyboard (pointer
+  // lock loss) and controller (Start button). The menu shows when this is true.
+  const [pauseMenuVisible, setPauseMenuVisible] = useState(false);
+  const pauseMenuVisibleRef = useRef(false);
+  useEffect(() => { pauseMenuVisibleRef.current = pauseMenuVisible; }, [pauseMenuVisible]);
   // Lifted MainMenu state — allows controller navigation of the saved-worlds sub-list
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
@@ -284,7 +289,8 @@ export default function MinecraftGame() {
     (screen === "playing" && (
       showInventory || showCraftingTable || showFurnace || showChest ||
       showConfig || showControls || showGraphics || showHostPanel || showLoadMenu ||
-      (!isLocked && !isDead) // pause overlay open
+      pauseMenuVisible ||
+      (!isLocked && !isDead)
     )) ||
     isDead
   );
@@ -337,7 +343,7 @@ export default function MinecraftGame() {
   // via D-Pad/stick and triggers click on A.
   const pauseMenuButtons = useRef<Array<() => void>>([]);
   const pauseMenuNav = useControllerNav({
-    enabled: screen === "playing" && !isLocked && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && !showConfig && !showControls && !showGraphics && !showHostPanel,
+    enabled: screen === "playing" && pauseMenuVisible && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && !showConfig && !showControls && !showGraphics && !showHostPanel,
     itemCount: 7,
     columns: 1,
     initialIndex: 0,
@@ -1857,7 +1863,19 @@ export default function MinecraftGame() {
     renderer.domElement.addEventListener("contextmenu", (e) => e.preventDefault());
 
     const handlePointerLockChange = () => {
-      setIsLocked(document.pointerLockElement === renderer.domElement);
+      const locked = document.pointerLockElement === renderer.domElement;
+      setIsLocked(locked);
+      // When pointer lock is lost (Esc pressed, or user clicked away), show
+      // the pause menu. When re-locked, hide it.
+      if (!locked && !pauseMenuVisibleRef.current && !isDead) {
+        // Only show if we're in active gameplay (not already in a menu)
+        pauseMenuVisibleRef.current = true;
+        setPauseMenuVisible(true);
+      }
+      if (locked && pauseMenuVisibleRef.current) {
+        pauseMenuVisibleRef.current = false;
+        setPauseMenuVisible(false);
+      }
     };
     document.addEventListener("pointerlockchange", handlePointerLockChange);
 
@@ -1896,6 +1914,7 @@ export default function MinecraftGame() {
     let posUpdateCounter = 0;
     let waterAnimTime = 0;
     let rippleSpawnTimer = 0; // throttle for water ripples when player is in water
+    let gravityBlockTimer = 0; // throttle for sand/gravel falling
 
     const animate = () => {
       rafId = requestAnimationFrame(animate);
@@ -1926,7 +1945,7 @@ export default function MinecraftGame() {
       // IMPORTANT: skip gameplay input when the pause menu is open (pointer
       // unlocked but not dead and no overlay) — that's when the virtual mouse
       // is active and RT should NOT mine blocks.
-      const pauseMenuOpen = screen === "playing" && !isLocked && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest;
+      const pauseMenuOpen = screen === "playing" && pauseMenuVisibleRef.current && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest;
       if (gp && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest && !pauseMenuOpen) {
         // Movement: left stick → WASD
         player.setKey("KeyW", gp.moveY < -0.3);
@@ -2018,9 +2037,12 @@ export default function MinecraftGame() {
           if (drag && !drag.isMounted) drag.isStaying = !drag.isStaying;
         }
 
-        // Pause: Start (edge)
+        // Pause: Start (edge) — toggle pause menu visibility directly
         if (wasButtonPressed(gp, 9)) {
           if (document.pointerLockElement) document.exitPointerLock();
+          // For controller mode: toggle the pause menu directly
+          pauseMenuVisibleRef.current = true;
+          setPauseMenuVisible(true);
         }
       }
 
@@ -2392,6 +2414,39 @@ export default function MinecraftGame() {
           if (b === BlockType.Water || b === BlockType.Lava) world.queueFluidUpdate(pX + dx, pY + dy, pZ + dz, b);
         }
         if (world.processFluidFlow(100)) { for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const cx = Math.floor((pX + dx * CHUNK_SIZE) / CHUNK_SIZE), cz = Math.floor((pZ + dz * CHUNK_SIZE) / CHUNK_SIZE); if (chunkMeshes.has(`${cx},${cz}`)) buildChunk(cx, cz); } }
+      }
+
+      // === GRAVITY BLOCKS (sand, gravel falling) ===
+      // Scan a box around the player every 0.3s for gravity-affected blocks
+      // with air/water below them, and move them down one cell.
+      gravityBlockTimer += dt;
+      if (gravityBlockTimer >= 0.3) {
+        gravityBlockTimer = 0;
+        const pX = Math.floor(player.position.x), pY = Math.floor(player.position.y), pZ = Math.floor(player.position.z);
+        let anyFell = false;
+        // Scan from bottom to top so cascading falls work in one pass
+        for (let dy = -5; dy <= 5; dy++) for (let dx = -6; dx <= 6; dx++) for (let dz = -6; dz <= 6; dz++) {
+          const bx = pX + dx, by = pY + dy, bz = pZ + dz;
+          const b = world.getBlockIfLoaded(bx, by, bz);
+          if (b === undefined) continue;
+          const def = BLOCKS[b as BlockType];
+          if (!def?.gravityAffected) continue;
+          // Check if the block below is air or water (can fall through)
+          if (by <= 0) continue;
+          const below = world.getBlockIfLoaded(bx, by - 1, bz);
+          if (below === BlockType.Air || below === BlockType.Water) {
+            world.setBlock(bx, by, bz, BlockType.Air);
+            world.setBlock(bx, by - 1, bz, b);
+            anyFell = true;
+          }
+        }
+        if (anyFell) {
+          // Rebuild affected chunks
+          for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+            const cx = Math.floor((pX + dx * CHUNK_SIZE) / CHUNK_SIZE), cz = Math.floor((pZ + dz * CHUNK_SIZE) / CHUNK_SIZE);
+            if (chunkMeshes.has(`${cx},${cz}`)) buildChunk(cx, cz);
+          }
+        }
       }
 
       // === ITEM NAME DISPLAY (5s timer) ===
@@ -2775,6 +2830,8 @@ export default function MinecraftGame() {
     setScreen("main-menu");
     setIsDead(false);
     setCurrentWorld(null);
+    setPauseMenuVisible(false);
+    pauseMenuVisibleRef.current = false;
     // Clear inventory
     inventoryRef.current.clear();
     // Reset XP state when leaving the world without saving
@@ -2808,17 +2865,21 @@ export default function MinecraftGame() {
   }, [currentWorld]);
 
   const handleStartClick = useCallback(() => {
-    // Attempt to re-lock the pointer directly. Some browsers accept this from
-    // a gamepad-polled callback; others require a real mouse click. If the
-    // browser blocks it, the user can click the canvas to re-lock (handled by
-    // handleCanvasClick). We try the request and don't show any overlay.
+    // Close the pause menu immediately — works for both keyboard and controller.
+    // For keyboard/mouse mode, also try to re-lock the pointer. For controller
+    // mode, the game runs without pointer lock so just hiding the menu is enough.
+    setPauseMenuVisible(false);
+    pauseMenuVisibleRef.current = false;
+    // Try to re-lock pointer (works for keyboard/mouse; silently fails for
+    // controller which is fine since controller mode doesn't need pointer lock).
     const canvas = containerRef.current?.querySelector("canvas");
     if (canvas) {
-      const p = canvas.requestPointerLock();
-      // If it returns a promise (newer browsers), catch any rejection silently
-      if (p && typeof (p as any).catch === "function") {
-        (p as Promise<void>).catch(() => {});
-      }
+      try {
+        const p = canvas.requestPointerLock();
+        if (p && typeof (p as any).catch === "function") {
+          (p as Promise<void>).catch(() => {});
+        }
+      } catch (e) { /* ignore */ }
     }
   }, []);
 
@@ -2894,8 +2955,19 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* HUD */}
-      <div className="absolute top-2 left-2 z-20 text-white font-mono text-xs sm:text-sm bg-black/50 px-2 py-1 rounded">
+      {/* HUD — Minecraft F3-style debug overlay */}
+      <div
+        className="absolute top-1 left-1 z-20 text-white font-mono text-[11px] leading-tight px-2 py-1.5"
+        style={{
+          backgroundColor: "rgba(0,0,0,0.55)",
+          borderTop: "1px solid rgba(80,80,80,0.6)",
+          borderLeft: "1px solid rgba(80,80,80,0.6)",
+          borderBottom: "1px solid rgba(0,0,0,0.8)",
+          borderRight: "1px solid rgba(0,0,0,0.8)",
+          imageRendering: "pixelated",
+          textShadow: "1px 1px 0 #000",
+        }}
+      >
         <div className="font-bold text-yellow-300">{currentWorld?.name || "World"}</div>
         <div>FPS: {stats.fps}</div>
         <div>X: {stats.x} Y: {stats.y} Z: {stats.z}</div>
@@ -2985,18 +3057,18 @@ export default function MinecraftGame() {
         </>
       )}
 
-      {/* Hotbar — Minecraft style with beveled slots */}
+      {/* Hotbar — Minecraft style, nearly opaque with beveled slots */}
       <div
-        className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex p-1.5"
+        className="absolute bottom-2 left-1/2 -translate-x-1/2 z-20 flex p-1"
         key={inventoryVersion}
         style={{
-          backgroundColor: "rgba(20,20,25,0.85)",
-          borderTop: "3px solid rgba(110,110,120,0.9)",
-          borderLeft: "3px solid rgba(110,110,120,0.9)",
-          borderBottom: "3px solid rgba(0,0,0,0.95)",
-          borderRight: "3px solid rgba(0,0,0,0.95)",
+          backgroundColor: "rgba(40,40,40,0.92)",
+          borderTop: "2px solid rgba(120,120,120,0.95)",
+          borderLeft: "2px solid rgba(120,120,120,0.95)",
+          borderBottom: "2px solid rgba(0,0,0,0.95)",
+          borderRight: "2px solid rgba(0,0,0,0.95)",
           imageRendering: "pixelated",
-          boxShadow: "0 6px 20px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(0,0,0,0.5)",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.7)",
         }}
       >
         {Array.from({ length: 9 }).map((_, i) => {
@@ -3043,15 +3115,15 @@ export default function MinecraftGame() {
                 transform: isSelected ? "translateY(-4px) scale(1.06)" : "translateY(0) scale(1)",
               }}
             >
-              {/* Slot background */}
+              {/* Slot background — Minecraft-style inset bevel */}
               <div
                 className="absolute inset-0"
                 style={{
-                  backgroundColor: "rgba(139,139,139,0.45)",
-                  borderTop: "2px solid rgba(170,170,170,0.7)",
-                  borderLeft: "2px solid rgba(170,170,170,0.7)",
-                  borderBottom: "2px solid rgba(50,50,50,0.9)",
-                  borderRight: "2px solid rgba(50,50,50,0.9)",
+                  backgroundColor: "#8b8b8b",
+                  borderTop: "1px solid #373737",
+                  borderLeft: "1px solid #373737",
+                  borderBottom: "1px solid #ffffff",
+                  borderRight: "1px solid #ffffff",
                 }}
               />
               {/* Selection highlight - bright white border with glow */}
@@ -3098,7 +3170,7 @@ export default function MinecraftGame() {
       </div>
 
       {/* Pause overlay — Minecraft-style menu */}
-      {!isLocked && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && (
+      {pauseMenuVisible && isLoaded && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest && (
         <div className="absolute inset-0 z-30 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.78)", backdropFilter: "blur(2px)" }}>
           {!showControls && !showConfig && !showGraphics ? (
             <div className="max-w-sm w-full mx-4" style={{ imageRendering: "pixelated" }}>

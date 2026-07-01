@@ -108,6 +108,31 @@ export class Player {
       Player.DAMAGE_SHAKE_MAX_INTENSITY * (reduced / 5)
     );
     if (this.damageShakeIntensity < 0.02) this.damageShakeIntensity = 0.02;
+    // === Haptic feedback — vibrate the gamepad and/or mobile device ===
+    // Stronger vibration for more damage. Capped at 500ms.
+    const vibDuration = Math.min(500, 80 + reduced * 30);
+    try {
+      // Mobile device vibration
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        navigator.vibrate(vibDuration);
+      }
+      // Gamepad dual-rumble (Chrome/Edge only — Firefox/Safari don't support)
+      if (typeof navigator !== "undefined" && navigator.getGamepads) {
+        const pads = navigator.getGamepads();
+        for (const pad of pads) {
+          if (pad && pad.connected && (pad as any).vibrationActuator) {
+            const actuator = (pad as any).vibrationActuator;
+            const strength = Math.min(1, 0.3 + reduced / 15);
+            actuator.playEffect("dual-rumble", {
+              duration: vibDuration,
+              strongMagnitude: strength,
+              weakMagnitude: strength * 0.7,
+              startDelay: 0,
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (e) { /* vibration not supported — ignore */ }
   }
 
   // Apply knockback to the player (pushed away from a source position).
