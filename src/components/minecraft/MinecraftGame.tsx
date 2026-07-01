@@ -282,6 +282,12 @@ export default function MinecraftGame() {
   // Enabled when: a gamepad is connected AND the user is NOT in active gameplay
   // (i.e., when any overlay or menu is open). During gameplay, the right stick
   // is used for camera look, so we don't intercept it.
+  // === Virtual digital mouse — activated by holding RT.
+  // IMPORTANT: only enabled when a menu/overlay is open. During active gameplay
+  // the right stick is used for camera look and RT is used for mining, so we
+  // must NOT intercept them. The `!isLocked` fallback was removed because
+  // controller mode never locks the pointer, which made the virtual mouse
+  // active during all gameplay.
   const vmouseEnabled = isGamepadConnected() && (
     screen === "main-menu" ||
     screen === "create-world" ||
@@ -289,8 +295,7 @@ export default function MinecraftGame() {
     (screen === "playing" && (
       showInventory || showCraftingTable || showFurnace || showChest ||
       showConfig || showControls || showGraphics || showHostPanel || showLoadMenu ||
-      pauseMenuVisible ||
-      (!isLocked && !isDead)
+      pauseMenuVisible
     )) ||
     isDead
   );
