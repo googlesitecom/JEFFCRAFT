@@ -739,7 +739,7 @@ export function InventoryUI({
       >
         <div className="flex justify-between items-center mb-5 pb-3" style={{ borderBottom: "2px solid #555" }}>
           <h2 className="text-2xl font-black text-[#2a2a2a] font-mono tracking-wide" style={{ textShadow: "2px 2px 0 #ffffff, -1px -1px 0 #ffffff" }}>
-            {isCraftingTable ? "Mesa de Crafteo" : "Inventario"}
+            {isCraftingTable ? "Crafting Table" : "Inventory"}
           </h2>
           <div className="flex gap-2">
             <button
@@ -755,7 +755,7 @@ export function InventoryUI({
                 textShadow: "1px 1px 0 #1a1a1a",
               }}
             >
-              {showRecipeBook ? "▼ Recetas" : "▶ Recetas"}
+              {showRecipeBook ? "▼ Recipes" : "▶ Recipes"}
             </button>
             <button
               onClick={onClose}
@@ -811,7 +811,7 @@ export function InventoryUI({
                           ? "0 0 12px rgba(100,150,255,0.9), inset 0 0 0 1px rgba(255,255,255,0.6)"
                           : "inset 1px 1px 0 rgba(255,255,255,0.15)",
                       }}
-                      title={equippedId !== null ? ITEMS[equippedId as ItemType]?.name ?? "Armor" : (canEquip ? `Equipar ${slot}` : slot)}
+                      title={equippedId !== null ? ITEMS[equippedId as ItemType]?.name ?? "Armor" : (canEquip ? `Equip ${slot}` : slot)}
                     >
                       {equippedId !== null && (() => {
                         const icon = getIcon(equippedId as number);
@@ -875,7 +875,7 @@ export function InventoryUI({
 
           {/* Crafting area */}
           <div className="flex-shrink-0">
-            <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Crafteo {isCraftingTable ? "(3×3)" : "(2×2)"}</h3>
+            <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Crafting {isCraftingTable ? "(3×3)" : "(2×2)"}</h3>
             <div className="flex items-center gap-4">
               <div className="grid grid-cols-3 gap-1 p-1.5" style={{
                 backgroundColor: "#373737",
@@ -963,7 +963,7 @@ export function InventoryUI({
           {/* Recipe book */}
           {showRecipeBook && (
             <div className="flex-1">
-              <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Recetas ({allRecipes.length})</h3>
+              <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Recipes ({allRecipes.length})</h3>
               <div className="grid grid-cols-6 sm:grid-cols-8 gap-1 p-2 max-h-64 overflow-y-auto" style={{
                 backgroundColor: "#373737",
                 borderTop: "2px solid #1a1a1a",
@@ -993,7 +993,7 @@ export function InventoryUI({
                         cursor: (canCraft && !needsTable) ? "pointer" : "help",
                         opacity: (!canCraft && !needsTable) ? 0.6 : 1,
                       }}
-                      title={getName(recipe.result.id) + (needsTable ? " (requiere mesa)" : canCraft ? "" : " (sin materiales)")}
+                      title={getName(recipe.result.id) + (needsTable ? " (requires table)" : canCraft ? "" : " (no materials)")}
                     >
                       {recipeIcon ? (
                         <img src={recipeIcon} alt={getName(recipe.result.id)} className="w-9 h-9 relative z-10" style={{
@@ -1017,9 +1017,9 @@ export function InventoryUI({
                 })}
               </div>
               <p className="text-[#3a3a3a] text-xs font-mono mt-2">
-                <span className="text-[#2a6a2a] font-bold">●</span> Con materiales ·
-                <span className="text-[#555]"> ●</span> Sin materiales ·
-                <span className="text-[#1a3a6a] font-bold"> T</span> Requiere mesa
+                <span className="text-[#2a6a2a] font-bold">●</span> With materials ·
+                <span className="text-[#555]"> ●</span> No materials ·
+                <span className="text-[#1a3a6a] font-bold"> T</span> Requires table
               </p>
             </div>
           )}
@@ -1028,7 +1028,7 @@ export function InventoryUI({
         {/* Creative items list */}
         {isCreative && (
           <div className="mt-6">
-            <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Todos los objetos (click para obtener 64)</h3>
+            <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>All items (click to get 64)</h3>
             <div className="grid grid-cols-9 sm:grid-cols-12 gap-1 p-2 max-h-48 overflow-y-auto" style={{
               backgroundColor: "#373737",
               borderTop: "2px solid #1a1a1a",
@@ -1071,7 +1071,7 @@ export function InventoryUI({
 
         {/* Main inventory (27 slots) */}
         <div className="mt-6">
-          <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Inventario</h3>
+          <h3 className="text-[#2a2a2a] text-sm font-mono font-bold mb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>Inventory</h3>
           <div className="grid grid-cols-9 gap-1 p-2" style={{
             backgroundColor: "#373737",
             borderTop: "2px solid #1a1a1a",
@@ -1153,13 +1153,13 @@ export function InventoryUI({
         )}
 
         <p className="text-[#3a3a3a] text-xs font-mono mt-4 text-center pb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>
-          <span className="text-[#2a6a2a] font-bold">Click izq</span>: recoger/colocar todo ·
-          <span className="text-[#2a6a2a] font-bold"> Click der</span>: recoger mitad/colocar 1 ·
-          <span className="text-[#2a6a2a] font-bold"> Click en resultado</span>: craftear
+          <span className="text-[#2a6a2a] font-bold">Left click</span>: pick up/place all ·
+          <span className="text-[#2a6a2a] font-bold"> Right click</span>: pick up half/place 1 ·
+          <span className="text-[#2a6a2a] font-bold"> Click result</span>: craft
         </p>
         {controllerActive && (
           <p className="text-[#3a5a8a] text-xs font-mono text-center pb-2" style={{ textShadow: "1px 1px 0 #ddd" }}>
-            🎮 D-Pad: mover cursor · A: click izq · X: click der · LB/RB: cambiar zona · B/Y: cerrar · Zona: {controllerZone} #{controllerSlot}
+            🎮 D-Pad: move cursor · A: left click · X: right click · LB/RB: change zone · B/Y: close · Zone: {controllerZone} #{controllerSlot}
           </p>
         )}
       </div>

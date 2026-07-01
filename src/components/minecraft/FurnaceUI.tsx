@@ -298,12 +298,12 @@ export function FurnaceUI({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-bold text-white font-mono">Horno</h2>
+          <h2 className="text-2xl font-bold text-white font-mono">Furnace</h2>
           <button
             onClick={onClose}
             className="px-3 py-1 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white text-sm font-mono rounded"
           >
-            ✕ Cerrar
+            ✕ Close
           </button>
         </div>
 
@@ -312,7 +312,7 @@ export function FurnaceUI({
           {/* Input */}
           <div className="flex flex-col items-center">
             {renderSlot(inputSlot, (isRight) => handleFurnaceSlotClick("input", isRight), "input")}
-            <span className="text-white/60 text-xs font-mono mt-1">Entrada</span>
+            <span className="text-white/60 text-xs font-mono mt-1">Input</span>
           </div>
 
           {/* Flame indicator */}
@@ -323,7 +323,7 @@ export function FurnaceUI({
                 style={{ height: `${fuelProgress * 100}%` }}
               />
             </div>
-            <span className="text-white/60 text-xs font-mono mt-1">Combustible</span>
+            <span className="text-white/60 text-xs font-mono mt-1">Fuel</span>
           </div>
 
           {/* Fuel */}
@@ -349,7 +349,7 @@ export function FurnaceUI({
           {/* Output */}
           <div className="flex flex-col items-center">
             {renderSlot(outputSlot, (isRight) => handleFurnaceSlotClick("output", isRight), "output", true)}
-            <span className="text-white/60 text-xs font-mono mt-1">Salida</span>
+            <span className="text-white/60 text-xs font-mono mt-1">Output</span>
           </div>
         </div>
 
@@ -357,18 +357,18 @@ export function FurnaceUI({
         <div className="text-center mb-4 text-stone-400 text-xs font-mono">
           {inputSlot && SMELTING_RECIPES[inputSlot.id] !== undefined ? (
             fuelSlot || fuelProgress > 0 ? (
-              smeltProgress > 0 ? "Cociendo..." : "Esperando combustible..."
-            ) : "Necesita combustible (carbón, madera)"
+              smeltProgress > 0 ? "Smelting..." : "Waiting for fuel..."
+            ) : "Needs fuel (coal, wood)"
           ) : inputSlot ? (
-            `${getName(inputSlot.id)} no se puede cocer`
+            `${getName(inputSlot.id)} cannot be smelted`
           ) : (
-            "Coloca comida cruda o minerales en la entrada"
+            "Place raw food or ores in the input"
           )}
         </div>
 
         {/* Main inventory */}
         <div>
-          <h3 className="text-white text-sm font-mono mb-2">Inventario</h3>
+          <h3 className="text-white text-sm font-mono mb-2">Inventory</h3>
           <div className="grid grid-cols-9 gap-1 p-2 bg-stone-800/60 rounded">
             {inventory.slots.slice(HOTBAR_SIZE).map((stack, i) => (
               <div key={i}>
@@ -413,9 +413,9 @@ export function FurnaceUI({
         )}
 
         <p className="text-stone-400 text-xs font-mono mt-4 text-center">
-          Combustibles: <span className="text-yellow-400">Carbón</span> (8 items), 
-          <span className="text-yellow-400"> Madera/Tablones</span> (1.5 items) · 
-          Cocina: carne cruda, minerales
+          Fuels: <span className="text-yellow-400">Coal</span> (8 items), 
+          <span className="text-yellow-400"> Wood/Planks</span> (1.5 items) · 
+          Cooks: raw meat, ores
         </p>
       </div>
     </div>

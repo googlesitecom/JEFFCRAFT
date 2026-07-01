@@ -193,7 +193,7 @@ export default function MinecraftGame() {
     const command = parts[0];
     const addMsg = (text: string) => setChatMessages(prev => [...prev, { text, type: "system" }]);
     if (command === "/help") {
-      addMsg("=== Comandos ===");
+      addMsg("=== Commands ===");
       addMsg("/time set <day|night|noon|midnight>");
       addMsg("/gamemode <0|1|creative|survival>");
       addMsg("/tp <x> <y> <z>");
@@ -204,16 +204,16 @@ export default function MinecraftGame() {
     } else if (command === "/time") {
       if (parts[1] === "set" && parts[2]) {
         const t = parts[2];
-        if (t === "day") { dayTimeRef.current = 0.3; addMsg("Día"); }
-        else if (t === "night") { dayTimeRef.current = 0.8; addMsg("Noche"); }
-        else if (t === "noon") { dayTimeRef.current = 0.5; addMsg("Mediodía"); }
-        else if (t === "midnight") { dayTimeRef.current = 0.0; addMsg("Medianoche"); }
-        else { const n = parseFloat(t); if (!isNaN(n)) { dayTimeRef.current = n; addMsg("Tiempo: " + n); } }
+        if (t === "day") { dayTimeRef.current = 0.3; addMsg("Day"); }
+        else if (t === "night") { dayTimeRef.current = 0.8; addMsg("Night"); }
+        else if (t === "noon") { dayTimeRef.current = 0.5; addMsg("Noon"); }
+        else if (t === "midnight") { dayTimeRef.current = 0.0; addMsg("Midnight"); }
+        else { const n = parseFloat(t); if (!isNaN(n)) { dayTimeRef.current = n; addMsg("Time: " + n); } }
       }
     } else if (command === "/gamemode") {
       const gm = parts[1];
       if ((gm === "creative" || gm === "1" || gm === "c") && worldConfigRef.current) {
-        worldConfigRef.current.mode = "creative"; setCurrentWorld({ ...worldConfigRef.current }); addMsg("Creativo");
+        worldConfigRef.current.mode = "creative"; setCurrentWorld({ ...worldConfigRef.current }); addMsg("Creative");
       } else if ((gm === "survival" || gm === "0" || gm === "s") && worldConfigRef.current) {
         worldConfigRef.current.mode = "survival"; setCurrentWorld({ ...worldConfigRef.current }); addMsg("Survival");
       }
@@ -225,15 +225,15 @@ export default function MinecraftGame() {
       if (itemName) {
         const allItems = [...Object.values(BLOCKS), ...Object.values(ITEMS)] as any[];
         const found = allItems.find(it => it && it.name && it.name.toLowerCase().replace(/\s+/g, "_") === itemName);
-        if (found) { inventoryRef.current.addItem(found.id, count); setInventoryVersion(v => v + 1); addMsg("Dado: " + found.name + " x" + count); }
-        else addMsg("No encontrado: " + itemName);
+        if (found) { inventoryRef.current.addItem(found.id, count); setInventoryVersion(v => v + 1); addMsg("Given: " + found.name + " x" + count); }
+        else addMsg("Not found: " + itemName);
       }
-    } else if (command === "/heal") { if (playerRef.current) { playerRef.current.health = playerRef.current.maxHealth; addMsg("Curado"); } }
-    else if (command === "/feed") { if (playerRef.current) { playerRef.current.hunger = playerRef.current.maxHunger; addMsg("Alimentado"); } }
-    else if (command === "/weather") { if (parts[1] === "clear" || parts[1] === "rain" || parts[1] === "thunder") { weatherCommandRef.current = parts[1]; addMsg("Clima: " + parts[1]); } }
-    else if (command === "/dimension" || command === "/dim") { if (parts[1] === "overworld" || parts[1] === "nether" || parts[1] === "end") { dimensionCommandRef.current = parts[1]; addMsg("Dimensión: " + parts[1]); } }
-    else if (command === "/clear") { inventoryRef.current.clear(); setInventoryVersion(v => v + 1); addMsg("Inventario vaciado"); }
-    else addMsg("Desconocido: " + command);
+    } else if (command === "/heal") { if (playerRef.current) { playerRef.current.health = playerRef.current.maxHealth; addMsg("Healed"); } }
+    else if (command === "/feed") { if (playerRef.current) { playerRef.current.hunger = playerRef.current.maxHunger; addMsg("Fed"); } }
+    else if (command === "/weather") { if (parts[1] === "clear" || parts[1] === "rain" || parts[1] === "thunder") { weatherCommandRef.current = parts[1]; addMsg("Weather: " + parts[1]); } }
+    else if (command === "/dimension" || command === "/dim") { if (parts[1] === "overworld" || parts[1] === "nether" || parts[1] === "end") { dimensionCommandRef.current = parts[1]; addMsg("Dimension: " + parts[1]); } }
+    else if (command === "/clear") { inventoryRef.current.clear(); setInventoryVersion(v => v + 1); addMsg("Inventory cleared"); }
+    else addMsg("Unknown: " + command);
   }, []);
   const [inputMode, setInputMode] = useState<InputMode>("keyboard");
   const inputModeRef = useRef<InputMode>("keyboard");
@@ -321,7 +321,7 @@ export default function MinecraftGame() {
       // Show toast
       const name = (id || "").split("(")[0].trim().slice(0, 32) || "Controller";
       setGamepadToast({
-        message: connected ? `🎮 ${name} conectado` : `🎮 Control desconectado`,
+        message: connected ? `🎮 ${name} connected` : `🎮 Controller disconnected`,
         tone: connected ? "connect" : "disconnect",
       });
       if (gamepadToastTimerRef.current) window.clearTimeout(gamepadToastTimerRef.current);
@@ -1230,7 +1230,7 @@ export default function MinecraftGame() {
         if (selected && selected.id === ItemType.DragonEgg) {
           // Don't place if dragon already exists
           if (dragonManager.getActiveDragon()) {
-            setDragonNotification("Ya tienes un dragón");
+            setDragonNotification("You already have a dragon");
             setTimeout(() => setDragonNotification(""), 2500);
             return false;
           }
@@ -1243,7 +1243,7 @@ export default function MinecraftGame() {
           inventoryRef.current.removeSelected(1);
           setInventoryVersion((v) => v + 1);
           sound.levelUp();
-          setDragonNotification("¡Dragón invocado! Pulsa N para montarlo");
+          setDragonNotification("Dragon summoned! Press N to mount it");
           setTimeout(() => setDragonNotification(""), 4000);
           return true;
         }
@@ -1562,16 +1562,16 @@ export default function MinecraftGame() {
       if (e.code === "KeyB") {
         const dragon = dragonManager.getActiveDragon();
         if (!dragon) {
-          setDragonNotification("No tienes dragón. Alcanza nivel 10 de XP para recibir un huevo.");
+          setDragonNotification("You don't have a dragon. Reach XP level 10 to receive an egg.");
           setTimeout(() => setDragonNotification(""), 3500);
         } else if (dragon.isMounted) {
-          setDragonNotification("No puedes usar B mientras estás montado");
+          setDragonNotification("Cannot use B while mounted");
           setTimeout(() => setDragonNotification(""), 2000);
         } else {
           dragon.isStaying = !dragon.isStaying;
           setDragonNotification(dragon.isStaying
-            ? "🐉 Dragón esperando aquí"
-            : "🐉 Dragón te sigue");
+            ? "🐉 Dragon waiting here"
+            : "🐉 Dragon following you");
           setTimeout(() => setDragonNotification(""), 1800);
         }
       }
@@ -1579,7 +1579,7 @@ export default function MinecraftGame() {
         // N: mount/dismount dragon pet (if one exists)
         const dragon = dragonManager.getActiveDragon();
         if (!dragon) {
-          setDragonNotification("No tienes dragón. Alcanza nivel 10 de XP para recibir un huevo.");
+          setDragonNotification("You don't have a dragon. Reach XP level 10 to receive an egg.");
           setTimeout(() => setDragonNotification(""), 3500);
           return;
         }
@@ -1589,7 +1589,7 @@ export default function MinecraftGame() {
           // dismount: drop player next to dragon
           player.position.set(dragon.position.x + 1, dragon.position.y, dragon.position.z);
           player.velocity.set(0, 0, 0);
-          setDragonNotification("Has desmontado");
+          setDragonNotification("You dismounted");
           setTimeout(() => setDragonNotification(""), 1500);
         } else {
           // Only mount if dragon is close enough
@@ -1598,12 +1598,12 @@ export default function MinecraftGame() {
           const dz = dragon.position.z - player.position.z;
           const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
           if (dist > 6) {
-            setDragonNotification("Acércate al dragón para montarlo");
+            setDragonNotification("Approach the dragon to mount it");
             setTimeout(() => setDragonNotification(""), 2500);
             return;
           }
           dragon.toggleMount(player.position);
-          setDragonNotification("¡Montado! WASD para volar, Espacio subir, Ctrl/Shift bajar");
+          setDragonNotification("Mounted! WASD to fly, Space up, Ctrl/Shift down");
           setTimeout(() => setDragonNotification(""), 3500);
         }
       }
@@ -1697,18 +1697,18 @@ export default function MinecraftGame() {
             const d = Math.sqrt((bx-player.position.x)**2+(by-player.position.y)**2+(bz-player.position.z)**2);
             if (d < 8) player.damage(30);
             sound.blockSound(BlockType.Stone, "break");
-            setDragonNotification("¡La cama explotó!"); setTimeout(() => setDragonNotification(""), 3000);
+            setDragonNotification("The bed exploded!"); setTimeout(() => setDragonNotification(""), 3000);
             return;
           }
           const isNight = dayTimeRef.current > 0.6 || dayTimeRef.current < 0.2;
-          if (!isNight) { setDragonNotification("Solo puedes dormir de noche"); setTimeout(() => setDragonNotification(""), 3000); return; }
+          if (!isNight) { setDragonNotification("You can only sleep at night"); setTimeout(() => setDragonNotification(""), 3000); return; }
           // Check hostile mobs in 8-block radius
           let hostile = false;
           for (const m of monsterManager.monsters) if (Math.sqrt((m.position.x-player.position.x)**2+(m.position.y-player.position.y)**2+(m.position.z-player.position.z)**2) < 8) { hostile = true; break; }
-          if (hostile) { setDragonNotification("No puedes dormir, hay monstruos cerca"); setTimeout(() => setDragonNotification(""), 3000); return; }
+          if (hostile) { setDragonNotification("Cannot sleep, monsters are nearby"); setTimeout(() => setDragonNotification(""), 3000); return; }
           setSleepFade(0.01);
           spawnPointRef.current = { x: hit.block.x + 1, y: hit.block.y, z: hit.block.z };
-          setTimeout(() => { dayTimeRef.current = 0.3; setSleepFade(0); setDragonNotification("¡Buenos días!"); setTimeout(() => setDragonNotification(""), 3000); }, 1500);
+          setTimeout(() => { dayTimeRef.current = 0.3; setSleepFade(0); setDragonNotification("Good morning!"); setTimeout(() => setDragonNotification(""), 3000); }, 1500);
           return;
         }
         // Door: toggle open/closed
@@ -1745,7 +1745,7 @@ export default function MinecraftGame() {
                     if (dx === 0 && dz === 0) continue;
                     if (world.getBlock(ccx+dx, ccy, ccz+dz) === BlockType.EndPortalFrame) { frame++; if (endPortalEyesRef.current.has(`${ccx+dx},${ccy},${ccz+dz}`)) eyes++; }
                   }
-                  if (frame === 8 && eyes === 8) { world.setBlock(ccx, ccy, ccz, BlockType.EndPortal); rebuildChunkAt(ccx, ccz); setDragonNotification("¡Portal del End activado!"); setTimeout(() => setDragonNotification(""), 3000); }
+                  if (frame === 8 && eyes === 8) { world.setBlock(ccx, ccy, ccz, BlockType.EndPortal); rebuildChunkAt(ccx, ccz); setDragonNotification("End Portal activated!"); setTimeout(() => setDragonNotification(""), 3000); }
                 }
               }
               return;
@@ -2097,11 +2097,11 @@ export default function MinecraftGame() {
               dragonEggAwardedRef.current = true;
               const leftover = inventoryRef.current.addItem(ItemType.DragonEgg, 1);
               if (leftover === 0) {
-                setDragonNotification("¡Has alcanzado el nivel 10! Recibiste un Huevo de Dragón. Colócalo para invocar a tu mascota.");
+                setDragonNotification("You reached level 10! You received a Dragon Egg. Place it to summon your pet.");
               } else {
                 // Inventory full - drop the egg on the ground at the player's position
                 dropManager.spawnDrop(ItemType.DragonEgg, 1, player.position.x, player.position.y + 1, player.position.z);
-                setDragonNotification("¡Nivel 10! Huevo de Dragón dejado en el suelo (inventario lleno).");
+                setDragonNotification("Level 10! Dragon Egg dropped on the ground (inventory full).");
               }
               setTimeout(() => setDragonNotification(""), 6000);
               sound.craftSuccess();
@@ -2658,7 +2658,7 @@ export default function MinecraftGame() {
   // Host: open current world to multiplayer (generates a share code)
   const hostMultiplayer = useCallback(async () => {
     setMpError("");
-    setMpStatus("Creando mundo...");
+    setMpStatus("Creating world...");
     if (!multiplayerRef.current) {
       multiplayerRef.current = new MultiplayerManager();
       multiplayerRef.current.onStatusChange = (s) => setMpStatus(s);
@@ -2691,14 +2691,14 @@ export default function MinecraftGame() {
       setShowHostPanel(true);
       showHostPanelRef.current = true;
     } catch (e: any) {
-      setMpError(e?.message || "Error al abrir el mundo");
+      setMpError(e?.message || "Error opening world");
     }
   }, []);
 
   // Client: join a host's world using their code
   const joinMultiplayer = useCallback(async (code: string) => {
     setMpError("");
-    setMpStatus("Conectando...");
+    setMpStatus("Connecting...");
     if (!multiplayerRef.current) {
       multiplayerRef.current = new MultiplayerManager();
       multiplayerRef.current.onStatusChange = (s) => setMpStatus(s);
@@ -2738,7 +2738,7 @@ export default function MinecraftGame() {
       setMpShareCode(code);
       setMpConnected(true);
     } catch (e: any) {
-      setMpError(e?.message || "Error al conectar");
+      setMpError(e?.message || "Error connecting");
       setMpStatus("");
     }
   }, []);
@@ -2803,7 +2803,7 @@ export default function MinecraftGame() {
       xpStateRef.current.serialize(),
       serializeArmor(armorStateRef.current)
     );
-    setSaveMessage(success ? "✓ Mundo guardado" : "✗ Error al guardar");
+    setSaveMessage(success ? "✓ World saved" : "✗ Error saving");
     setTimeout(() => setSaveMessage(""), 3000);
   }, [currentWorld]);
 
@@ -2896,7 +2896,7 @@ export default function MinecraftGame() {
 
       {/* HUD */}
       <div className="absolute top-2 left-2 z-20 text-white font-mono text-xs sm:text-sm bg-black/50 px-2 py-1 rounded">
-        <div className="font-bold text-yellow-300">{currentWorld?.name || "Mundo"}</div>
+        <div className="font-bold text-yellow-300">{currentWorld?.name || "World"}</div>
         <div>FPS: {stats.fps}</div>
         <div>X: {stats.x} Y: {stats.y} Z: {stats.z}</div>
         <div>Chunks: {stats.chunks}</div>
@@ -2905,7 +2905,7 @@ export default function MinecraftGame() {
           {mode === "survival"
             ? (() => {
                 const stack = inventoryRef.current.slots[selectedSlot];
-                if (!stack) return "(vacío)";
+                if (!stack) return "(empty)";
                 if (stack.id < 100) return BLOCKS[stack.id as BlockType]?.name ?? "Unknown";
                 return ITEMS[stack.id as ItemType]?.name ?? "Unknown";
               })()
@@ -2913,11 +2913,11 @@ export default function MinecraftGame() {
                 ? (inventoryRef.current.slots[selectedSlot]!.id < 100
                     ? BLOCKS[inventoryRef.current.slots[selectedSlot]!.id as BlockType]?.name ?? "Unknown"
                     : ITEMS[inventoryRef.current.slots[selectedSlot]!.id as ItemType]?.name ?? "Unknown")
-                : "(vacío)")
+                : "(empty)")
         }
         </div>
-        <div className="mt-1 text-yellow-300/80">{mode === "creative" ? "Creativo" : "Survival"}</div>
-        <div className="mt-1 text-white/50 text-[10px]">E: Inventario</div>
+        <div className="mt-1 text-yellow-300/80">{mode === "creative" ? "Creative" : "Survival"}</div>
+        <div className="mt-1 text-white/50 text-[10px]">E: Inventory</div>
       </div>
 
       {/* Held item name (5s timer) */}
@@ -3111,16 +3111,16 @@ export default function MinecraftGame() {
                 {currentWorld?.name || "JEFFCRAFT"}
               </h1>
               <div className="flex flex-col gap-2 mb-2">
-                <MCMenuButton onClick={handleStartClick} color="gray" selected={pauseMenuNav.selectedIndex === 0}>Continuar</MCMenuButton>
-                <MCMenuButton onClick={handleExitToMenu} color="gray" selected={pauseMenuNav.selectedIndex === 1}>Salir del mundo</MCMenuButton>
+                <MCMenuButton onClick={handleStartClick} color="gray" selected={pauseMenuNav.selectedIndex === 0}>Continue</MCMenuButton>
+                <MCMenuButton onClick={handleExitToMenu} color="gray" selected={pauseMenuNav.selectedIndex === 1}>Exit World</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
-                <MCMenuButton onClick={handleSaveWorld} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 2}>Guardar</MCMenuButton>
-                <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 3}>Configuración</MCMenuButton>
+                <MCMenuButton onClick={handleSaveWorld} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 2}>Save</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowConfig(true); showConfigRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 3}>Settings</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
-                <MCMenuButton onClick={() => { setShowGraphics(true); showGraphicsRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 4}>Gráficos</MCMenuButton>
-                <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 5}>Controles</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowGraphics(true); showGraphicsRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 4}>Graphics</MCMenuButton>
+                <MCMenuButton onClick={() => { setShowControls(true); showControlsRef.current = true; }} color="gray" className="flex-1 text-sm" selected={pauseMenuNav.selectedIndex === 5}>Controls</MCMenuButton>
               </div>
               <div className="flex gap-2 mb-2">
                 {/* Multiplayer: open current world to other players */}
@@ -3131,7 +3131,7 @@ export default function MinecraftGame() {
                     className="flex-1 text-sm"
                     selected={pauseMenuNav.selectedIndex === 6}
                   >
-                    Multijugador ✓
+                    Multiplayer ✓
                   </MCMenuButton>
                 ) : (
                   <MCMenuButton
@@ -3140,7 +3140,7 @@ export default function MinecraftGame() {
                     className="flex-1 text-sm"
                     selected={pauseMenuNav.selectedIndex === 6}
                   >
-                    Abrir mundo
+                    Open to LAN
                   </MCMenuButton>
                 )}
               </div>
@@ -3154,7 +3154,7 @@ export default function MinecraftGame() {
                   borderRight: "3px solid rgba(0,0,0,0.95)",
                 }}>
                   <p className="text-white font-mono text-xs text-center mb-2" style={{ textShadow: "1px 1px 0 #000" }}>
-                    Comparte este código con tus amigos:
+                    Share this code with your friends:
                   </p>
                   <p className="text-yellow-300 font-mono font-black text-3xl text-center tracking-[0.3em] mb-2" style={{ textShadow: "2px 2px 0 #000" }}>
                     {mpShareCode}
@@ -3172,14 +3172,14 @@ export default function MinecraftGame() {
                       color="gray"
                       className="flex-1 text-xs"
                     >
-                      Copiar
+                      Copy
                     </MCMenuButton>
                     <MCMenuButton
                       onClick={disconnectMultiplayer}
                       color="gray"
                       className="flex-1 text-xs"
                     >
-                      Cerrar mundo
+                      Close World
                     </MCMenuButton>
                   </div>
                 </div>
@@ -3191,7 +3191,7 @@ export default function MinecraftGame() {
               )}
               {saveMessage && <p className="mt-3 text-center text-xs text-green-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>{saveMessage}</p>}
               <p className="mt-2 text-center text-xs text-stone-400 font-mono" style={{ textShadow: "1px 1px 0 #000" }}>
-                {mode === "creative" ? "Creativo" : "Survival"} · Pulsa Esc para reanudar
+                {mode === "creative" ? "Creative" : "Survival"} · Press Esc to resume
               </p>
             </div>
           ) : showConfig ? (
@@ -3201,7 +3201,7 @@ export default function MinecraftGame() {
                 fontFamily: "monospace",
                 textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)",
                 letterSpacing: "0.05em",
-              }}>Configuración</h2>
+              }}>Settings</h2>
               <div className="text-left p-4 mb-4 space-y-2" style={{
                 backgroundColor: "rgba(0,0,0,0.7)",
                 borderTop: "3px solid rgba(110,110,120,0.9)",
@@ -3211,7 +3211,7 @@ export default function MinecraftGame() {
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.1)",
               }}>
                 <MCSlider
-                  label="Sensibilidad del ratón"
+                  label="Mouse sensitivity"
                   value={mouseSens}
                   min={0.1}
                   max={10.0}
@@ -3222,7 +3222,7 @@ export default function MinecraftGame() {
                   format={(v) => v.toFixed(2)}
                 />
                 <MCSlider
-                  label="Sensibilidad control (X)"
+                  label="Controller sensitivity (X)"
                   value={controllerSensX}
                   min={0.1}
                   max={10.0}
@@ -3233,7 +3233,7 @@ export default function MinecraftGame() {
                   format={(v) => v.toFixed(2)}
                 />
                 <MCSlider
-                  label="Sensibilidad control (Y)"
+                  label="Controller sensitivity (Y)"
                   value={controllerSensY}
                   min={0.1}
                   max={10.0}
@@ -3244,43 +3244,43 @@ export default function MinecraftGame() {
                   format={(v) => v.toFixed(2)}
                 />
                 <p className="text-stone-400 text-[10px] font-mono text-center pt-1">
-                  Rango: 0.1 (muy lento) – 10.0 (muy rápido). Los cambios se aplican inmediatamente.
+                  Range: 0.1 (very slow) – 10.0 (very fast). Changes apply immediately.
                 </p>
                 <p className="text-cyan-300 text-[9px] font-mono text-center">
-                  🎮 D-Pad ↑↓ navegar · ◀ ▶ ajustar · A reset · B volver
+                  🎮 D-Pad ↑↓ navigate · ◀ ▶ adjust · A reset · B back
                 </p>
               </div>
               <MCMenuButton
                 onClick={() => { setShowConfig(false); showConfigRef.current = false; }}
                 color="gray"
                 selected={configFocus.isFocused("back")}
-              >← Volver</MCMenuButton>
+              >← Back</MCMenuButton>
             </div>
           ) : showGraphics ? (
             /* ===== GRAPHICS PANEL — compact 2-column grid ===== */
             <div className="max-w-lg w-full mx-4" style={{ imageRendering: "pixelated" }}>
-              <h2 className="text-center text-2xl font-black mb-3 text-white" style={{ fontFamily: "monospace", textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)", letterSpacing: "0.05em" }}>Gráficos</h2>
+              <h2 className="text-center text-2xl font-black mb-3 text-white" style={{ fontFamily: "monospace", textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)", letterSpacing: "0.05em" }}>Graphics</h2>
               <div className="p-3 mb-3 max-h-[70vh] overflow-y-auto" style={{ backgroundColor: "rgba(0,0,0,0.7)", borderTop: "3px solid rgba(110,110,120,0.9)", borderLeft: "3px solid rgba(110,110,120,0.9)", borderBottom: "3px solid rgba(0,0,0,0.95)", borderRight: "3px solid rgba(0,0,0,0.95)" }}>
-                <p className="text-green-300 font-mono text-[10px] font-bold mb-2">BÁSICOS</p>
+                <p className="text-green-300 font-mono text-[10px] font-bold mb-2">BASIC</p>
                 <div className="grid grid-cols-2 gap-2 mb-3">
-                  <MCToggle label="PBR" desc="Materiales realistas" value={gfxSettings.pbr} onChange={(v) => { setGfxSettings(s => ({...s, pbr: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, pbr: v}; gfxNeedsRebuildRef.current = true; }} focused={graphicsFocus.isFocused("pbr")} />
-                  <MCToggle label="Sombras" desc="Sombras dinámicas" value={gfxSettings.shadows} onChange={(v) => { setGfxSettings(s => ({...s, shadows: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadows: v}; }} focused={graphicsFocus.isFocused("shadows")} />
-                  <MCToggle label="Niebla" desc="Profundidad de distancia" value={gfxSettings.fog} onChange={(v) => { setGfxSettings(s => ({...s, fog: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, fog: v}; }} focused={graphicsFocus.isFocused("fog")} />
-                  <MCToggle label="Hojas brillantes" desc="Subsurface scattering" value={gfxSettings.leavesGlow} onChange={(v) => { setGfxSettings(s => ({...s, leavesGlow: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, leavesGlow: v}; gfxNeedsRebuildRef.current = true; }} focused={graphicsFocus.isFocused("leavesGlow")} />
-                  <MCToggle label="Reflejos agua" desc="Reflexiones del entorno" value={gfxSettings.waterReflections} onChange={(v) => { setGfxSettings(s => ({...s, waterReflections: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, waterReflections: v}; }} focused={graphicsFocus.isFocused("waterReflections")} />
-                  <MCToggle label="Cielo realista" desc="Atardeceres y glow" value={gfxSettings.realisticSky} onChange={(v) => { setGfxSettings(s => ({...s, realisticSky: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, realisticSky: v}; }} focused={graphicsFocus.isFocused("realisticSky")} />
+                  <MCToggle label="PBR" desc="Realistic materials" value={gfxSettings.pbr} onChange={(v) => { setGfxSettings(s => ({...s, pbr: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, pbr: v}; gfxNeedsRebuildRef.current = true; }} focused={graphicsFocus.isFocused("pbr")} />
+                  <MCToggle label="Shadows" desc="Dynamic shadows" value={gfxSettings.shadows} onChange={(v) => { setGfxSettings(s => ({...s, shadows: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadows: v}; }} focused={graphicsFocus.isFocused("shadows")} />
+                  <MCToggle label="Fog" desc="Distance depth" value={gfxSettings.fog} onChange={(v) => { setGfxSettings(s => ({...s, fog: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, fog: v}; }} focused={graphicsFocus.isFocused("fog")} />
+                  <MCToggle label="Glowing leaves" desc="Subsurface scattering" value={gfxSettings.leavesGlow} onChange={(v) => { setGfxSettings(s => ({...s, leavesGlow: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, leavesGlow: v}; gfxNeedsRebuildRef.current = true; }} focused={graphicsFocus.isFocused("leavesGlow")} />
+                  <MCToggle label="Water reflections" desc="Environment reflections" value={gfxSettings.waterReflections} onChange={(v) => { setGfxSettings(s => ({...s, waterReflections: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, waterReflections: v}; }} focused={graphicsFocus.isFocused("waterReflections")} />
+                  <MCToggle label="Realistic sky" desc="Sunsets and glow" value={gfxSettings.realisticSky} onChange={(v) => { setGfxSettings(s => ({...s, realisticSky: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, realisticSky: v}; }} focused={graphicsFocus.isFocused("realisticSky")} />
                 </div>
                 <div className="flex items-center gap-2 mb-3">
                   <MCSelect<number>
-                    label="Sombras"
+                    label="Shadows"
                     value={gfxSettings.shadowQuality}
-                    options={[{ value: 512, label: "512 Rápido" }, { value: 1024, label: "1024 Medio" }, { value: 2048, label: "2048 Nítido" }]}
+                    options={[{ value: 512, label: "512 Fast" }, { value: 1024, label: "1024 Medium" }, { value: 2048, label: "2048 Sharp" }]}
                     onChange={(v) => { setGfxSettings(s => ({...s, shadowQuality: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadowQuality: v}; }}
                     focused={graphicsFocus.isFocused("shadowQuality")}
                   />
                   <div className="flex-1">
                     <MCSlider
-                      label="Exposición"
+                      label="Exposure"
                       value={gfxSettings.toneMapping}
                       min={0.5}
                       max={2.5}
@@ -3292,24 +3292,24 @@ export default function MinecraftGame() {
                     />
                   </div>
                 </div>
-                <div className="pt-2 border-t border-stone-700"><p className="text-cyan-300 font-mono text-[10px] font-bold mb-2">🔮 SHADERS (ULTRA REALISTA)</p></div>
+                <div className="pt-2 border-t border-stone-700"><p className="text-cyan-300 font-mono text-[10px] font-bold mb-2">🔮 SHADERS (ULTRA REALISTIC)</p></div>
                 <div className="grid grid-cols-2 gap-2">
-                  <MCToggle label="✨ Activar Shaders" desc="Post-procesamiento completo" value={gfxSettings.shadersEnabled} onChange={(v) => { setGfxSettings(s => ({...s, shadersEnabled: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadersEnabled: v}; }} focused={graphicsFocus.isFocused("shadersEnabled")} />
-                  <MCToggle label="Bloom" desc="Resplandor de luz" value={gfxSettings.shaderBloom} onChange={(v) => { setGfxSettings(s => ({...s, shaderBloom: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderBloom: v}; }} focused={graphicsFocus.isFocused("shaderBloom")} />
-                  <MCToggle label="SSAO" desc="Mejor dejar OFF, ya viene color grade" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} focused={graphicsFocus.isFocused("shaderSSAO")} />
-                  <MCToggle label="God Rays" desc="Rayos de sol" value={gfxSettings.shaderGodRays} onChange={(v) => { setGfxSettings(s => ({...s, shaderGodRays: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderGodRays: v}; }} focused={graphicsFocus.isFocused("shaderGodRays")} />
-                  <MCToggle label="Ondas agua" desc="Oleaje Gerstner" value={gfxSettings.shaderWaterWaves} onChange={(v) => { setGfxSettings(s => ({...s, shaderWaterWaves: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWaterWaves: v}; }} focused={graphicsFocus.isFocused("shaderWaterWaves")} />
-                  <MCToggle label="Viento" desc="Movimiento de hojas" value={gfxSettings.shaderWind} onChange={(v) => { setGfxSettings(s => ({...s, shaderWind: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWind: v}; }} focused={graphicsFocus.isFocused("shaderWind")} />
+                  <MCToggle label="✨ Enable Shaders" desc="Full post-processing" value={gfxSettings.shadersEnabled} onChange={(v) => { setGfxSettings(s => ({...s, shadersEnabled: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shadersEnabled: v}; }} focused={graphicsFocus.isFocused("shadersEnabled")} />
+                  <MCToggle label="Bloom" desc="Light glow" value={gfxSettings.shaderBloom} onChange={(v) => { setGfxSettings(s => ({...s, shaderBloom: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderBloom: v}; }} focused={graphicsFocus.isFocused("shaderBloom")} />
+                  <MCToggle label="SSAO" desc="Best left OFF, color grading already applied" value={gfxSettings.shaderSSAO} onChange={(v) => { setGfxSettings(s => ({...s, shaderSSAO: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderSSAO: v}; }} focused={graphicsFocus.isFocused("shaderSSAO")} />
+                  <MCToggle label="God Rays" desc="Sun rays" value={gfxSettings.shaderGodRays} onChange={(v) => { setGfxSettings(s => ({...s, shaderGodRays: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderGodRays: v}; }} focused={graphicsFocus.isFocused("shaderGodRays")} />
+                  <MCToggle label="Water waves" desc="Gerstner waves" value={gfxSettings.shaderWaterWaves} onChange={(v) => { setGfxSettings(s => ({...s, shaderWaterWaves: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWaterWaves: v}; }} focused={graphicsFocus.isFocused("shaderWaterWaves")} />
+                  <MCToggle label="Wind" desc="Leaf movement" value={gfxSettings.shaderWind} onChange={(v) => { setGfxSettings(s => ({...s, shaderWind: v})); gfxSettingsRef.current = {...gfxSettingsRef.current, shaderWind: v}; }} focused={graphicsFocus.isFocused("shaderWind")} />
                 </div>
                 <p className="text-cyan-300 text-[9px] font-mono text-center mt-3">
-                  🎮 D-Pad navega grid · A alterna/resetea · ◀ ▶ ajusta slider · B vuelve
+                  🎮 D-Pad navigates grid · A toggles/resets · ◀ ▶ adjusts slider · B back
                 </p>
               </div>
               <MCMenuButton
                 onClick={() => { setShowGraphics(false); showGraphicsRef.current = false; }}
                 color="gray"
                 selected={graphicsFocus.isFocused("back")}
-              >← Volver</MCMenuButton>
+              >← Back</MCMenuButton>
             </div>
           ) : (
             /* ===== CONTROLS PANEL (existing) ===== */
@@ -3318,7 +3318,7 @@ export default function MinecraftGame() {
                 fontFamily: "monospace",
                 textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)",
                 letterSpacing: "0.05em",
-              }}>Controles</h2>
+              }}>Controls</h2>
               <div className="text-left text-sm space-y-1.5 p-4 mb-4" style={{
                 backgroundColor: "rgba(0,0,0,0.7)",
                 borderTop: "3px solid rgba(110,110,120,0.9)",
@@ -3327,42 +3327,42 @@ export default function MinecraftGame() {
                 borderRight: "3px solid rgba(0,0,0,0.95)",
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.1)",
               }}>
-                <ControlRow keys="WASD" desc="Moverse" />
-                <ControlRow keys="Mouse" desc="Mirar alrededor" />
-                <ControlRow keys="Espacio" desc="Saltar / Nadar arriba" />
-                <ControlRow keys="Shift" desc="Correr" />
-                <ControlRow keys="Click izq" desc={mode === "survival" ? "Minar bloque / Atacar" : "Romper bloque"} />
-                <ControlRow keys="Click der / M" desc="Comer / Abrir mesa-horno / Colocar" />
-                <ControlRow keys="1-9 / Rueda" desc="Seleccionar slot" />
-                {mode === "survival" && <ControlRow keys="E" desc="Abrir inventario" />}
-                {mode === "survival" && <ControlRow keys="Click der en mesa" desc="Craftear" />}
-                {mode === "survival" && <ControlRow keys="Click der en horno" desc="Cocer comida" />}
-                {mode === "survival" && <ControlRow keys="N" desc="Montar/desmontar dragón 🐉" />}
-                {mode === "survival" && <ControlRow keys="B" desc="Dragón espera/te sigue" />}
-                {mode === "creative" && <ControlRow keys="F" desc="Vuelo" />}
-                <ControlRow keys="Esc" desc="Pausar" />
+                <ControlRow keys="WASD" desc="Move" />
+                <ControlRow keys="Mouse" desc="Look around" />
+                <ControlRow keys="Space" desc="Jump / Swim up" />
+                <ControlRow keys="Shift" desc="Run" />
+                <ControlRow keys="Left click" desc={mode === "survival" ? "Mine block / Attack" : "Break block"} />
+                <ControlRow keys="Right click / M" desc="Eat / Open table-furnace / Place" />
+                <ControlRow keys="1-9 / Wheel" desc="Select slot" />
+                {mode === "survival" && <ControlRow keys="E" desc="Open inventory" />}
+                {mode === "survival" && <ControlRow keys="Right click on table" desc="Craft" />}
+                {mode === "survival" && <ControlRow keys="Right click on furnace" desc="Cook food" />}
+                {mode === "survival" && <ControlRow keys="N" desc="Mount/dismount dragon 🐉" />}
+                {mode === "survival" && <ControlRow keys="B" desc="Dragon waits/follows you" />}
+                {mode === "creative" && <ControlRow keys="F" desc="Fly" />}
+                <ControlRow keys="Esc" desc="Pause" />
                 {/* Xbox controller mapping */}
                 {inputMode === "controller" && (
                   <>
                     <div className="mt-3 mb-1 text-yellow-300 font-bold text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
-                      ── Control Xbox ──
+                      ── Xbox Controller ──
                     </div>
-                    <ControlRow keys="Stick Izq" desc="Moverse" />
-                    <ControlRow keys="Stick Der" desc="Mirar" />
-                    <ControlRow keys="A" desc="Saltar" />
-                    <ControlRow keys="B" desc="Montar/desmontar dragón" />
-                    <ControlRow keys="X" desc="Colocar / Interactuar" />
-                    <ControlRow keys="Y" desc="Inventario" />
-                    <ControlRow keys="RT" desc="Minar / Atacar (mantener)" />
-                    <ControlRow keys="LT" desc="Bajar (creativo)" />
-                    <ControlRow keys="LB / RB" desc="Slot anterior / siguiente" />
-                    <ControlRow keys="D-Pad" desc="Slots 1-4 (sin LB) / 5-8 (con LB)" />
+                    <ControlRow keys="Left Stick" desc="Move" />
+                    <ControlRow keys="Right Stick" desc="Look" />
+                    <ControlRow keys="A" desc="Jump" />
+                    <ControlRow keys="B" desc="Mount/dismount dragon" />
+                    <ControlRow keys="X" desc="Place / Interact" />
+                    <ControlRow keys="Y" desc="Inventory" />
+                    <ControlRow keys="RT" desc="Mine / Attack (hold)" />
+                    <ControlRow keys="LT" desc="Descend (creative)" />
+                    <ControlRow keys="LB / RB" desc="Previous / next slot" />
+                    <ControlRow keys="D-Pad" desc="Slots 1-4 (without LB) / 5-8 (with LB)" />
                     <ControlRow keys="LB + RB" desc="Slot 9" />
-                    <ControlRow keys="LS (click)" desc="Correr" />
-                    <ControlRow keys="Back" desc="Dragón espera/sigue" />
-                    <ControlRow keys="Start" desc="Pausar / Reanudar" />
-                    <ControlRow keys="A / B" desc="Confirmar / Volver (en menús)" />
-                    <ControlRow keys="RT (mantener)" desc="Mouse digital (solo en menús)" />
+                    <ControlRow keys="LS (click)" desc="Run" />
+                    <ControlRow keys="Back" desc="Dragon waits/follows" />
+                    <ControlRow keys="Start" desc="Pause / Resume" />
+                    <ControlRow keys="A / B" desc="Confirm / Back (in menus)" />
+                    <ControlRow keys="RT (hold)" desc="Digital mouse (menus only)" />
                   </>
                 )}
               </div>
@@ -3382,7 +3382,7 @@ export default function MinecraftGame() {
                     imageRendering: "pixelated",
                   }}
                 >
-                  ⌨ Teclado
+                  ⌨ Keyboard
                 </button>
                 <button
                   onClick={() => { setInputMode("controller"); inputModeRef.current = "controller"; resetGamepadState(); }}
@@ -3398,15 +3398,15 @@ export default function MinecraftGame() {
                     imageRendering: "pixelated",
                   }}
                 >
-                  🎮 Control Xbox
+                  🎮 Xbox Controller
                 </button>
               </div>
               {!isGamepadConnected() && inputMode === "controller" && (
                 <p className="text-center text-xs text-yellow-400 font-mono mb-2" style={{ textShadow: "1px 1px 0 #000" }}>
-                  ⚠ No se detectó un control. Conecta un control Xbox.
+                  ⚠ No controller detected. Connect an Xbox controller.
                 </p>
               )}
-              <MCMenuButton onClick={() => { setShowControls(false); showControlsRef.current = false; }} color="gray" selected={subPanelNav.selectedIndex === 0}>← Volver</MCMenuButton>
+              <MCMenuButton onClick={() => { setShowControls(false); showControlsRef.current = false; }} color="gray" selected={subPanelNav.selectedIndex === 0}>← Back</MCMenuButton>
             </div>
           )}
         </div>
@@ -3417,7 +3417,7 @@ export default function MinecraftGame() {
         <div className="absolute inset-0 z-40 flex items-end justify-center pb-20 pointer-events-none">
           <div className="w-full max-w-2xl mx-4 pointer-events-auto">
             <div className="max-h-48 overflow-y-auto mb-2 p-2" style={{ backgroundColor: "rgba(0,0,0,0.6)", borderTop: "2px solid rgba(80,80,80,0.8)", borderLeft: "2px solid rgba(80,80,80,0.8)", borderBottom: "2px solid rgba(0,0,0,0.9)", borderRight: "2px solid rgba(0,0,0,0.9)" }}>
-              {chatMessages.length === 0 ? <p className="text-stone-500 text-xs font-mono">Escribe /help para ver comandos</p> :
+              {chatMessages.length === 0 ? <p className="text-stone-500 text-xs font-mono">Type /help for commands</p> :
                 chatMessages.slice(-8).map((msg, i) => <p key={i} className={`text-xs font-mono mb-0.5 ${msg.type === "system" ? "text-yellow-300" : "text-white"}`} style={{ textShadow: "1px 1px 0 #000" }}>{msg.text}</p>)}
             </div>
             <input type="text" value={chatInput} autoFocus onChange={(e) => setChatInput(e.target.value)}
@@ -3425,7 +3425,7 @@ export default function MinecraftGame() {
                 if (e.key === "Enter") { const t = chatInput.trim(); if (t) { if (t.startsWith("/")) processChatCommand(t); else { setChatMessages(prev => [...prev, { text: "<Player> " + t, type: "chat" }]); if (multiplayerRef.current?.isConnected()) multiplayerRef.current.sendChat(t); } } setChatInput(""); setChatOpen(false); chatOpenRef.current = false; }
                 else if (e.key === "Escape") { setChatInput(""); setChatOpen(false); chatOpenRef.current = false; }
               }}
-              placeholder="Mensaje o comando (/help)..." className="w-full px-3 py-2 text-white font-mono text-sm outline-none" style={{ backgroundColor: "rgba(0,0,0,0.8)", borderTop: "2px solid rgba(80,80,80,0.8)", borderLeft: "2px solid rgba(80,80,80,0.8)", borderBottom: "2px solid rgba(0,0,0,0.9)", borderRight: "2px solid rgba(0,0,0,0.9)" }} />
+              placeholder="Message or command (/help)..." className="w-full px-3 py-2 text-white font-mono text-sm outline-none" style={{ backgroundColor: "rgba(0,0,0,0.8)", borderTop: "2px solid rgba(80,80,80,0.8)", borderLeft: "2px solid rgba(80,80,80,0.8)", borderBottom: "2px solid rgba(0,0,0,0.9)", borderRight: "2px solid rgba(0,0,0,0.9)" }} />
           </div>
         </div>
       )}
@@ -3436,11 +3436,11 @@ export default function MinecraftGame() {
       {signEditing && (
         <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
           <div className="p-4" style={{ backgroundColor: "#c6c6c6", borderTop: "4px solid #fff", borderLeft: "4px solid #fff", borderBottom: "4px solid #373737", borderRight: "4px solid #373737" }}>
-            <h3 className="text-[#2a2a2a] font-mono font-bold text-sm mb-3 text-center">Editar Cartel</h3>
+            <h3 className="text-[#2a2a2a] font-mono font-bold text-sm mb-3 text-center">Edit Sign</h3>
             <div className="space-y-1 mb-3">
-              {[0,1,2,3].map(line => <input key={line} type="text" value={signText[line]} maxLength={15} onChange={(e) => { const n = [...signText]; n[line] = e.target.value; setSignText(n); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") { setSignEditing(null); signEditingRef.current = false; } }} className="w-48 px-2 py-1 text-sm font-mono outline-none" style={{ backgroundColor: "#8b8b8b", border: "2px solid #555", color: "#000" }} placeholder={`Línea ${line+1}`} autoFocus={line === 0} />)}
+              {[0,1,2,3].map(line => <input key={line} type="text" value={signText[line]} maxLength={15} onChange={(e) => { const n = [...signText]; n[line] = e.target.value; setSignText(n); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") { setSignEditing(null); signEditingRef.current = false; } }} className="w-48 px-2 py-1 text-sm font-mono outline-none" style={{ backgroundColor: "#8b8b8b", border: "2px solid #555", color: "#000" }} placeholder={`Line ${line+1}`} autoFocus={line === 0} />)}
             </div>
-            <button onClick={() => { setSignEditing(null); signEditingRef.current = false; }} className="w-full py-2 text-white font-mono font-bold text-sm" style={{ backgroundColor: "#5a8a3a", border: "2px solid #2a4a1a" }}>Hecho</button>
+            <button onClick={() => { setSignEditing(null); signEditingRef.current = false; }} className="w-full py-2 text-white font-mono font-bold text-sm" style={{ backgroundColor: "#5a8a3a", border: "2px solid #2a4a1a" }}>Done</button>
           </div>
         </div>
       )}
@@ -3448,7 +3448,7 @@ export default function MinecraftGame() {
       {isDead && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-red-950/70 backdrop-blur-sm">
           <div className="text-center text-white">
-            <h1 className="text-5xl font-bold mb-6" style={{ fontFamily: "monospace" }}>¡Has muerto!</h1>
+            <h1 className="text-5xl font-bold mb-6" style={{ fontFamily: "monospace" }}>You died!</h1>
             <div className="flex gap-4 justify-center">
               <button
                 onClick={(e) => { e.preventDefault(); handleRespawn(); }}
@@ -3456,7 +3456,7 @@ export default function MinecraftGame() {
                 className={`px-6 py-3 border-2 rounded text-lg font-bold transition-all ${deathNav.selectedIndex === 0 ? "scale-110 bg-green-600 border-green-300 shadow-[0_0_20px_rgba(150,255,150,0.6)]" : "bg-green-700 hover:bg-green-600 border-green-500"}`}
                 style={{ touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}
               >
-                Reaparecer
+                Respawn
               </button>
               <button
                 onClick={(e) => { e.preventDefault(); handleExitToMenu(); }}
@@ -3464,17 +3464,17 @@ export default function MinecraftGame() {
                 className={`px-6 py-3 border-2 rounded text-lg font-bold transition-all ${deathNav.selectedIndex === 1 ? "scale-110 bg-stone-500 border-stone-200 shadow-[0_0_20px_rgba(200,200,200,0.5)]" : "bg-stone-700 hover:bg-stone-600 border-stone-500"}`}
                 style={{ touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent" }}
               >
-                Menú principal
+                Main Menu
               </button>
             </div>
-            <p className="mt-4 text-stone-300 text-sm font-mono">🎮 A: confirmar · D-Pad: navegar · o toca un botón</p>
+            <p className="mt-4 text-stone-300 text-sm font-mono">🎮 A: confirm · D-Pad: navigate · or tap a button</p>
           </div>
         </div>
       )}
 
       {!isLoaded && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black">
-          <div className="text-white font-mono text-xl">Generando mundo...</div>
+          <div className="text-white font-mono text-xl">Generating world...</div>
         </div>
       )}
 
@@ -3501,7 +3501,7 @@ export default function MinecraftGame() {
       <VirtualMouseCursor visible={virtualMouse.visible} pos={virtualMouse.pos} />
       {virtualMouse.visible && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[90] px-3 py-1.5 bg-stone-900/90 border-2 border-cyan-500 rounded text-cyan-300 font-mono text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
-          🖱️ Mouse digital · Stick Der: mover · A: click · X: click der · Suelta RT para salir
+          🖱️ Digital mouse · Right stick: move · A: click · X: right click · Release RT to exit
         </div>
       )}
 
@@ -3518,15 +3518,15 @@ export default function MinecraftGame() {
       {(() => {
         const dragon = dragonManagerRef.current?.getActiveDragon?.();
         if (!dragon) return null;
-        const status = dragon.isMounted ? "[MONTADO]" : dragon.isStaying ? "[ESPERANDO]" : "[Libre]";
+        const status = dragon.isMounted ? "[MOUNTED]" : dragon.isStaying ? "[WAITING]" : "[Free]";
         const hint = dragon.isMounted
-          ? "Pulsa N para desmontar"
+          ? "Press N to dismount"
           : dragon.isStaying
-            ? "Pulsa N para montar · B para que te siga"
-            : "Pulsa N para montar · B para que espere";
+            ? "Press N to mount · B to make it follow"
+            : "Press N to mount · B to make it wait";
         return (
           <div className="absolute top-2 right-2 z-20 px-3 py-1.5 bg-black/50 rounded text-white font-mono text-xs">
-            <div className="text-purple-300 font-bold">🐉 Dragón {status}</div>
+            <div className="text-purple-300 font-bold">🐉 Dragon {status}</div>
             <div className="text-white/70">{hint}</div>
           </div>
         );
@@ -3678,7 +3678,7 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-black text-[#3f3f3f] font-mono" style={{ textShadow: "2px 2px 0 #fff" }}>Cofre</h2>
+          <h2 className="text-2xl font-black text-[#3f3f3f] font-mono" style={{ textShadow: "2px 2px 0 #fff" }}>Chest</h2>
           <button
             onClick={onClose}
             className="px-3 py-1.5 text-white text-sm font-mono font-bold"
@@ -3692,7 +3692,7 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
               textShadow: "1px 1px 0 #000",
             }}
           >
-            ✕ Cerrar
+            ✕ Close
           </button>
         </div>
         {/* Chest storage (27 slots = slots 9-35 of inventory) */}
@@ -3793,7 +3793,7 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
         {/* Held item */}
         {heldItem && (
           <div className="mt-2 text-center text-sm font-mono text-[#3f3f3f]">
-            Llevando: {getName(heldItem.id)} ×{heldItem.count}
+            Holding: {getName(heldItem.id)} ×{heldItem.count}
           </div>
         )}
       </div>
@@ -3803,9 +3803,9 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
 
 // =============== MAIN MENU (Minecraft Java style) ===============
 const SPLASH_TEXTS = [
-  "¡Hecho con amor!", "100% voxel puro!", "¡Cava profundamente!", "¡Cuidado con los creepers!",
-  "¡Construye algo épico!", "¡Explora el infinito!", "¡Sobrevive!", "¡Craftea hasta el amanecer!",
-  "¡Los diamantes brillan!", "¡V2.0!", "¡Bienvenido a Jeffcraft!", "¡Construye. Sobrevive. Prospera!",
+  "Made with love!", "100% pure voxel!", "Dig deeply!", "Watch out for creepers!",
+  "Build something epic!", "Explore the infinite!", "Survive!", "Craft until dawn!",
+  "Diamonds shine!", "V2.0!", "Welcome to Jeffcraft!", "Build. Survive. Prosper!",
 ];
 
 function MainMenu({
@@ -3839,7 +3839,7 @@ function MainMenu({
     <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
       {/* Panoramic background with slow horizontal pan */}
       <div className="absolute inset-0" style={{
-        backgroundImage: `url(/IMG_2423.jpeg), url(/IMG_2398.jpeg)`,
+        backgroundImage: `url(/IMG_2447.jpeg)`,
         backgroundSize: "cover",
         backgroundPosition: `${panOffset}% center`,
         opacity: 0.95,
@@ -3852,15 +3852,15 @@ function MainMenu({
         {/* Menu buttons — title removed (image already includes it) */}
         {!showLoadMenu ? (
           <div className="flex flex-col gap-2 w-full max-w-xs">
-            <MCMenuButton onClick={onCreateWorld} color="gray" selected={selectedIndex === 0}>Crear nuevo mundo</MCMenuButton>
-            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="gray" selected={selectedIndex === 1}>Cargar mundo</MCMenuButton>
-            <MCMenuButton onClick={onMultiplayer} color="gray" selected={selectedIndex === 2}>Multijugador</MCMenuButton>
-            <MCMenuButton onClick={() => {}} color="gray" className="opacity-50 cursor-not-allowed" selected={selectedIndex === 3}>Opciones</MCMenuButton>
+            <MCMenuButton onClick={onCreateWorld} color="gray" selected={selectedIndex === 0}>Create New World</MCMenuButton>
+            <MCMenuButton onClick={() => { refreshSavedWorlds(); setShowLoadMenu(true); }} color="gray" selected={selectedIndex === 1}>Load World</MCMenuButton>
+            <MCMenuButton onClick={onMultiplayer} color="gray" selected={selectedIndex === 2}>Multiplayer</MCMenuButton>
+            <MCMenuButton onClick={() => {}} color="gray" className="opacity-50 cursor-not-allowed" selected={selectedIndex === 3}>Options</MCMenuButton>
           </div>
         ) : (
           <div className="w-full max-w-sm">
             <h2 className="text-xl font-black text-white font-mono mb-3 text-center" style={{ textShadow: "2px 2px 0 #000" }}>
-              Selecciona un mundo
+              Select a world
             </h2>
             <div className="p-2 max-h-72 overflow-y-auto" style={{
               backgroundColor: "rgba(15,15,25,0.92)",
@@ -3872,7 +3872,7 @@ function MainMenu({
             }}>
               {savedWorlds.length === 0 ? (
                 <p className="text-stone-400 text-center font-mono py-6 text-sm">
-                  No hay mundos guardados.<br />Crea un mundo y guárdalo desde el menú de pausa.
+                  No saved worlds.<br />Create a world and save it from the pause menu.
                 </p>
               ) : (
                 <div className="flex flex-col gap-1">
@@ -3895,7 +3895,7 @@ function MainMenu({
                         <div className="flex-1">
                           <div className="text-white font-mono font-bold text-sm">{isFocused ? "▶ " : ""}{w.name}</div>
                           <div className="text-stone-400 text-xs font-mono">
-                            {w.mode === "creative" ? "Creativo" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
+                            {w.mode === "creative" ? "Creative" : "Survival"} · {new Date(w.savedAt).toLocaleDateString()}
                           </div>
                         </div>
                         <button
@@ -3907,7 +3907,7 @@ function MainMenu({
                             borderBottom: "2px solid #1a3a0a", borderRight: "2px solid #1a3a0a", imageRendering: "pixelated",
                             touchAction: "manipulation", cursor: "pointer", WebkitTapHighlightColor: "transparent",
                           }}
-                        >▶ Cargar</button>
+                        >▶ Load</button>
                         <button
                           onClick={(e) => { e.preventDefault(); deleteWorld(w.name); refreshSavedWorlds(); }}
                           onTouchEnd={(e) => { e.preventDefault(); deleteWorld(w.name); refreshSavedWorlds(); }}
@@ -3925,10 +3925,10 @@ function MainMenu({
               )}
             </div>
             <div className="mt-3">
-              <MCMenuButton onClick={() => setShowLoadMenu(false)} color="gray" className="w-full text-sm">← Volver</MCMenuButton>
+              <MCMenuButton onClick={() => setShowLoadMenu(false)} color="gray" className="w-full text-sm">← Back</MCMenuButton>
             </div>
             <p className="text-cyan-300 text-[9px] font-mono text-center mt-2">
-              🎮 D-Pad ↑↓ navega · A carga el mundo enfocado · B vuelve
+              🎮 D-Pad ↑↓ navigates · A loads focused world · B back
             </p>
           </div>
         )}
@@ -3946,7 +3946,7 @@ function MainMenu({
           {SPLASH_TEXTS[splashIndex]}
         </span>
 
-        <p className="absolute bottom-2 left-4 text-white/35 text-xs font-mono">Jeffcraft V2 · No afiliado con Mojang o Microsoft</p>
+        <p className="absolute bottom-2 left-4 text-white/35 text-xs font-mono">Jeffcraft V2 · Not affiliated with Mojang or Microsoft</p>
       </div>
     </div>
   );
@@ -4071,7 +4071,7 @@ function MultiplayerScreen({
   const handleJoin = () => {
     const trimmed = code.trim().toUpperCase();
     if (trimmed.length !== 6) {
-      setError("El código debe tener 6 caracteres.");
+      setError("Code must be 6 characters.");
       return;
     }
     setError("");
@@ -4083,7 +4083,7 @@ function MultiplayerScreen({
     <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
       {/* Background */}
       <div className="absolute inset-0" style={{
-        backgroundImage: `url(/IMG_2423.jpeg), url(/IMG_2398.jpeg)`,
+        backgroundImage: `url(/IMG_2447.jpeg)`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         opacity: 0.55,
@@ -4096,10 +4096,10 @@ function MultiplayerScreen({
           textShadow: "0 0 30px rgba(80,140,255,0.5), 3px 3px 0 #0a0a1a, 5px 5px 0 rgba(0,0,0,0.5)",
           letterSpacing: "0.05em",
         }}>
-          Multijugador
+          Multiplayer
         </h2>
         <p className="text-stone-300 text-sm font-mono mb-6 text-center" style={{ textShadow: "1px 1px 0 #000" }}>
-          Ingresa el código de 6 caracteres que te compartió el host.
+          Enter the 6-character code shared by the host.
         </p>
 
         <div className="w-full max-w-xs">
@@ -4140,7 +4140,7 @@ function MultiplayerScreen({
               color="gray"
               className={connecting ? "opacity-50 cursor-not-allowed" : ""}
             >
-              {connecting ? "Conectando..." : "Conectar"}
+              {connecting ? "Connecting..." : "Connect"}
             </MCMenuButton>
             <MCMenuButton
               onClick={() => { if (!connecting) onCancel(); }}
@@ -4153,7 +4153,7 @@ function MultiplayerScreen({
         </div>
 
         <p className="absolute bottom-2 left-4 text-white/35 text-xs font-mono">
-          P2P vía PeerJS · Sin servidor dedicado
+          P2P via PeerJS · No dedicated server
         </p>
       </div>
     </div>
@@ -4172,8 +4172,8 @@ function CreateWorldScreen({
   const [name, setName] = useState(() => {
     const existing = listSavedWorlds().map((w) => w.name);
     let n = 1;
-    while (existing.includes(`Nuevo Mundo ${n}`)) n++;
-    return `Nuevo Mundo ${n}`;
+    while (existing.includes(`New World ${n}`)) n++;
+    return `New World ${n}`;
   });
   // Default seed is empty (= random), but show a hint button to generate one
   const [seedStr, setSeedStr] = useState("");
@@ -4198,7 +4198,7 @@ function CreateWorldScreen({
         seed = Math.abs(h);
       }
     }
-    onCreate({ name: name.trim() || "Nuevo Mundo", seed, mode });
+    onCreate({ name: name.trim() || "New World", seed, mode });
   };
 
   // Generate a random numeric seed and fill the input
@@ -4217,27 +4217,27 @@ function CreateWorldScreen({
             WebkitTextStroke: "1px #2a2a2a",
           }}
         >
-          Crear Nuevo Mundo
+          Create New World
         </h2>
 
         <div className="w-full max-w-2xl bg-stone-900/80 border-4 border-stone-700 rounded-lg p-6 space-y-6">
           {/* World name */}
           <div>
-            <label className="block text-white font-mono text-sm mb-2">Nombre del mundo</label>
+            <label className="block text-white font-mono text-sm mb-2">World name</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               maxLength={32}
               className="w-full bg-stone-800 border-2 border-stone-600 focus:border-green-400 text-white font-mono px-4 py-2 rounded outline-none transition-colors"
-              placeholder="Mi mundo épico"
+              placeholder="My epic world"
             />
           </div>
 
           {/* Seed */}
           <div>
             <label className="block text-white font-mono text-sm mb-2">
-              Semilla del mundo <span className="text-stone-500">(opcional)</span>
+              World seed <span className="text-stone-500">(optional)</span>
             </label>
             <div className="flex gap-2">
               <input
@@ -4245,12 +4245,12 @@ function CreateWorldScreen({
                 value={seedStr}
                 onChange={(e) => setSeedStr(e.target.value)}
                 className="flex-1 bg-stone-800 border-2 border-stone-600 focus:border-green-400 text-white font-mono px-4 py-2 rounded outline-none transition-colors"
-                placeholder="Vacío = semilla aleatoria (como Minecraft)"
+                placeholder="Empty = random seed (like Minecraft)"
               />
               <button
                 type="button"
                 onClick={handleRandomSeed}
-                title="Generar semilla aleatoria"
+                title="Generate random seed"
                 className="px-3 py-2 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white font-mono rounded transition-colors"
               >
                 🎲
@@ -4258,21 +4258,21 @@ function CreateWorldScreen({
             </div>
             <p className="text-stone-500 text-xs mt-1 font-mono">
               {seedStr.trim() === ""
-                ? "Se generará una semilla aleatoria: cada mundo es único"
-                : "La misma semilla siempre genera el mismo mundo"}
+                ? "A random seed will be generated: each world is unique"
+                : "The same seed always generates the same world"}
             </p>
           </div>
 
           {/* Mode selection */}
           <div>
-            <label className="block text-white font-mono text-sm mb-3">Modo de juego</label>
+            <label className="block text-white font-mono text-sm mb-3">Game mode</label>
             <div className="grid grid-cols-2 gap-4">
               <ModeCard
                 selected={mode === "creative"}
                 onClick={() => setMode("creative")}
-                title="Creativo"
+                title="Creative"
                 icon="🏗️"
-                description="Vuelo libre, bloques infinitos, sin daño"
+                description="Free flight, infinite blocks, no damage"
                 color="yellow"
               />
               <ModeCard
@@ -4280,7 +4280,7 @@ function CreateWorldScreen({
                 onClick={() => setMode("survival")}
                 title="Survival"
                 icon="⚔️"
-                description="Sobrevive, hambre, daño por caída, ahogo"
+                description="Survive, hunger, fall damage, drowning"
                 color="red"
               />
             </div>
@@ -4293,13 +4293,13 @@ function CreateWorldScreen({
             onClick={onCancel}
             className="px-6 py-3 bg-stone-700 hover:bg-stone-600 border-2 border-stone-500 text-white font-mono font-bold rounded transition-colors"
           >
-            Cancelar
+            Cancel
           </button>
           <button
             onClick={handleCreate}
             className="px-8 py-3 bg-green-700 hover:bg-green-600 border-2 border-green-500 text-white font-mono font-bold rounded transition-colors shadow-lg"
           >
-            Crear Mundo
+            Create World
           </button>
         </div>
       </div>
