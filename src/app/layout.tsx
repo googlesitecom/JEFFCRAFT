@@ -14,22 +14,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MINECRAFT JAVA EDITION",
-  description: "Minecraft Java Edition - voxel sandbox built with Next.js, Three.js, and TypeScript.",
-  keywords: ["Minecraft", "Java Edition", "voxel", "sandbox", "Three.js", "Next.js", "TypeScript"],
+  title: "WORLDBIND JAVA",
+  description: "Worldbind Java - voxel sandbox built with Next.js, Three.js, and TypeScript.",
+  keywords: ["Worldbind", "Java", "voxel", "sandbox", "Three.js", "Next.js", "TypeScript"],
   authors: [{ name: "JEFFCRAFT" }],
   icons: {
     icon: "/logo.svg",
   },
   openGraph: {
-    title: "MINECRAFT JAVA EDITION",
+    title: "WORLDBIND JAVA",
     description: "Voxel sandbox built with Next.js + Three.js",
-    siteName: "Minecraft Java Edition",
+    siteName: "Worldbind Java",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "MINECRAFT JAVA EDITION",
+    title: "WORLDBIND JAVA",
     description: "Voxel sandbox built with Next.js + Three.js",
   },
 };

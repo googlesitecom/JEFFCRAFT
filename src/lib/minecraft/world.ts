@@ -454,6 +454,25 @@ export class World {
         }
       }
 
+      // 2b. Infinite water source: if this is a flowing water block (not lava)
+      //     and it has 2+ adjacent source blocks (level 0) horizontally, and
+      //     there's a solid/fluid block below, convert it to a source block.
+      //     This makes 2x2 pools infinite like Minecraft.
+      if (type === BlockType.Water && myLevel > 0) {
+        let sourceCount = 0;
+        for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]] as const) {
+          if (this.getBlockIfLoaded(x + dx, y, z + dz) === BlockType.Water) {
+            if (this.getFluidLevel(x + dx, y, z + dz) === 0) sourceCount++;
+          }
+        }
+        // Also need a solid block or water below to become a source
+        const belowType = this.getBlockIfLoaded(x, y - 1, z);
+        const hasSupport = belowType !== BlockType.Air && belowType !== BlockType.Water;
+        if (sourceCount >= 2 && hasSupport) {
+          this.setFluidLevel(x, y, z, 0); // become a source
+        }
+      }
+
       // 3. Remove fluid if it has no support (source above or adjacent source)
       //    This prevents floating fluid blocks. Check if there's a same-type
       //    fluid above OR a source-level fluid adjacent. If not, and this is a

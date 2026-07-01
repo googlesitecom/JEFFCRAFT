@@ -1672,6 +1672,44 @@ export default function MinecraftGame() {
           return;
         }
       }
+      // 1b. Bucket logic — place water source, pick up water
+      if (selected && (selected.id === ItemType.WaterBucket || selected.id === ItemType.Bucket)) {
+        const hit = player.raycast(6);
+        if (hit.hit && hit.block && hit.normal) {
+          const tx = hit.block.x + hit.normal.x;
+          const ty = hit.block.y + hit.normal.y;
+          const tz = hit.block.z + hit.normal.z;
+          if (ty >= 0 && ty < WORLD_HEIGHT) {
+            if (selected.id === ItemType.WaterBucket) {
+              // Place water source block (level 0 = infinite source)
+              world.setBlock(tx, ty, tz, BlockType.Water);
+              world.setFluidLevel(tx, ty, tz, 0); // mark as source
+              world.queueFluidUpdate(tx, ty, tz, BlockType.Water);
+              // Replace water bucket with empty bucket
+              inventoryRef.current.removeSelected(1);
+              inventoryRef.current.addItem(ItemType.Bucket, 1);
+              setInventoryVersion((v) => v + 1);
+              sound.blockSound(BlockType.Water, "place");
+              rebuildChunkAt(tx, tz);
+              return;
+            } else {
+              // Empty bucket — pick up water source block (click on water)
+              const targetBlock = world.getBlock(hit.block.x, hit.block.y, hit.block.z);
+              if (targetBlock === BlockType.Water && world.getFluidLevel(hit.block.x, hit.block.y, hit.block.z) === 0) {
+                // Only pick up source blocks (level 0)
+                world.setBlock(hit.block.x, hit.block.y, hit.block.z, BlockType.Air);
+                world.clearFluidLevel(hit.block.x, hit.block.y, hit.block.z);
+                inventoryRef.current.removeSelected(1);
+                inventoryRef.current.addItem(ItemType.WaterBucket, 1);
+                setInventoryVersion((v) => v + 1);
+                sound.blockSound(BlockType.Water, "break");
+                rebuildChunkAt(hit.block.x, hit.block.z);
+                return;
+              }
+            }
+          }
+        }
+      }
       // 2. Check if we're right-clicking a crafting table or furnace
       const hit = player.raycast(6);
       if (hit.hit && hit.block) {
@@ -1915,6 +1953,16 @@ export default function MinecraftGame() {
     let waterAnimTime = 0;
     let rippleSpawnTimer = 0; // throttle for water ripples when player is in water
     let gravityBlockTimer = 0; // throttle for sand/gravel falling
+    // Falling block animations (sand, gravel) — mesh falls visually, then lands
+    const fallingBlocks: Array<{
+      mesh: THREE.Mesh;
+      velocity: number;
+      blockType: BlockType;
+      x: number;
+      z: number;
+      startY: number;
+      landed: boolean;
+    }> = [];
 
     const animate = () => {
       rafId = requestAnimationFrame(animate);
@@ -2416,11 +2464,14 @@ export default function MinecraftGame() {
         if (world.processFluidFlow(100)) { for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const cx = Math.floor((pX + dx * CHUNK_SIZE) / CHUNK_SIZE), cz = Math.floor((pZ + dz * CHUNK_SIZE) / CHUNK_SIZE); if (chunkMeshes.has(`${cx},${cz}`)) buildChunk(cx, cz); } }
       }
 
-      // === GRAVITY BLOCKS (sand, gravel falling) ===
-      // Scan a box around the player every 0.3s for gravity-affected blocks
-      // with air/water below them, and move them down one cell.
+      // === GRAVITY BLOCKS (sand, gravel falling) — animated fall ===
+      // Instead of teleporting the block down, we:
+      //   1. Remove the block from the world
+      //   2. Spawn a falling mesh (a small cube with the block texture)
+      //   3. The mesh falls with gravity until it hits a solid block
+      //   4. The block is placed back at the landing position
       gravityBlockTimer += dt;
-      if (gravityBlockTimer >= 0.3) {
+      if (gravityBlockTimer >= 0.2) {
         gravityBlockTimer = 0;
         const pX = Math.floor(player.position.x), pY = Math.floor(player.position.y), pZ = Math.floor(player.position.z);
         let anyFell = false;
@@ -2435,8 +2486,35 @@ export default function MinecraftGame() {
           if (by <= 0) continue;
           const below = world.getBlockIfLoaded(bx, by - 1, bz);
           if (below === BlockType.Air || below === BlockType.Water) {
+            // Remove the block from the world
             world.setBlock(bx, by, bz, BlockType.Air);
-            world.setBlock(bx, by - 1, bz, b);
+            // Create a falling block mesh
+            const tile = atlas.tiles[def.textures.side] || atlas.tiles[def.textures.top];
+            const fallGeo = new THREE.BoxGeometry(0.9, 0.9, 0.9);
+            const fallMat = new THREE.MeshLambertMaterial({ map: atlas.texture });
+            if (tile) {
+              const uvs = fallGeo.attributes.uv;
+              for (let f = 0; f < 6; f++) {
+                const base = f * 4;
+                uvs.setXY(base + 0, tile.u0, tile.v1);
+                uvs.setXY(base + 1, tile.u1, tile.v1);
+                uvs.setXY(base + 2, tile.u0, tile.v0);
+                uvs.setXY(base + 3, tile.u1, tile.v0);
+              }
+              uvs.needsUpdate = true;
+            }
+            const fallMesh = new THREE.Mesh(fallGeo, fallMat);
+            fallMesh.position.set(bx + 0.5, by + 0.5, bz + 0.5);
+            scene.add(fallMesh);
+            fallingBlocks.push({
+              mesh: fallMesh,
+              velocity: 0,
+              blockType: b,
+              x: bx,
+              z: bz,
+              startY: by,
+              landed: false,
+            });
             anyFell = true;
           }
         }
@@ -2446,6 +2524,44 @@ export default function MinecraftGame() {
             const cx = Math.floor((pX + dx * CHUNK_SIZE) / CHUNK_SIZE), cz = Math.floor((pZ + dz * CHUNK_SIZE) / CHUNK_SIZE);
             if (chunkMeshes.has(`${cx},${cz}`)) buildChunk(cx, cz);
           }
+        }
+      }
+
+      // === Update falling block animations ===
+      for (let i = fallingBlocks.length - 1; i >= 0; i--) {
+        const fb = fallingBlocks[i];
+        // Apply gravity
+        fb.velocity += 20 * dt; // gravity acceleration
+        fb.mesh.position.y -= fb.velocity * dt;
+        // Check if we've fallen one full block
+        const fallDistance = fb.startY + 0.5 - fb.mesh.position.y;
+        if (fallDistance >= 1.0) {
+          // Check the block at the landing position
+          const landY = fb.startY - Math.floor(fallDistance);
+          const targetBlock = world.getBlockIfLoaded(fb.x, landY, fb.z);
+          if (targetBlock === BlockType.Air || targetBlock === BlockType.Water) {
+            // Keep falling — update startY to the new position
+            fb.startY = landY;
+          } else {
+            // Landed — place the block at the position above the obstacle
+            const placeY = landY + 1;
+            world.setBlock(fb.x, placeY, fb.z, fb.blockType);
+            // Rebuild chunk
+            const cx = Math.floor(fb.x / CHUNK_SIZE), cz = Math.floor(fb.z / CHUNK_SIZE);
+            if (chunkMeshes.has(`${cx},${cz}`)) buildChunk(cx, cz);
+            // Clean up
+            scene.remove(fb.mesh);
+            fb.mesh.geometry.dispose();
+            (fb.mesh.material as THREE.Material).dispose();
+            fallingBlocks.splice(i, 1);
+          }
+        }
+        // Safety: remove if fell too far (into void)
+        if (fb.mesh.position.y < -64) {
+          scene.remove(fb.mesh);
+          fb.mesh.geometry.dispose();
+          (fb.mesh.material as THREE.Material).dispose();
+          fallingBlocks.splice(i, 1);
         }
       }
 
@@ -2955,41 +3071,69 @@ export default function MinecraftGame() {
         </div>
       )}
 
-      {/* HUD — Minecraft F3-style debug overlay */}
-      <div
-        className="absolute top-1 left-1 z-20 text-white font-mono text-[11px] leading-tight px-2 py-1.5"
-        style={{
-          backgroundColor: "rgba(0,0,0,0.55)",
-          borderTop: "1px solid rgba(80,80,80,0.6)",
-          borderLeft: "1px solid rgba(80,80,80,0.6)",
-          borderBottom: "1px solid rgba(0,0,0,0.8)",
-          borderRight: "1px solid rgba(0,0,0,0.8)",
-          imageRendering: "pixelated",
+      {/* HUD — Minecraft F3-style: each line is its own separate box */}
+      <div className="absolute top-1 left-1 z-20 flex flex-col gap-0.5">
+        {/* World name */}
+        <div className="font-mono text-[11px] leading-tight px-1.5 py-0.5 text-yellow-300 font-bold" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
           textShadow: "1px 1px 0 #000",
-        }}
-      >
-        <div className="font-bold text-yellow-300">{currentWorld?.name || "World"}</div>
-        <div>FPS: {stats.fps}</div>
-        <div>X: {stats.x} Y: {stats.y} Z: {stats.z}</div>
-        <div>Chunks: {stats.chunks}</div>
-        <div className="text-white/60 text-[10px]">Seed: {currentWorld?.seed ?? 0}</div>
-        <div className="mt-1 text-white/70">
-          {mode === "survival"
-            ? (() => {
-                const stack = inventoryRef.current.slots[selectedSlot];
-                if (!stack) return "(empty)";
-                if (stack.id < 100) return BLOCKS[stack.id as BlockType]?.name ?? "Unknown";
-                return ITEMS[stack.id as ItemType]?.name ?? "Unknown";
-              })()
-            : (inventoryRef.current.slots[selectedSlot]
-                ? (inventoryRef.current.slots[selectedSlot]!.id < 100
-                    ? BLOCKS[inventoryRef.current.slots[selectedSlot]!.id as BlockType]?.name ?? "Unknown"
-                    : ITEMS[inventoryRef.current.slots[selectedSlot]!.id as ItemType]?.name ?? "Unknown")
-                : "(empty)")
-        }
+        }}>
+          {currentWorld?.name || "World"}
         </div>
-        <div className="mt-1 text-yellow-300/80">{mode === "creative" ? "Creative" : "Survival"}</div>
-        <div className="mt-1 text-white/50 text-[10px]">E: Inventory</div>
+        {/* FPS */}
+        <div className="font-mono text-[11px] leading-tight px-1.5 py-0.5 text-white" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          FPS: {stats.fps}
+        </div>
+        {/* XYZ coordinates */}
+        <div className="font-mono text-[11px] leading-tight px-1.5 py-0.5 text-white" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          X: {stats.x}  Y: {stats.y}  Z: {stats.z}
+        </div>
+        {/* Chunks */}
+        <div className="font-mono text-[11px] leading-tight px-1.5 py-0.5 text-white" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          Chunks: {stats.chunks}
+        </div>
+        {/* Seed */}
+        <div className="font-mono text-[10px] leading-tight px-1.5 py-0.5 text-white/70" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          Seed: {currentWorld?.seed ?? 0}
+        </div>
+        {/* Held item name */}
+        <div className="font-mono text-[11px] leading-tight px-1.5 py-0.5 text-white/85" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          {(() => {
+            const stack = inventoryRef.current.slots[selectedSlot];
+            if (!stack) return "(empty)";
+            if (stack.id < 100) return BLOCKS[stack.id as BlockType]?.name ?? "Unknown";
+            return ITEMS[stack.id as ItemType]?.name ?? "Unknown";
+          })()}
+        </div>
+        {/* Game mode */}
+        <div className="font-mono text-[11px] leading-tight px-1.5 py-0.5 text-yellow-300/90" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          {mode === "creative" ? "Creative" : "Survival"}
+        </div>
+        {/* Inventory hint */}
+        <div className="font-mono text-[10px] leading-tight px-1.5 py-0.5 text-white/50" style={{
+          backgroundColor: "rgba(0,0,0,0.6)",
+          textShadow: "1px 1px 0 #000",
+        }}>
+          E: Inventory
+        </div>
       </div>
 
       {/* Held item name (5s timer) */}
@@ -3911,7 +4055,7 @@ function MainMenu({
     <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
       {/* Panoramic background with slow horizontal pan */}
       <div className="absolute inset-0" style={{
-        backgroundImage: `url(/IMG_2447.jpeg)`,
+        backgroundImage: `url(/IMG_2455.jpeg)`,
         backgroundSize: "cover",
         backgroundPosition: `${panOffset}% center`,
         opacity: 0.95,
@@ -4005,9 +4149,9 @@ function MainMenu({
           </div>
         )}
 
-        {/* Splash text — positioned at right side of logo, blended with title image */}
+        {/* Splash text — positioned higher up, at right side of logo */}
         <span
-          className="absolute top-[30%] left-[58%] text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
+          className="absolute top-[18%] left-[58%] text-yellow-300 font-bold text-base sm:text-2xl font-mono pointer-events-none text-center"
           style={{
             transform: `rotate(-12deg) scale(${1 + Math.sin(Date.now() / 400) * 0.08})`,
             textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 12px rgba(255,220,0,0.5)",
@@ -4155,7 +4299,7 @@ function MultiplayerScreen({
     <div className="relative w-full h-screen overflow-hidden select-none" style={{ backgroundColor: "#0a0a12" }}>
       {/* Background */}
       <div className="absolute inset-0" style={{
-        backgroundImage: `url(/IMG_2447.jpeg)`,
+        backgroundImage: `url(/IMG_2455.jpeg)`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         opacity: 0.55,
