@@ -20,6 +20,7 @@ export const metadata: Metadata = {
   authors: [{ name: "Axion" }],
   icons: {
     icon: "/axion-logo.png",
+    shortcut: "/axion-logo.png",
     apple: "/axion-logo.png",
   },
   openGraph: {
