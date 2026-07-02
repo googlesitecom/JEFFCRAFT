@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Inventory, ItemStack, HOTBAR_SIZE } from "@/lib/minecraft/inventory";
 import { BlockType, BLOCKS } from "@/lib/minecraft/blocks";
-import { ItemType, ITEMS, isItem } from "@/lib/minecraft/items";
+import { ItemType, ITEMS, isItem, getMaxStack } from "@/lib/minecraft/items";
 import { matchRecipe, getAvailableRecipes, RECIPES, Recipe } from "@/lib/minecraft/recipes";
 import { getAllBlockIds } from "@/lib/minecraft/blocks";
 import { getAllItemIds } from "@/lib/minecraft/items";
@@ -389,7 +389,9 @@ export function InventoryUI({
 
   // Click on a creative item: give a stack to the player
   const handleCreativeItemClick = (id: number) => {
-    inventory.addItem(id, 64);
+    // Respect maxStack — non-stackable items (tools, armor, buckets) get 1, not 64
+    const max = id >= 100 ? (ITEMS[id as ItemType]?.maxStack ?? 64) : 64;
+    inventory.addItem(id, max);
     onInventoryChange();
     refresh();
   };

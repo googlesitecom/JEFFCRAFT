@@ -106,6 +106,7 @@ function shouldDrawFace(block: BlockType, neighbor: BlockType): boolean {
   if (neighbor === block) {
     if (block === BlockType.Water) return false;
     if (block === BlockType.Glass) return false; // don't draw glass-glass faces
+    if (block === BlockType.NetherPortal) return true; // portal blocks show internal faces
     if (block === BlockType.Leaves) return true;
     return false;
   }
@@ -256,7 +257,7 @@ export function buildChunkGeometry(
         // Choose target buffer
         let target: FaceData;
         if (block === BlockType.Water) target = transparent;
-        else if (block === BlockType.Glass) target = glass;
+        else if (block === BlockType.Glass || block === BlockType.NetherPortal) target = glass;
         else if (getRenderLayer(block) === "cutout") target = cutout;
         else target = opaque;
 

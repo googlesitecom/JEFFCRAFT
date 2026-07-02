@@ -9,7 +9,7 @@ import { buildTextureCanvases, buildIconDataURLs, loadRealTextures } from "@/lib
 import { getSharedAtlas, resetAtlas } from "@/lib/minecraft/atlas";
 import { BlockType, BLOCKS, HOTBAR_BLOCKS } from "@/lib/minecraft/blocks";
 import { ItemType, ITEMS, isItem, getDisplayName } from "@/lib/minecraft/items";
-import { Inventory } from "@/lib/minecraft/inventory";
+import { Inventory, ItemStack } from "@/lib/minecraft/inventory";
 import { InventoryUI } from "./InventoryUI";
 import { FurnaceUI } from "./FurnaceUI";
 import { AnimalManager, Animal } from "@/lib/minecraft/animals";
@@ -136,6 +136,9 @@ export default function MinecraftGame() {
   const [showCraftingTable, setShowCraftingTable] = useState(false);
   const [showFurnace, setShowFurnace] = useState(false);
   const [showChest, setShowChest] = useState(false);
+  // Chest storage: Map of "x,y,z" → 27-slot array (separate from player inventory)
+  const chestStorageRef = useRef<Map<string, (ItemStack | null)[]>>(new Map());
+  const currentChestPosRef = useRef<{ x: number; y: number; z: number } | null>(null);
   // Furnace state persists across UI open/close (so smelting continues when closed)
   const furnaceStateRef = useRef<{
     input: { id: number; count: number } | null;
@@ -750,6 +753,13 @@ export default function MinecraftGame() {
       transparentMaterial.needsUpdate = true;
       glassMaterial.map = newAtlas.texture;
       glassMaterial.needsUpdate = true;
+      // === Fix: update HandView's atlas reference so items in hand use the new texture ===
+      // Without this, the hand holds a stale reference to the old (disposed) atlas,
+      // and items (tools, food, materials) don't render — only blocks (which happen
+      // to still work because their material was created with the old atlas texture
+      // which gets replaced on the material but not on the hand's internal meshes).
+      handView.atlas = newAtlas;
+      handView.currentItem = null; // force rebuild on next updateItem() call
       // Update icon URLs for hotbar
       const newIcons = buildIconDataURLs(canvases);
       iconUrlsRef.current = newIcons;
@@ -1731,6 +1741,12 @@ export default function MinecraftGame() {
         }
         if (block === BlockType.Chest) {
           document.exitPointerLock();
+          // Track which chest is open and initialize its storage if needed
+          const ckey = `${hit.block.x},${hit.block.y},${hit.block.z}`;
+          currentChestPosRef.current = { x: hit.block.x, y: hit.block.y, z: hit.block.z };
+          if (!chestStorageRef.current.has(ckey)) {
+            chestStorageRef.current.set(ckey, new Array(27).fill(null));
+          }
           setShowChest(true);
           return;
         }
@@ -2432,14 +2448,37 @@ export default function MinecraftGame() {
           world.dimension = "nether"; world.clearAllChunks();
           for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
           chunkMeshes.clear();
-          player.position.set(Math.floor(player.position.x / 8) + 0.5, 40, Math.floor(player.position.z / 8) + 0.5);
-          setDragonNotification("Teletransportado al Nether"); setTimeout(() => setDragonNotification(""), 3000);
+          const netherX = Math.floor(player.position.x / 8) + 0.5;
+          const netherZ = Math.floor(player.position.z / 8) + 0.5;
+          player.position.set(netherX, 40, netherZ);
+          // === Generate a return portal in the Nether ===
+          // Build a 4×5 obsidian frame and light the portal at the player's nether position
+          const nx = Math.floor(netherX), nz = Math.floor(netherZ);
+          for (let dx = -1; dx <= 2; dx++) {
+            for (let dy = 0; dy <= 4; dy++) {
+              const isFrame = (dx === -1 || dx === 2 || dy === 0 || dy === 4);
+              if (isFrame) {
+                world.setBlock(nx + dx, 38 + dy, nz, BlockType.Obsidian);
+              } else {
+                // Clear interior
+                world.setBlock(nx + dx, 38 + dy, nz, BlockType.Air);
+              }
+            }
+          }
+          // Light the portal (place NetherPortal blocks in the interior)
+          for (let dy = 1; dy <= 3; dy++) {
+            world.setBlock(nx, 38 + dy, nz, BlockType.NetherPortal);
+            world.setBlock(nx + 1, 38 + dy, nz, BlockType.NetherPortal);
+          }
+          // Place player in front of the portal
+          player.position.set(nx + 0.5, 39, nz + 1.5);
+          setDragonNotification("Teleported to Nether"); setTimeout(() => setDragonNotification(""), 3000);
         } else if (world.dimension === "nether") {
           world.dimension = "overworld"; world.clearAllChunks();
           for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
           chunkMeshes.clear();
           const r = overworldReturnPos.current; if (r) player.position.set(r.x, r.y, r.z);
-          setDragonNotification("Volviendo al Overworld"); setTimeout(() => setDragonNotification(""), 3000);
+          setDragonNotification("Returning to Overworld"); setTimeout(() => setDragonNotification(""), 3000);
         }
       }
       // End Portal teleportation
@@ -3810,11 +3849,17 @@ export default function MinecraftGame() {
         />
       )}
 
-      {/* Chest UI — simple storage that shares inventory slots 9-35 */}
-      {showChest && (
+      {/* Chest UI — separate chest storage + player inventory */}
+      {showChest && currentChestPosRef.current && (
         <ChestUI
           inventory={inventoryRef.current}
           iconUrls={iconUrls}
+          chestStorage={chestStorageRef.current.get(`${currentChestPosRef.current.x},${currentChestPosRef.current.y},${currentChestPosRef.current.z}`) || new Array(27).fill(null)}
+          onChestChange={(newStorage) => {
+            const ckey = `${currentChestPosRef.current!.x},${currentChestPosRef.current!.y},${currentChestPosRef.current!.z}`;
+            chestStorageRef.current.set(ckey, newStorage);
+            setInventoryVersion((v) => v + 1);
+          }}
           onClose={() => setShowChest(false)}
           onInventoryChange={() => setInventoryVersion((v) => v + 1)}
         />
@@ -3824,9 +3869,11 @@ export default function MinecraftGame() {
 }
 
 // =============== CHEST UI ===============
-function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
+function ChestUI({ inventory, iconUrls, chestStorage, onChestChange, onClose, onInventoryChange }: {
   inventory: Inventory;
   iconUrls: Record<string, string>;
+  chestStorage: (ItemStack | null)[];
+  onChestChange: (storage: (ItemStack | null)[]) => void;
   onClose: () => void;
   onInventoryChange: () => void;
 }) {
@@ -3850,7 +3897,44 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
     return ITEMS[id as ItemType]?.name ?? "Unknown";
   };
 
-  const handleSlotClick = (slot: number) => {
+  // Click on a chest slot (0-26)
+  const handleChestSlotClick = (slot: number) => {
+    const current = chestStorage[slot];
+    if (heldItem === null) {
+      if (current) {
+        setHeldItem({ id: current.id, count: current.count });
+        const newStorage = [...chestStorage];
+        newStorage[slot] = null;
+        onChestChange(newStorage);
+        refresh();
+      }
+    } else {
+      if (!current) {
+        const newStorage = [...chestStorage];
+        newStorage[slot] = { id: heldItem.id, count: heldItem.count };
+        onChestChange(newStorage);
+        setHeldItem(null);
+      } else if (current.id === heldItem.id) {
+        const max = current.id < 100 ? 64 : (ITEMS[current.id as ItemType]?.maxStack ?? 64);
+        const space = max - current.count;
+        const add = Math.min(space, heldItem.count);
+        const newStorage = [...chestStorage];
+        newStorage[slot] = { id: current.id, count: current.count + add };
+        onChestChange(newStorage);
+        const remaining = heldItem.count - add;
+        setHeldItem(remaining > 0 ? { id: heldItem.id, count: remaining } : null);
+      } else {
+        const newStorage = [...chestStorage];
+        newStorage[slot] = { id: heldItem.id, count: heldItem.count };
+        onChestChange(newStorage);
+        setHeldItem({ id: current.id, count: current.count });
+      }
+      refresh();
+    }
+  };
+
+  // Click on a player inventory slot (0-35)
+  const handlePlayerSlotClick = (slot: number) => {
     const current = inventory.slots[slot];
     if (heldItem === null) {
       if (current) {
@@ -3879,14 +3963,48 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
     }
   };
 
+  const renderSlot = (stack: ItemStack | null, onClick: () => void, key: string) => (
+    <div
+      key={key}
+      onClick={(e) => { e.preventDefault(); onClick(); }}
+      onTouchEnd={(e) => { e.preventDefault(); onClick(); }}
+      className="relative flex items-center justify-center cursor-pointer hover:brightness-110"
+      style={{
+        width: "48px", height: "48px",
+        backgroundColor: "#8b8b8b",
+        borderTop: "2px solid #373737",
+        borderLeft: "2px solid #373737",
+        borderBottom: "2px solid #ffffff",
+        borderRight: "2px solid #ffffff",
+        imageRendering: "pixelated",
+      }}
+    >
+      {stack && (() => {
+        const icon = getIcon(stack.id);
+        return (
+          <>
+            {icon && (
+              <img src={icon} alt={getName(stack.id)} style={{ width: "36px", height: "36px", imageRendering: "pixelated", filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))" }} draggable={false} />
+            )}
+            {stack.count > 1 && (
+              <span className="absolute bottom-0 right-1 text-sm font-mono font-bold" style={{ color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}>
+                {stack.count}
+              </span>
+            )}
+          </>
+        );
+      })()}
+    </div>
+  );
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ backgroundColor: "rgba(20,20,20,0.85)" }}
+      style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="max-w-2xl w-full mx-4 p-5"
+        className="relative p-4 max-h-[95vh] overflow-y-auto"
         style={{
           backgroundColor: "#c6c6c6",
           imageRendering: "pixelated",
@@ -3898,123 +4016,68 @@ function ChestUI({ inventory, iconUrls, onClose, onInventoryChange }: {
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-2xl font-black text-[#3f3f3f] font-mono" style={{ textShadow: "2px 2px 0 #fff" }}>Chest</h2>
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 text-white text-sm font-mono font-bold"
-            style={{
-              backgroundColor: "#8a3a3a",
-              borderTop: "2px solid #aa5a5a",
-              borderLeft: "2px solid #aa5a5a",
-              borderBottom: "2px solid #6a1a1a",
-              borderRight: "2px solid #6a1a1a",
-              imageRendering: "pixelated",
-              textShadow: "1px 1px 0 #000",
-            }}
-          >
-            ✕ Close
-          </button>
+        {/* Close button */}
+        <button
+          onClick={onClose}
+          onTouchEnd={(e) => { e.preventDefault(); onClose(); }}
+          className="absolute top-1 right-1 w-6 h-6 flex items-center justify-center text-white text-xs font-bold z-30"
+          style={{
+            backgroundColor: "#8a3a3a",
+            borderTop: "2px solid #aa5a5a", borderLeft: "2px solid #aa5a5a",
+            borderBottom: "2px solid #4a1a1a", borderRight: "2px solid #4a1a1a",
+            imageRendering: "pixelated", cursor: "pointer",
+          }}
+        >✕</button>
+
+        {/* Chest storage (27 slots = 3 rows × 9 cols) */}
+        <div className="grid grid-cols-9 gap-0.5 p-1 mb-2" style={{
+          backgroundColor: "#373737",
+          borderTop: "2px solid #1a1a1a", borderLeft: "2px solid #1a1a1a",
+          borderBottom: "2px solid #c6c6c6", borderRight: "2px solid #c6c6c6",
+          imageRendering: "pixelated",
+        }}>
+          {Array.from({ length: 27 }).map((_, i) => renderSlot(chestStorage[i], () => handleChestSlotClick(i), `chest-${i}`))}
         </div>
-        {/* Chest storage (27 slots = slots 9-35 of inventory) */}
-        <div className="grid grid-cols-9 gap-1 p-2 mb-3" style={{ backgroundColor: "#8b8b8b", border: "3px solid #555", imageRendering: "pixelated" }}>
+
+        {/* Player main inventory (27 slots = 3 rows × 9 cols) */}
+        <div className="grid grid-cols-9 gap-0.5 p-1 mb-2" style={{
+          backgroundColor: "#373737",
+          borderTop: "2px solid #1a1a1a", borderLeft: "2px solid #1a1a1a",
+          borderBottom: "2px solid #c6c6c6", borderRight: "2px solid #c6c6c6",
+          imageRendering: "pixelated",
+        }}>
           {Array.from({ length: 27 }).map((_, i) => {
-            const slot = i + 9; // main inventory slots
-            const stack = inventory.slots[slot];
-            return (
-              <div
-                key={i}
-                onClick={() => handleSlotClick(slot)}
-                className="relative flex items-center justify-center cursor-pointer hover:brightness-110"
-                style={{
-                  width: "52px",
-                  height: "52px",
-                  backgroundColor: "#8b8b8b",
-                  borderTop: "2px solid #aaaaaa",
-                  borderLeft: "2px solid #aaaaaa",
-                  borderBottom: "2px solid #555555",
-                  borderRight: "2px solid #555555",
-                  imageRendering: "pixelated",
-                }}
-              >
-                {stack && (() => {
-                  const icon = getIcon(stack.id);
-                  return (
-                    <>
-                      {icon && (
-                        <img
-                          src={icon}
-                          alt={getName(stack.id)}
-                          style={{ width: "36px", height: "36px", imageRendering: "pixelated" }}
-                          draggable={false}
-                        />
-                      )}
-                      {stack.count > 1 && (
-                        <span
-                          className="absolute bottom-0 right-1 text-sm font-mono font-bold"
-                          style={{ color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}
-                        >
-                          {stack.count}
-                        </span>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            );
+            const slot = i + 9;
+            return renderSlot(inventory.slots[slot], () => handlePlayerSlotClick(slot), `inv-${i}`);
           })}
         </div>
-        {/* Player hotbar */}
-        <div className="grid grid-cols-9 gap-1 p-2" style={{ backgroundColor: "#8b8b8b", border: "3px solid #555", imageRendering: "pixelated" }}>
-          {Array.from({ length: 9 }).map((_, i) => {
-            const stack = inventory.slots[i];
-            return (
-              <div
-                key={i}
-                onClick={() => handleSlotClick(i)}
-                className="relative flex items-center justify-center cursor-pointer hover:brightness-110"
-                style={{
-                  width: "52px",
-                  height: "52px",
-                  backgroundColor: "#8b8b8b",
-                  borderTop: "2px solid #aaaaaa",
-                  borderLeft: "2px solid #aaaaaa",
-                  borderBottom: "2px solid #555555",
-                  borderRight: "2px solid #555555",
-                  imageRendering: "pixelated",
-                }}
-              >
-                {stack && (() => {
-                  const icon = getIcon(stack.id);
-                  return (
-                    <>
-                      {icon && (
-                        <img
-                          src={icon}
-                          alt={getName(stack.id)}
-                          style={{ width: "36px", height: "36px", imageRendering: "pixelated" }}
-                          draggable={false}
-                        />
-                      )}
-                      {stack.count > 1 && (
-                        <span
-                          className="absolute bottom-0 right-1 text-sm font-mono font-bold"
-                          style={{ color: "#fff", textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}
-                        >
-                          {stack.count}
-                        </span>
-                      )}
-                    </>
-                  );
-                })()}
-              </div>
-            );
-          })}
+
+        {/* Player hotbar (9 slots) */}
+        <div className="grid grid-cols-9 gap-0.5 p-1" style={{
+          backgroundColor: "#373737",
+          borderTop: "2px solid #1a1a1a", borderLeft: "2px solid #1a1a1a",
+          borderBottom: "2px solid #c6c6c6", borderRight: "2px solid #c6c6c6",
+          imageRendering: "pixelated",
+        }}>
+          {Array.from({ length: 9 }).map((_, i) => renderSlot(inventory.slots[i], () => handlePlayerSlotClick(i), `hot-${i}`))}
         </div>
-        {/* Held item */}
+
+        {/* Held item following cursor */}
         {heldItem && (
-          <div className="mt-2 text-center text-sm font-mono text-[#3f3f3f]">
-            Holding: {getName(heldItem.id)} ×{heldItem.count}
+          <div className="fixed pointer-events-none z-[60]" style={{ left: 0, top: 0, transform: "none" }}>
+            <div className="w-12 h-12 flex items-center justify-center relative">
+              {(() => {
+                const icon = getIcon(heldItem.id);
+                return icon ? (
+                  <img src={icon} alt="" className="w-9 h-9 relative z-10" style={{ imageRendering: "pixelated", filter: "drop-shadow(1px 1px 0 rgba(0,0,0,0.55))" }} draggable={false} />
+                ) : null;
+              })()}
+              {heldItem.count > 1 && (
+                <span className="absolute bottom-0 right-1 text-white text-xs font-mono font-bold z-20" style={{ textShadow: "2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000" }}>
+                  {heldItem.count}
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>
