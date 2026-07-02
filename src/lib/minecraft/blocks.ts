@@ -45,13 +45,14 @@ export enum BlockType {
   Sign = 47,
   Anvil = 48,
   BrickSlab = 49,
-  WoodSlab = 50,
-  CobblestoneStairs = 51,
-  WoodStairs = 52,
-  BrickStairs = 53,
-  StoneStairs = 54,
+  // Stairs/Slabs use IDs 60+ to avoid collision with Lava(50), EndPortalFrame(51), EndPortal(52)
+  WoodSlab = 60,
+  CobblestoneStairs = 61,
+  WoodStairs = 62,
+  BrickStairs = 63,
+  StoneStairs = 64,
   // Combat items (as blocks for simplicity, rendered as items)
-  CraftingTable2 = 55, // placeholder unused
+  CraftingTable2 = 65, // placeholder unused
 }
 
 export type RenderLayer = "opaque" | "cutout" | "translucent";

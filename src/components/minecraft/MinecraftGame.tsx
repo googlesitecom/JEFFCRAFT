@@ -137,6 +137,18 @@ export default function MinecraftGame() {
   const [showCraftingTable, setShowCraftingTable] = useState(false);
   const [showFurnace, setShowFurnace] = useState(false);
   const [showChest, setShowChest] = useState(false);
+  // Refs for show* states — needed because the game loop's useEffect captures
+  // stale values of these useState variables. The refs are always current.
+  const showInventoryRef = useRef(false);
+  const showCraftingTableRef = useRef(false);
+  const showFurnaceRef = useRef(false);
+  const showChestRef = useRef(false);
+  const isDeadRef = useRef(false);
+  useEffect(() => { showInventoryRef.current = showInventory; }, [showInventory]);
+  useEffect(() => { showCraftingTableRef.current = showCraftingTable; }, [showCraftingTable]);
+  useEffect(() => { showFurnaceRef.current = showFurnace; }, [showFurnace]);
+  useEffect(() => { showChestRef.current = showChest; }, [showChest]);
+  useEffect(() => { isDeadRef.current = isDead; }, [isDead]);
   // Chest storage: Map of "x,y,z" → 27-slot array (separate from player inventory)
   const chestStorageRef = useRef<Map<string, (ItemStack | null)[]>>(new Map());
   const currentChestPosRef = useRef<{ x: number; y: number; z: number } | null>(null);
@@ -2090,8 +2102,8 @@ export default function MinecraftGame() {
       // IMPORTANT: skip gameplay input when the pause menu is open (pointer
       // unlocked but not dead and no overlay) — that's when the virtual mouse
       // is active and RT should NOT mine blocks.
-      const pauseMenuOpen = screen === "playing" && pauseMenuVisibleRef.current && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest;
-      if (gp && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest && !pauseMenuOpen) {
+      const pauseMenuOpen = screen === "playing" && pauseMenuVisibleRef.current && !isDeadRef.current;
+      if (gp && !isDeadRef.current && !showInventoryRef.current && !showCraftingTableRef.current && !showFurnaceRef.current && !showChestRef.current && !pauseMenuOpen) {
         const cb = ctrlBindingsRef.current;
         // Movement: left stick → WASD
         player.setKey("KeyW", gp.moveY < -0.3);
@@ -2192,8 +2204,8 @@ export default function MinecraftGame() {
       // we still pause when the pause menu is open (so the player doesn't
       // keep moving/falling while the user is navigating the menu).
       const canUpdate = usingController
-        ? (!player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest && !pauseMenuOpen)
-        : (document.pointerLockElement === renderer.domElement && !player.isDead());
+        ? (!isDeadRef.current && !showInventoryRef.current && !showCraftingTableRef.current && !showFurnaceRef.current && !showChestRef.current && !pauseMenuOpen)
+        : (document.pointerLockElement === renderer.domElement && !isDeadRef.current);
       if (canUpdate) {
         if (isDragonMounted) {
           const sensitivity = mouseSensRef.current * 0.001;
@@ -2625,7 +2637,8 @@ export default function MinecraftGame() {
           enderDragonRef.current = new EnderDragon(world, new THREE.Vector3(0, 60, 0), scene);
           setDragonHealthVisible(true);
         }
-        // === Spawn Endermen in the End ===
+        // === Spawn Endermen in the End (clear existing first to avoid cap issues) ===
+        endermanManager.dispose(); // removes all existing endermen from scene and clears array
         for (let i = 0; i < 5; i++) {
           const ea = Math.random() * Math.PI * 2, ed = 10 + Math.random() * 30;
           endermanManager.spawn(Math.cos(ea) * ed + 0.5, 51, Math.sin(ea) * ed + 0.5);

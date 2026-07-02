@@ -385,7 +385,7 @@ export function buildChunkGeometry(
         // Choose target buffer
         let target: FaceData;
         if (block === BlockType.Water) target = transparent;
-        else if (block === BlockType.Glass || block === BlockType.NetherPortal) target = glass;
+        else if (block === BlockType.Glass || block === BlockType.NetherPortal || block === BlockType.EndPortal) target = glass;
         else if (getRenderLayer(block) === "cutout") target = cutout;
         else target = opaque;
 
