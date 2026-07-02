@@ -109,3 +109,81 @@ export const BINDING_LABELS: Record<keyof KeyBindings, string> = {
   dragonMount: "Mount / Dismount Dragon",
   dragonStay: "Dragon Wait / Follow",
 };
+
+// ============================================================================
+// Controller button bindings — same actions as keyboard but for gamepad.
+// Each value is a gamepad button index (0-15) or special string for sticks.
+// ============================================================================
+
+export interface ControllerBindings {
+  jump: number;       // default: A (0)
+  interact: number;   // default: LT (6) — place/interact/eat/use bucket
+  inventory: number;  // default: Y (3)
+  mine: number;       // default: RT (7)
+  descend: number;    // default: RS click (11)
+  sprint: number;     // default: LS click (10)
+  dragonMount: number;// default: B (1)
+  dragonStay: number; // default: Back (8)
+  pause: number;      // default: Start (9)
+}
+
+export const DEFAULT_CONTROLLER_BINDINGS: ControllerBindings = {
+  jump: 0,        // A
+  interact: 6,    // LT
+  inventory: 3,   // Y
+  mine: 7,        // RT
+  descend: 11,    // RS click
+  sprint: 10,     // LS click
+  dragonMount: 1, // B
+  dragonStay: 8,  // Back
+  pause: 9,       // Start
+};
+
+const CTRL_STORAGE_KEY = "worldbind_controller_bindings";
+
+export function loadControllerBindings(): ControllerBindings {
+  try {
+    const saved = localStorage.getItem(CTRL_STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...DEFAULT_CONTROLLER_BINDINGS, ...parsed };
+    }
+  } catch (e) { /* ignore */ }
+  return { ...DEFAULT_CONTROLLER_BINDINGS };
+}
+
+export function saveControllerBindings(bindings: ControllerBindings) {
+  try {
+    localStorage.setItem(CTRL_STORAGE_KEY, JSON.stringify(bindings));
+  } catch (e) { /* ignore */ }
+}
+
+export function resetControllerBindings(): ControllerBindings {
+  try {
+    localStorage.removeItem(CTRL_STORAGE_KEY);
+  } catch (e) { /* ignore */ }
+  return { ...DEFAULT_CONTROLLER_BINDINGS };
+}
+
+/** Convert a gamepad button index to a human-readable label. */
+export function ctrlButtonToLabel(btn: number): string {
+  const labels: Record<number, string> = {
+    0: "A", 1: "B", 2: "X", 3: "Y",
+    4: "LB", 5: "RB", 6: "LT", 7: "RT",
+    8: "Back", 9: "Start", 10: "LS", 11: "RS",
+    12: "D-Up", 13: "D-Down", 14: "D-Left", 15: "D-Right",
+  };
+  return labels[btn] ?? `Btn ${btn}`;
+}
+
+export const CTRL_BINDING_LABELS: Record<keyof ControllerBindings, string> = {
+  jump: "Jump",
+  interact: "Place / Interact / Eat",
+  inventory: "Open Inventory",
+  mine: "Mine / Attack",
+  descend: "Descend (Creative)",
+  sprint: "Sprint",
+  dragonMount: "Mount / Dismount Dragon",
+  dragonStay: "Dragon Wait / Follow",
+  pause: "Pause / Resume",
+};

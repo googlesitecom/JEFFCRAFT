@@ -34,7 +34,7 @@ import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButto
 import { useControllerNav } from "@/lib/minecraft/use-controller-nav";
 import { MCSlider, MCToggle, MCSelect, MCAction, useFocusGrid } from "@/lib/minecraft/mc-controls";
 import { useVirtualMouse, VirtualMouseCursor } from "@/lib/minecraft/virtual-mouse";
-import { KeyBindings, DEFAULT_KEYBINDINGS, loadKeyBindings, saveKeyBindings, resetKeyBindings, keyToLabel, BINDING_LABELS } from "@/lib/minecraft/keybindings";
+import { KeyBindings, DEFAULT_KEYBINDINGS, loadKeyBindings, saveKeyBindings, resetKeyBindings, keyToLabel, BINDING_LABELS, ControllerBindings, DEFAULT_CONTROLLER_BINDINGS, loadControllerBindings, saveControllerBindings, resetControllerBindings, ctrlButtonToLabel, CTRL_BINDING_LABELS } from "@/lib/minecraft/keybindings";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -276,6 +276,12 @@ export default function MinecraftGame() {
   const [rebindingKey, setRebindingKey] = useState<keyof KeyBindings | null>(null);
   // Load saved bindings on mount
   useEffect(() => { setKeybindings(loadKeyBindings()); }, []);
+  // Controller button bindings
+  const [ctrlBindings, setCtrlBindings] = useState<ControllerBindings>(DEFAULT_CONTROLLER_BINDINGS);
+  const ctrlBindingsRef = useRef(ctrlBindings);
+  ctrlBindingsRef.current = ctrlBindings;
+  const [rebindingCtrl, setRebindingCtrl] = useState<keyof ControllerBindings | null>(null);
+  useEffect(() => { setCtrlBindings(loadControllerBindings()); }, []);
   // Pause menu visibility — unified state that works for both keyboard (pointer
   // lock loss) and controller (Start button). The menu shows when this is true.
   const [pauseMenuVisible, setPauseMenuVisible] = useState(false);
@@ -1560,6 +1566,17 @@ export default function MinecraftGame() {
     interface Bullet { position: THREE.Vector3; velocity: THREE.Vector3; life: number; mesh: THREE.Mesh; light: THREE.PointLight; }
     const bullets: Bullet[] = [];
 
+    // Helper: get a boolean button state from a GamepadState by index
+    const getButton = (state: any, idx: number): boolean => {
+      switch (idx) {
+        case 0: return state.a; case 1: return state.b; case 2: return state.x; case 3: return state.y;
+        case 4: return state.lb; case 5: return state.rb; case 6: return state.lt; case 7: return state.rt;
+        case 8: return state.back; case 9: return state.start; case 10: return state.ls; case 11: return state.rs;
+        case 12: return state.dpadUp; case 13: return state.dpadDown; case 14: return state.dpadLeft; case 15: return state.dpadRight;
+        default: return false;
+      }
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       const kb = keybindingsRef.current;
       // Chat
@@ -1677,6 +1694,31 @@ export default function MinecraftGame() {
       }
     };
     window.addEventListener("keydown", handleRebindKey, true); // capture phase = before game handler
+
+    // === Controller rebinding — polls gamepad for the next button press ===
+    let ctrlRebindRaf = 0;
+    const ctrlRebindTick = () => {
+      if (rebindingCtrl) {
+        const pad = readGamepad(0);
+        if (pad) {
+          // Check all 12 standard buttons (0-11). Triggers (6,7) use value>0.4.
+          const buttons = [pad.a, pad.b, pad.x, pad.y, pad.lb, pad.rb, pad.lt, pad.rt, pad.back, pad.start, pad.ls, pad.rs,
+                           pad.dpadUp, pad.dpadDown, pad.dpadLeft, pad.dpadRight];
+          for (let i = 0; i < buttons.length; i++) {
+            if (buttons[i]) {
+              const newBindings = { ...ctrlBindingsRef.current, [rebindingCtrl]: i };
+              setCtrlBindings(newBindings);
+              ctrlBindingsRef.current = newBindings;
+              saveControllerBindings(newBindings);
+              setRebindingCtrl(null);
+              break;
+            }
+          }
+        }
+      }
+      ctrlRebindRaf = requestAnimationFrame(ctrlRebindTick);
+    };
+    ctrlRebindRaf = requestAnimationFrame(ctrlRebindTick);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
@@ -2036,17 +2078,18 @@ export default function MinecraftGame() {
       // is active and RT should NOT mine blocks.
       const pauseMenuOpen = screen === "playing" && pauseMenuVisibleRef.current && !isDead && !showInventory && !showCraftingTable && !showFurnace && !showChest;
       if (gp && !player.isDead() && !showInventory && !showCraftingTable && !showFurnace && !showChest && !pauseMenuOpen) {
+        const cb = ctrlBindingsRef.current;
         // Movement: left stick → WASD
         player.setKey("KeyW", gp.moveY < -0.3);
         player.setKey("KeyS", gp.moveY > 0.3);
         player.setKey("KeyA", gp.moveX < -0.3);
         player.setKey("KeyD", gp.moveX > 0.3);
-        // Jump: A
-        player.setKey("Space", gp.a);
-        // Sprint: LS click
-        player.setKey("ShiftLeft", gp.ls);
-        // Fly down in creative: RS click (right stick click, hold)
-        player.setKey("ControlLeft", gp.rs);
+        // Jump
+        player.setKey("Space", getButton(gp, cb.jump));
+        // Sprint
+        player.setKey("ShiftLeft", getButton(gp, cb.sprint));
+        // Fly down (creative)
+        player.setKey("ControlLeft", getButton(gp, cb.descend));
         // Look: right stick — uses live controller sensitivity
         const lookSensX = controllerSensXRef.current * 200;
         const lookSensY = controllerSensYRef.current * 200;
@@ -2064,25 +2107,21 @@ export default function MinecraftGame() {
           inventoryRef.current.setSelected(idx);
         }
         // D-pad hotbar slots — LB modifier gives access to slots 4-8
-        // Without LB: D-pad Up/Down/Left/Right = slots 0/1/2/3
-        // With LB held: D-pad Up/Down/Left/Right = slots 4/5/6/7, RB = slot 8
         if (!gp.lb) {
           if (wasButtonPressed(gp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
           if (wasButtonPressed(gp, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
           if (wasButtonPressed(gp, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
           if (wasButtonPressed(gp, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
         } else {
-          // LB + D-Pad = slots 4-7
           if (wasButtonPressedLabelled("hotbar", gp, 12)) { setSelectedSlot(4); selectedSlotRef.current = 4; inventoryRef.current.setSelected(4); }
           if (wasButtonPressedLabelled("hotbar", gp, 13)) { setSelectedSlot(5); selectedSlotRef.current = 5; inventoryRef.current.setSelected(5); }
           if (wasButtonPressedLabelled("hotbar", gp, 14)) { setSelectedSlot(6); selectedSlotRef.current = 6; inventoryRef.current.setSelected(6); }
           if (wasButtonPressedLabelled("hotbar", gp, 15)) { setSelectedSlot(7); selectedSlotRef.current = 7; inventoryRef.current.setSelected(7); }
-          // LB + RB = slot 8 (last)
           if (wasButtonPressedLabelled("hotbar", gp, 5)) { setSelectedSlot(8); selectedSlotRef.current = 8; inventoryRef.current.setSelected(8); }
         }
 
-        // Attack/Mine: RT (hold)
-        if (gp.rt) {
+        // Attack/Mine: configurable button (hold)
+        if (getButton(gp, cb.mine)) {
           if (!leftMouseDown) {
             leftMouseDown = true;
             handView.triggerAction("swing");
@@ -2093,20 +2132,18 @@ export default function MinecraftGame() {
           miningBlock = null;
         }
 
-        // Place/Interact: LT (left trigger, edge) — opens crafting table,
-        // furnace, chest; eats food; uses bucket; places blocks.
-        // We use edge detection via the labelled API so it fires once per press.
-        if (wasButtonPressedLabelled("gp-interact", gp, 6)) {
+        // Place/Interact: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-interact", gp, cb.interact)) {
           performRightClickAction();
         }
 
-        // Inventory: Y (edge)
-        if (wasButtonPressed(gp, 3)) {
+        // Inventory: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-inventory", gp, cb.inventory)) {
           setShowInventory(true);
         }
 
-        // Dragon mount/dismount: B (edge)
-        if (wasButtonPressed(gp, 1)) {
+        // Dragon mount/dismount: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-mount", gp, cb.dragonMount)) {
           const drag = dragonManager.getActiveDragon();
           if (drag) {
             if (drag.isMounted) {
@@ -2120,16 +2157,15 @@ export default function MinecraftGame() {
           }
         }
 
-        // Dragon stay/follow: Back (edge)
-        if (wasButtonPressed(gp, 8)) {
+        // Dragon stay/follow: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-stay", gp, cb.dragonStay)) {
           const drag = dragonManager.getActiveDragon();
           if (drag && !drag.isMounted) drag.isStaying = !drag.isStaying;
         }
 
-        // Pause: Start (edge) — toggle pause menu visibility directly
-        if (wasButtonPressed(gp, 9)) {
+        // Pause: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-pause", gp, cb.pause)) {
           if (document.pointerLockElement) document.exitPointerLock();
-          // For controller mode: toggle the pause menu directly
           pauseMenuVisibleRef.current = true;
           setPauseMenuVisible(true);
         }
@@ -2799,6 +2835,7 @@ export default function MinecraftGame() {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("keydown", handleRebindKey, true);
+      cancelAnimationFrame(ctrlRebindRaf);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("resize", handleResize);
@@ -3697,6 +3734,48 @@ export default function MinecraftGame() {
                     <ControlRow keys="Start" desc="Pause / Resume" />
                     <ControlRow keys="A / B" desc="Confirm / Back (in menus)" />
                     <ControlRow keys="RT (hold)" desc="Digital mouse (menus only)" />
+
+                    {/* === Controller Button Rebinding === */}
+                    <div className="mt-4 mb-2 text-yellow-300 font-bold text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
+                      ── Controller Bindings (click to rebind) ──
+                    </div>
+                    <div className="space-y-1">
+                      {(Object.keys(CTRL_BINDING_LABELS) as (keyof ControllerBindings)[]).map((action) => (
+                        <div key={action} className="flex items-center justify-between gap-2">
+                          <span className="text-white text-xs font-mono">{CTRL_BINDING_LABELS[action]}</span>
+                          <button
+                            onClick={() => setRebindingCtrl(action)}
+                            onTouchEnd={(e) => { e.preventDefault(); setRebindingCtrl(action); }}
+                            className="px-3 py-1 text-white text-xs font-mono font-bold min-w-[80px] text-center"
+                            style={{
+                              backgroundColor: rebindingCtrl === action ? "#5a8a3a" : "#3a3a3a",
+                              borderTop: "2px solid " + (rebindingCtrl === action ? "#7aaa5a" : "#555"),
+                              borderLeft: "2px solid " + (rebindingCtrl === action ? "#7aaa5a" : "#555"),
+                              borderBottom: "2px solid " + (rebindingCtrl === action ? "#2a4a1a" : "#222"),
+                              borderRight: "2px solid " + (rebindingCtrl === action ? "#2a4a1a" : "#222"),
+                              imageRendering: "pixelated",
+                              cursor: "pointer",
+                              textShadow: "1px 1px 0 #000",
+                            }}
+                          >
+                            {rebindingCtrl === action ? "Press btn..." : ctrlButtonToLabel(ctrlBindings[action])}
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        onClick={() => { const r = resetControllerBindings(); setCtrlBindings(r); saveControllerBindings(r); }}
+                        onTouchEnd={(e) => { e.preventDefault(); const r = resetControllerBindings(); setCtrlBindings(r); saveControllerBindings(r); }}
+                        className="mt-2 px-3 py-1 text-white text-xs font-mono font-bold"
+                        style={{
+                          backgroundColor: "#8a3a3a",
+                          borderTop: "2px solid #aa5a5a", borderLeft: "2px solid #aa5a5a",
+                          borderBottom: "2px solid #4a1a1a", borderRight: "2px solid #4a1a1a",
+                          imageRendering: "pixelated", cursor: "pointer", textShadow: "1px 1px 0 #000",
+                        }}
+                      >
+                        Reset Controller
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

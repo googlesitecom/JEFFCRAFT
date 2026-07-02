@@ -125,6 +125,40 @@ function newFaceData(): FaceData {
   return { positions: [], normals: [], uvs: [], colors: [], indices: [] };
 }
 
+/**
+ * Helper: push a simple box (6 quads) into a FaceData buffer.
+ * Used for special block geometry (bed, fence, door, etc.).
+ */
+function pushBox(
+  target: FaceData,
+  x: number, y: number, z: number,
+  w: number, h: number, d: number,
+  tile: { u0: number; v0: number; u1: number; v1: number },
+  shade: number = 1.0
+) {
+  const x2 = x + w, y2 = y + h, z2 = z + d;
+  const c = shade;
+  // 6 faces: +X, -X, +Y, -Y, +Z, -Z
+  const faces: Array<{ n: number[]; verts: number[][] }> = [
+    { n: [1, 0, 0], verts: [[x2, y, z], [x2, y2, z], [x2, y2, z2], [x2, y, z2]] },     // +X
+    { n: [-1, 0, 0], verts: [[x, y, z2], [x, y2, z2], [x, y2, z], [x, y, z]] },         // -X
+    { n: [0, 1, 0], verts: [[x, y2, z], [x, y2, z2], [x2, y2, z2], [x2, y2, z]] },     // +Y
+    { n: [0, -1, 0], verts: [[x, y, z2], [x, y, z], [x2, y, z], [x2, y, z2]] },         // -Y
+    { n: [0, 0, 1], verts: [[x, y, z2], [x2, y, z2], [x2, y2, z2], [x, y2, z2]] },     // +Z
+    { n: [0, 0, -1], verts: [[x2, y, z], [x, y, z], [x, y2, z], [x2, y2, z]] },         // -Z
+  ];
+  for (const f of faces) {
+    const si = target.positions.length / 3;
+    for (const v of f.verts) {
+      target.positions.push(v[0], v[1], v[2]);
+      target.normals.push(f.n[0], f.n[1], f.n[2]);
+      target.colors.push(c, c, c);
+    }
+    target.uvs.push(tile.u0, tile.v0, tile.u0, tile.v1, tile.u1, tile.v1, tile.u1, tile.v0);
+    target.indices.push(si, si + 1, si + 2, si, si + 2, si + 3);
+  }
+}
+
 export interface ChunkMeshes {
   opaque: THREE.Mesh | null;
   cutout: THREE.Mesh | null;
@@ -164,6 +198,80 @@ export function buildChunkGeometry(
       for (let y = 0; y < WORLD_HEIGHT; y++) {
         const block = chunk.getLocal(lx, y, lz);
         if (isAir(block)) continue;
+        const def = BLOCKS[block];
+
+        // === Bed: render as a flat bed shape (headboard + mattress) ===
+        // A bed occupies a 1×1×2 area (head + foot). We render it as a low
+        // platform with a headboard at the back.
+        if (block === BlockType.Bed) {
+          const tile = atlas.tiles["bed_top"] || atlas.tiles["planks"];
+          if (tile) {
+            const target = cutout;
+            // Mattress: low box (0.9 wide, 0.3 tall, 0.9 deep) centered in the block
+            const mw = 0.9, mh = 0.3, md = 0.9;
+            const mx = wx + (1 - mw) / 2, my = y, mz = wz + (1 - md) / 2;
+            pushBox(target, mx, my, mz, mw, mh, md, tile, 1.0);
+            // Headboard: thin tall box at the back
+            const hw = 0.9, hh = 0.5, hd = 0.1;
+            const hx = wx + (1 - hw) / 2, hy = y + 0.3, hz = wz;
+            pushBox(target, hx, hy, hz, hw, hh, hd, tile, 0.8);
+            // Pillow: small white box at the head
+            const pw = 0.3, ph = 0.1, pd = 0.3;
+            const px = wx + (1 - pw) / 2, py = y + 0.3, pz = wz + 0.1;
+            const pillowTile = atlas.tiles["bed_top"] || atlas.tiles["planks"];
+            if (pillowTile) pushBox(target, px, py, pz, pw, ph, pd, pillowTile, 1.0);
+          }
+          continue;
+        }
+
+        // === Fence: render as a post + rails connecting to adjacent fences ===
+        if (block === BlockType.Fence) {
+          const tile = atlas.tiles[def.textures.side] || atlas.tiles["planks"];
+          if (tile) {
+            const target = cutout;
+            // Center post: 0.3×1.0×0.3
+            const pw = 0.3, ph = 1.0, pd = 0.3;
+            const px = wx + (1 - pw) / 2, py = y, pz = wz + (1 - pd) / 2;
+            pushBox(target, px, py, pz, pw, ph, pd, tile, 1.0);
+            // Rails: connect to adjacent fences in all 4 directions
+            const railW = 0.3, railH = 0.2, railD = 0.6;
+            const railY1 = y + 0.2, railY2 = y + 0.6;
+            // +X direction
+            if (world.getBlock(wx + 1, y, wz) === BlockType.Fence) {
+              pushBox(target, wx + 0.65, railY1, wz + 0.2, 0.4, railH, railW, tile, 0.9);
+              pushBox(target, wx + 0.65, railY2, wz + 0.2, 0.4, railH, railW, tile, 0.9);
+            }
+            // -X direction
+            if (world.getBlock(wx - 1, y, wz) === BlockType.Fence) {
+              pushBox(target, wx - 0.05, railY1, wz + 0.2, 0.4, railH, railW, tile, 0.9);
+              pushBox(target, wx - 0.05, railY2, wz + 0.2, 0.4, railH, railW, tile, 0.9);
+            }
+            // +Z direction
+            if (world.getBlock(wx, y, wz + 1) === BlockType.Fence) {
+              pushBox(target, wx + 0.2, railY1, wz + 0.65, railW, railH, 0.4, tile, 0.9);
+              pushBox(target, wx + 0.2, railY2, wz + 0.65, railW, railH, 0.4, tile, 0.9);
+            }
+            // -Z direction
+            if (world.getBlock(wx, y, wz - 1) === BlockType.Fence) {
+              pushBox(target, wx + 0.2, railY1, wz - 0.05, railW, railH, 0.4, tile, 0.9);
+              pushBox(target, wx + 0.2, railY2, wz - 0.05, railW, railH, 0.4, tile, 0.9);
+            }
+          }
+          continue;
+        }
+
+        // === Wooden Door: render as a tall thin door panel ===
+        if (block === BlockType.WoodenDoor) {
+          const tile = atlas.tiles[def.textures.side] || atlas.tiles["planks"];
+          if (tile) {
+            const target = cutout;
+            // Door panel: 0.9 wide, 1.0 tall, 0.08 thick
+            const dw = 0.9, dh = 1.0, dd = 0.08;
+            const dx = wx + (1 - dw) / 2, dy = y, dz = wz + (1 - dd) / 2;
+            pushBox(target, dx, dy, dz, dw, dh, dd, tile, 1.0);
+          }
+          continue;
+        }
 
         // Torch: render as small cross, attached to adjacent wall or floor (no floating).
         if (block === BlockType.Torch) {
