@@ -2233,7 +2233,10 @@ export default function MinecraftGame() {
       }
 
       // Update animals (always, even when paused)
-      animalManager.update(dt, player.position.x, player.position.z);
+      // Update animals (not in End dimension — End has no animals)
+      if (world.dimension !== "end") {
+        animalManager.update(dt, player.position.x, player.position.z);
+      }
 
       // Update item drops and pick up nearby ones
       const pickedUp = dropManager.update(dt, player.position.x, player.position.y + 0.8, player.position.z);
@@ -2614,10 +2617,12 @@ export default function MinecraftGame() {
         for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
         chunkMeshes.clear();
         player.position.set(0.5, 52, 0.5);
+        // === Make End always night with rain ===
+        dayTimeRef.current = 0.8; // midnight
+        weatherCommandRef.current = "rain";
         // === Spawn Ender Dragon in the End ===
         if (!enderDragonRef.current) {
-          enderDragonRef.current = new EnderDragon(world, new THREE.Vector3(0, 60, 0));
-          if (enderDragonRef.current.model) scene.add(enderDragonRef.current.model);
+          enderDragonRef.current = new EnderDragon(world, new THREE.Vector3(0, 60, 0), scene);
           setDragonHealthVisible(true);
         }
         // === Spawn Endermen in the End ===
@@ -3282,7 +3287,8 @@ export default function MinecraftGame() {
     <div className="relative w-full h-screen overflow-hidden bg-sky-400 select-none">
       <div ref={containerRef} className="absolute inset-0" />
 
-      {isLocked && !isDead && (
+      {/* Crosshair — shows when pointer locked OR controller mode (no pointer lock needed) */}
+      {((isLocked || inputModeRef.current === "controller") && !isDead && !pauseMenuVisible && !showInventory && !showCraftingTable && !showFurnace && !showChest) && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center z-10">
           <div className="relative w-6 h-6">
             <div className="absolute top-1/2 left-0 right-0 h-0.5 -translate-y-1/2 bg-white mix-blend-difference" />

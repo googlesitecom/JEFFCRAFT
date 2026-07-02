@@ -1,6 +1,7 @@
 // Enderman: tall black mob that spawns in the Nether and drops Ender Pearls.
 // Ender Pearls + Blaze Rods → Ender Eyes (crafted at a crafting table).
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { World, CHUNK_SIZE, WORLD_HEIGHT } from "./world";
 import { BlockType, isSolid } from "./blocks";
 import { ItemType } from "./items";
@@ -34,7 +35,44 @@ export class Enderman {
   constructor(world: World, position: THREE.Vector3) {
     this.world = world;
     this.position = position.clone();
-    this.model = this.buildModel();
+    this.model = this.buildModel(); // fallback procedural model (used while GLB loads or if it fails)
+    this.loadGLBModel();
+  }
+
+  private async loadGLBModel() {
+    try {
+      const loader = new GLTFLoader();
+      const gltf = await loader.loadAsync("/Enderman.glb");
+      const glbModel = gltf.scene;
+      glbModel.scale.set(0.06, 0.06, 0.06);
+      // Replace procedural model with GLB model
+      if (this.model.parent) this.model.parent.remove(this.model);
+      this.model = glbModel;
+      this.model.position.copy(this.position);
+      // Re-detect parts for animation
+      this.model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
+      // Try to find head and arms by name
+      this.head = (this.model.getObjectByName("head") || this.model.children[0] || null) as any;
+      this.armL = (this.model.getObjectByName("armL") || null) as any;
+      this.armR = (this.model.getObjectByName("armR") || null) as any;
+      this.legL = (this.model.getObjectByName("legL") || null) as any;
+      this.legR = (this.model.getObjectByName("legR") || null) as any;
+      // Find eyes (magenta emissive meshes)
+      this.model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.name.toLowerCase().includes("eye")) {
+          if (!this.eyeL) this.eyeL = obj;
+          else if (!this.eyeR) this.eyeR = obj;
+        }
+      });
+    } catch (e) {
+      console.error("Failed to load Enderman.glb, using procedural model:", e);
+      // Procedural model is already set as fallback — do nothing
+    }
   }
 
   private buildModel(): THREE.Group {

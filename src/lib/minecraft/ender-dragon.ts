@@ -32,13 +32,13 @@ export class EnderDragon {
   prevYaw: number = 0;
   bankAngle: number = 0;
 
-  constructor(world: World, position: THREE.Vector3) {
+  constructor(world: World, position: THREE.Vector3, scene?: THREE.Scene) {
     this.world = world;
     this.position = position.clone();
-    this.loadModel();
+    this.loadModel(scene);
   }
 
-  private async loadModel() {
+  private async loadModel(scene?: THREE.Scene) {
     try {
       const gltf = await gltfLoader.loadAsync("/EnderDragon.glb");
       const model = gltf.scene;
@@ -62,6 +62,8 @@ export class EnderDragon {
           obj.receiveShadow = true;
         }
       });
+      // Add to scene if provided (async — model is now ready)
+      if (scene) scene.add(this.model);
     } catch (e) {
       console.error("Failed to load EnderDragon.glb:", e);
       // Fallback: large black dragon with simple wings
@@ -99,6 +101,7 @@ export class EnderDragon {
       group.add(wingR);
       this.wingParts.push(wingR);
       this.model = group;
+      if (scene) scene.add(this.model);
     }
   }
 
