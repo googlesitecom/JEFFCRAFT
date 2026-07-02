@@ -329,6 +329,11 @@ export default function MinecraftGame() {
   const prevXpLevelRef = useRef<number>(0);
   // Ref to dragon manager for HUD access
   const dragonManagerRef = useRef<DragonManager | null>(null);
+  // Ender Dragon boss (End dimension)
+  const enderDragonRef = useRef<EnderDragon | null>(null);
+  const [dragonHealthVisible, setDragonHealthVisible] = useState(false);
+  const [dragonHealth, setDragonHealth] = useState(200);
+  const dragonHealthRef = useRef(200);
   // Force HUD re-render periodically so the dragon mount indicator updates
   const [, setHudTick] = useState(0);
   // Armor state (mirror of player.armor for UI access)
@@ -2285,9 +2290,62 @@ export default function MinecraftGame() {
         }
       }
 
-      // Update endermen (spawn at night, drop ender pearls)
-      if (isSurvival) {
-        endermanManager.update(dt, player.position.x, player.position.y, player.position.z, isNight);
+      // Update endermen (spawn at night in overworld, always in End)
+      if (isSurvival || world.dimension === "end") {
+        const endSpawn = world.dimension === "end"; // always spawn in End
+        endermanManager.update(dt, player.position.x, player.position.y, player.position.z, isNight || endSpawn);
+      }
+
+      // === Update Ender Dragon boss (End dimension) ===
+      if (enderDragonRef.current && world.dimension === "end") {
+        const edDmg = enderDragonRef.current.update(dt, player.position.x, player.position.y, player.position.z);
+        if (edDmg && edDmg.damage) {
+          player.damage(edDmg.damage);
+          sound.hurt();
+        }
+        // Update health bar
+        const newHP = Math.ceil(enderDragonRef.current.health);
+        if (newHP !== dragonHealthRef.current) {
+          dragonHealthRef.current = newHP;
+          setDragonHealth(newHP);
+        }
+        // Check if dragon is dead
+        if (enderDragonRef.current.isDead) {
+          // Drop XP
+          const xp = enderDragonRef.current.getXpDrop();
+          if (xp > 0) dropManager.spawnXpOrb(xp, 0.5, 55, 0.5);
+          enderDragonRef.current.getXpDrop = () => 0; // prevent double drop
+          // Show victory notification
+          setDragonNotification("Ender Dragon defeated! A portal has appeared.");
+          setTimeout(() => setDragonNotification(""), 5000);
+          // Place exit portal at center
+          for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+            world.setBlock(dx, 50, dz, BlockType.EndPortal);
+          }
+          rebuildChunkAt(0, 0);
+          setDragonHealthVisible(false);
+          // Remove dragon
+          enderDragonRef.current.dispose();
+          enderDragonRef.current = null;
+        } else {
+          // Allow attacking dragon with RT (mining) when close enough
+          if (leftMouseDown) {
+            const d = Math.hypot(
+              enderDragonRef.current.position.x - player.position.x,
+              enderDragonRef.current.position.z - player.position.z
+            );
+            if (d < 8) {
+              const selected = inventoryRef.current.getSelected();
+              let dmg = 1;
+              if (selected && selected.id >= 100) {
+                const itemDef = ITEMS[selected.id as ItemType];
+                if (itemDef?.attackDamage) dmg = itemDef.attackDamage;
+              }
+              enderDragonRef.current.takeDamage(dmg);
+              sound.hit();
+            }
+          }
+        }
       }
 
       // Update blazes (spawn in survival, attack player with fire)
@@ -2556,9 +2614,30 @@ export default function MinecraftGame() {
         for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
         chunkMeshes.clear();
         player.position.set(0.5, 52, 0.5);
-        setDragonNotification("Teletransportado al End"); setTimeout(() => setDragonNotification(""), 3000);
+        // === Spawn Ender Dragon in the End ===
+        if (!enderDragonRef.current) {
+          enderDragonRef.current = new EnderDragon(world, new THREE.Vector3(0, 60, 0));
+          if (enderDragonRef.current.model) scene.add(enderDragonRef.current.model);
+          setDragonHealthVisible(true);
+        }
+        // === Spawn Endermen in the End ===
+        for (let i = 0; i < 5; i++) {
+          const ea = Math.random() * Math.PI * 2, ed = 10 + Math.random() * 30;
+          endermanManager.spawn(Math.cos(ea) * ed + 0.5, 51, Math.sin(ea) * ed + 0.5);
+        }
+        setDragonNotification("Teleported to the End"); setTimeout(() => setDragonNotification(""), 3000);
       }
       if (portalTeleportCooldown > 0) portalTeleportCooldown -= dt;
+
+      // === END → OVERWORLD (exit portal after dragon defeat) ===
+      if (world.dimension === "end" && world.getBlock(pBlockX, pBlockY, pBlockZ) === BlockType.EndPortal && portalTeleportCooldown <= 0 && !enderDragonRef.current) {
+        portalTeleportCooldown = 3.0;
+        world.dimension = "overworld"; world.clearAllChunks();
+        for (const [key, meshes] of chunkMeshes) { if (meshes.opaque) { chunkGroup.remove(meshes.opaque); meshes.opaque.geometry.dispose(); } if (meshes.cutout) { chunkGroup.remove(meshes.cutout); meshes.cutout.geometry.dispose(); } if (meshes.transparent) { chunkGroup.remove(meshes.transparent); meshes.transparent.geometry.dispose(); } if (meshes.glass) { chunkGroup.remove(meshes.glass); meshes.glass.geometry.dispose(); } }
+        chunkMeshes.clear();
+        const r = overworldReturnPos.current; if (r) player.position.set(r.x, r.y, r.z);
+        setDragonNotification("Returned to Overworld"); setTimeout(() => setDragonNotification(""), 3000);
+      }
 
       // === END VOID DAMAGE ===
       if (world.dimension === "end" && player.position.y < -64) player.damage(4 * dt);
@@ -3960,6 +4039,28 @@ export default function MinecraftGame() {
 
       {/* Mining cracks are now shown as 3D overlay on the block (like Minecraft) */}
 
+      {/* Ender Dragon boss health bar (top center, End only) */}
+      {dragonHealthVisible && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30" style={{ minWidth: "300px" }}>
+          <div className="text-center text-purple-300 font-mono text-sm font-bold mb-1" style={{ textShadow: "1px 1px 0 #000" }}>
+            Ender Dragon
+          </div>
+          <div className="w-full h-4 relative" style={{
+            backgroundColor: "#1a0a1a",
+            borderTop: "2px solid #3a1a3a",
+            borderLeft: "2px solid #3a1a3a",
+            borderBottom: "2px solid #000",
+            borderRight: "2px solid #000",
+          }}>
+            <div className="h-full transition-all duration-200" style={{
+              width: `${Math.max(0, (dragonHealth / 200) * 100)}%`,
+              background: "linear-gradient(90deg, #4a0a4a 0%, #8a2a8a 50%, #aa4aaa 100%)",
+              boxShadow: "0 0 6px rgba(138,42,138,0.6)",
+            }} />
+          </div>
+        </div>
+      )}
+
       {/* Dragon notification banner (center top) */}
       {dragonNotification && (
         <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-purple-900/90 border-2 border-purple-500 rounded text-white font-mono text-sm text-center shadow-xl" style={{ textShadow: "1px 1px 0 #000" }}>
@@ -3988,6 +4089,7 @@ export default function MinecraftGame() {
       {/* Inventory UI */}
       {showInventory && (
         <InventoryUI
+          key="inventory"
           inventory={inventoryRef.current}
           iconUrls={iconUrls}
           isCraftingTable={false}
@@ -4010,6 +4112,7 @@ export default function MinecraftGame() {
       {/* Crafting Table UI */}
       {showCraftingTable && (
         <InventoryUI
+          key="crafting"
           inventory={inventoryRef.current}
           iconUrls={iconUrls}
           isCraftingTable={true}

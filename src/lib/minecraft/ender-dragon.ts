@@ -255,4 +255,19 @@ export class EnderDragon {
       (this.position.z - z) ** 2
     );
   }
+
+  dispose() {
+    if (this.model) {
+      this.model.traverse((obj) => {
+        if (obj instanceof THREE.Mesh) {
+          obj.geometry?.dispose();
+          (obj.material as THREE.Material)?.dispose();
+        }
+      });
+      // Remove from parent scene
+      if (this.model.parent) this.model.parent.remove(this.model);
+      this.model = null;
+    }
+    if (this.mixer) this.mixer = null;
+  }
 }

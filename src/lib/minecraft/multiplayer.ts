@@ -63,11 +63,27 @@ export class MultiplayerManager {
       this.shareCode = this.genCode();
       this.onStatusChange?.(`Creando mundo... código: ${this.shareCode}`);
 
+      // Timeout — if the broker doesn't respond in 15s, reject
+      const timeout = setTimeout(() => {
+        reject(new Error("No se pudo conectar al servidor. Intenta de nuevo."));
+      }, 15000);
+
       // Use a known prefix to avoid collisions with other apps on the public broker
       const peerId = `jeffcraft-host-${this.shareCode}`;
-      this.peer = new Peer(peerId, { debug: 1 });
+      this.peer = new Peer(peerId, {
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" },
+            { urls: "stun:global.stun.twilio.com:3478" },
+          ],
+        },
+      });
 
       this.peer.on("open", (id: string) => {
+        clearTimeout(timeout);
         this.localId = id;
         this.onStatusChange?.(`Mundo abierto. Comparte el código: ${this.shareCode}`);
         this.onConnected?.();
@@ -124,8 +140,23 @@ export class MultiplayerManager {
       this.shareCode = code.toUpperCase().trim();
       this.onStatusChange?.(`Conectando a ${this.shareCode}...`);
 
+      // Timeout — if the broker doesn't respond in 15s, reject
+      const timeout = setTimeout(() => {
+        reject(new Error("No se pudo conectar. Verifica el código e intenta de nuevo."));
+      }, 15000);
+
       // Client uses a random ID
-      this.peer = new Peer({ debug: 1 });
+      this.peer = new Peer({
+        debug: 1,
+        config: {
+          iceServers: [
+            { urls: "stun:stun.l.google.com:19302" },
+            { urls: "stun:stun1.l.google.com:19302" },
+            { urls: "stun:stun2.l.google.com:19302" },
+            { urls: "stun:global.stun.twilio.com:3478" },
+          ],
+        },
+      });
 
       this.peer.on("open", (id: string) => {
         this.localId = id;
@@ -133,6 +164,7 @@ export class MultiplayerManager {
         const conn = this.peer!.connect(hostId, { reliable: true });
 
         conn.on("open", () => {
+          clearTimeout(timeout);
           this.clientConnection = conn;
           this.onStatusChange?.(`Conectado al mundo ${this.shareCode}`);
           this.onConnected?.();
