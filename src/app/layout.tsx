@@ -16,10 +16,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "WORLDBIND JAVA",
   description: "Worldbind Java - voxel sandbox built with Next.js, Three.js, and TypeScript.",
-  keywords: ["Worldbind", "Java", "voxel", "sandbox", "Three.js", "Next.js", "TypeScript"],
-  authors: [{ name: "JEFFCRAFT" }],
+  keywords: ["Worldbind", "Java", "voxel", "sandbox", "Three.js", "Next.js", "TypeScript", "Axion"],
+  authors: [{ name: "Axion" }],
   icons: {
-    icon: "/logo.svg",
+    icon: "/axion-logo.png",
+    apple: "/axion-logo.png",
   },
   openGraph: {
     title: "WORLDBIND JAVA",
