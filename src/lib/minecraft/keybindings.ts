@@ -120,11 +120,13 @@ export interface ControllerBindings {
   interact: number;   // default: LT (6) — place/interact/eat/use bucket
   inventory: number;  // default: Y (3)
   mine: number;       // default: RT (7)
-  descend: number;    // default: RS click (11)
+  sneak: number;      // default: RS click (11) — agacharse/sigilo
   sprint: number;     // default: LS click (10)
-  dragonMount: number;// default: B (1)
+  dropItem: number;   // default: D-Pad Down (13)
+  dragonMount: number;// default: D-Pad Up (12)
   dragonStay: number; // default: Back (8)
   pause: number;      // default: Start (9)
+  chat: number;       // default: D-Pad Right (15)
 }
 
 export const DEFAULT_CONTROLLER_BINDINGS: ControllerBindings = {
@@ -132,11 +134,13 @@ export const DEFAULT_CONTROLLER_BINDINGS: ControllerBindings = {
   interact: 6,    // LT
   inventory: 3,   // Y
   mine: 7,        // RT
-  descend: 11,    // RS click
+  sneak: 11,      // RS click
   sprint: 10,     // LS click
-  dragonMount: 1, // B
+  dropItem: 13,   // D-Pad Down
+  dragonMount: 12,// D-Pad Up
   dragonStay: 8,  // Back
   pause: 9,       // Start
+  chat: 15,       // D-Pad Right
 };
 
 const CTRL_STORAGE_KEY = "worldbind_controller_bindings";
@@ -177,13 +181,15 @@ export function ctrlButtonToLabel(btn: number): string {
 }
 
 export const CTRL_BINDING_LABELS: Record<keyof ControllerBindings, string> = {
-  jump: "Jump",
-  interact: "Place / Interact / Eat",
-  inventory: "Open Inventory",
+  jump: "Jump / Up",
+  interact: "Use / Place / Interact",
+  inventory: "Inventory",
   mine: "Mine / Attack",
-  descend: "Descend (Creative)",
+  sneak: "Sneak / Descend",
   sprint: "Sprint",
-  dragonMount: "Mount / Dismount Dragon",
+  dropItem: "Drop Item",
+  dragonMount: "Mount Dragon",
   dragonStay: "Dragon Wait / Follow",
   pause: "Pause / Resume",
+  chat: "Chat",
 };

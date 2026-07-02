@@ -293,6 +293,8 @@ export default function MinecraftGame() {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [savedWorlds, setSavedWorlds] = useState<{ name: string; savedAt: number; mode: string }[]>([]);
   const refreshSavedWorlds = useCallback(() => setSavedWorlds(listSavedWorlds()), []);
+  // Refs for multiplayer callbacks to access game-loop functions
+  const rebuildChunkAtRef = useRef<(wx: number, wz: number) => void>(() => {});
 
   // === Virtual digital mouse — activated with the View/Back button (Xbox "two
   // squares" button, index 8). Right stick moves the cursor, A left-clicks, X
@@ -1210,6 +1212,8 @@ export default function MinecraftGame() {
       if (!chunkMeshes.has(key)) return;
       buildChunk(cx, cz);
     }
+    // Expose to multiplayer callbacks via ref
+    rebuildChunkAtRef.current = rebuildChunkAt;
 
     // Try to ignite a nether portal at the given block position.
     function tryIgnitePortal(bx: number, by: number, bz: number): boolean {
@@ -2093,36 +2097,23 @@ export default function MinecraftGame() {
         player.setKey("Space", getButton(gp, cb.jump));
         // Sprint
         player.setKey("ShiftLeft", getButton(gp, cb.sprint));
-        // Fly down (creative)
-        player.setKey("ControlLeft", getButton(gp, cb.descend));
-        // Look: right stick — uses live controller sensitivity
+        // Sneak / Descend (creative)
+        player.setKey("ControlLeft", getButton(gp, cb.sneak));
+        // Look: right stick
         const lookSensX = controllerSensXRef.current * 200;
         const lookSensY = controllerSensYRef.current * 200;
         player.addMouseDelta(gp.lookX * lookSensX, gp.lookY * lookSensY);
 
-        // Hotbar: RB = next, LB = previous (edge detected)
-        if (wasButtonPressed(gp, 5)) {
+        // Hotbar: RB = next, LB = previous (edge detected) — ONLY way to cycle
+        if (wasButtonPressedLabelled("gp-hotbar", gp, 5)) {
           const idx = (selectedSlotRef.current + 1) % 9;
           setSelectedSlot(idx); selectedSlotRef.current = idx;
           inventoryRef.current.setSelected(idx);
         }
-        if (wasButtonPressed(gp, 4)) {
+        if (wasButtonPressedLabelled("gp-hotbar", gp, 4)) {
           const idx = (selectedSlotRef.current - 1 + 9) % 9;
           setSelectedSlot(idx); selectedSlotRef.current = idx;
           inventoryRef.current.setSelected(idx);
-        }
-        // D-pad hotbar slots — LB modifier gives access to slots 4-8
-        if (!gp.lb) {
-          if (wasButtonPressed(gp, 12)) { setSelectedSlot(0); selectedSlotRef.current = 0; inventoryRef.current.setSelected(0); }
-          if (wasButtonPressed(gp, 13)) { setSelectedSlot(1); selectedSlotRef.current = 1; inventoryRef.current.setSelected(1); }
-          if (wasButtonPressed(gp, 14)) { setSelectedSlot(2); selectedSlotRef.current = 2; inventoryRef.current.setSelected(2); }
-          if (wasButtonPressed(gp, 15)) { setSelectedSlot(3); selectedSlotRef.current = 3; inventoryRef.current.setSelected(3); }
-        } else {
-          if (wasButtonPressedLabelled("hotbar", gp, 12)) { setSelectedSlot(4); selectedSlotRef.current = 4; inventoryRef.current.setSelected(4); }
-          if (wasButtonPressedLabelled("hotbar", gp, 13)) { setSelectedSlot(5); selectedSlotRef.current = 5; inventoryRef.current.setSelected(5); }
-          if (wasButtonPressedLabelled("hotbar", gp, 14)) { setSelectedSlot(6); selectedSlotRef.current = 6; inventoryRef.current.setSelected(6); }
-          if (wasButtonPressedLabelled("hotbar", gp, 15)) { setSelectedSlot(7); selectedSlotRef.current = 7; inventoryRef.current.setSelected(7); }
-          if (wasButtonPressedLabelled("hotbar", gp, 5)) { setSelectedSlot(8); selectedSlotRef.current = 8; inventoryRef.current.setSelected(8); }
         }
 
         // Attack/Mine: configurable button (hold)
@@ -2166,6 +2157,21 @@ export default function MinecraftGame() {
         if (wasButtonPressedLabelled("gp-stay", gp, cb.dragonStay)) {
           const drag = dragonManager.getActiveDragon();
           if (drag && !drag.isMounted) drag.isStaying = !drag.isStaying;
+        }
+
+        // Drop item: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-drop", gp, cb.dropItem)) {
+          const selected = inventoryRef.current.getSelected();
+          if (selected) {
+            dropManager.spawnDrop(selected.id, 1, player.position.x, player.position.y + 1, player.position.z);
+            inventoryRef.current.damageSelected(1);
+            setInventoryVersion((v) => v + 1);
+          }
+        }
+
+        // Chat: configurable button (edge)
+        if (wasButtonPressedLabelled("gp-chat", gp, cb.chat)) {
+          setChatOpen(true); chatOpenRef.current = true;
         }
 
         // Pause: configurable button (edge)
@@ -2958,8 +2964,20 @@ export default function MinecraftGame() {
         if (!w) return;
         if (msg.kind === "block-place") {
           w.setBlock(msg.x, msg.y, msg.z, msg.blockType);
+          rebuildChunkAtRef.current(msg.x, msg.z);
+          if (msg.x % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x - 1, msg.z);
+          if (msg.x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x + 1, msg.z);
+          if (msg.z % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x, msg.z - 1);
+          if (msg.z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x, msg.z + 1);
         } else if (msg.kind === "block-break") {
           w.setBlock(msg.x, msg.y, msg.z, BlockType.Air);
+          rebuildChunkAtRef.current(msg.x, msg.z);
+          if (msg.x % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x - 1, msg.z);
+          if (msg.x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x + 1, msg.z);
+          if (msg.z % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x, msg.z - 1);
+          if (msg.z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x, msg.z + 1);
+        } else if (msg.kind === "chat") {
+          setChatMessages(prev => [...prev, { text: msg.text, type: "chat" as const }]);
         }
       };
     }
@@ -3004,10 +3022,26 @@ export default function MinecraftGame() {
           armorStateRef.current = emptyArmor();
         } else if (msg.kind === "block-place") {
           const w = worldRef.current;
-          if (w) w.setBlock(msg.x, msg.y, msg.z, msg.blockType);
+          if (w) {
+            w.setBlock(msg.x, msg.y, msg.z, msg.blockType);
+            rebuildChunkAtRef.current(msg.x, msg.z);
+            if (msg.x % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x - 1, msg.z);
+            if (msg.x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x + 1, msg.z);
+            if (msg.z % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x, msg.z - 1);
+            if (msg.z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x, msg.z + 1);
+          }
         } else if (msg.kind === "block-break") {
           const w = worldRef.current;
-          if (w) w.setBlock(msg.x, msg.y, msg.z, BlockType.Air);
+          if (w) {
+            w.setBlock(msg.x, msg.y, msg.z, BlockType.Air);
+            rebuildChunkAtRef.current(msg.x, msg.z);
+            if (msg.x % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x - 1, msg.z);
+            if (msg.x % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x + 1, msg.z);
+            if (msg.z % CHUNK_SIZE === 0) rebuildChunkAtRef.current(msg.x, msg.z - 1);
+            if (msg.z % CHUNK_SIZE === CHUNK_SIZE - 1) rebuildChunkAtRef.current(msg.x, msg.z + 1);
+          }
+        } else if (msg.kind === "chat") {
+          setChatMessages(prev => [...prev, { text: msg.text, type: "chat" as const }]);
         }
       };
     }
@@ -3725,19 +3759,19 @@ export default function MinecraftGame() {
                       ── Xbox Controller ──
                     </div>
                     <ControlRow keys="Left Stick" desc="Move" />
-                    <ControlRow keys="Right Stick" desc="Look" />
-                    <ControlRow keys="A" desc="Jump" />
-                    <ControlRow keys="B" desc="Mount/dismount dragon" />
-                    <ControlRow keys="LT" desc="Place / Interact / Eat / Use item" />
+                    <ControlRow keys="Right Stick" desc="Look / Turn" />
+                    <ControlRow keys="A" desc="Jump / Up" />
+                    <ControlRow keys="RT" desc="Attack / Destroy (hold)" />
+                    <ControlRow keys="LT" desc="Use / Place / Interact" />
+                    <ControlRow keys="LB / RB" desc="Hotbar prev / next" />
                     <ControlRow keys="Y" desc="Inventory" />
-                    <ControlRow keys="RT" desc="Mine / Attack (hold)" />
-                    <ControlRow keys="RS (click)" desc="Descend (creative)" />
-                    <ControlRow keys="LB / RB" desc="Previous / next slot" />
-                    <ControlRow keys="D-Pad" desc="Slots 1-4 (without LB) / 5-8 (with LB)" />
-                    <ControlRow keys="LB + RB" desc="Slot 9" />
-                    <ControlRow keys="LS (click)" desc="Run" />
+                    <ControlRow keys="Start (≡)" desc="Pause Menu" />
+                    <ControlRow keys="RS (click)" desc="Sneak / Descend" />
+                    <ControlRow keys="LS (click)" desc="Sprint" />
+                    <ControlRow keys="D-Pad Down" desc="Drop Item" />
+                    <ControlRow keys="D-Pad Up" desc="Mount Dragon" />
+                    <ControlRow keys="D-Pad Right" desc="Chat" />
                     <ControlRow keys="Back" desc="Dragon waits/follows" />
-                    <ControlRow keys="Start" desc="Pause / Resume" />
                     <ControlRow keys="A / B" desc="Confirm / Back (in menus)" />
                     <ControlRow keys="RT (hold)" desc="Digital mouse (menus only)" />
 

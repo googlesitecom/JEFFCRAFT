@@ -143,15 +143,44 @@ export class PlayerModel {
     return sprite;
   }
 
-  // Update pose: position, yaw (body rotation), pitch (head tilt), walk animation
+  // Update pose: position (interpolated), yaw (interpolated), pitch, walk animation
+  // Uses lerp for smooth movement — remote players receive 20 Hz updates and we
+  // interpolate between them to avoid visible stutter.
+  private targetPos = new THREE.Vector3();
+  private targetYaw = 0;
+  private hasTarget = false;
+  private prevPos = new THREE.Vector3();
+
   update(position: THREE.Vector3, yaw: number, pitch: number, walkAnimTime: number, isMoving: boolean) {
-    this.group.position.copy(position);
-    this.group.rotation.y = yaw;
+    if (!this.hasTarget) {
+      // First update — snap immediately
+      this.group.position.copy(position);
+      this.group.rotation.y = yaw;
+      this.targetPos.copy(position);
+      this.targetYaw = yaw;
+      this.prevPos.copy(position);
+      this.hasTarget = true;
+    } else {
+      // Store new target
+      this.targetPos.copy(position);
+      this.targetYaw = yaw;
+      // Lerp current position toward target (smooth interpolation)
+      this.group.position.lerp(this.targetPos, 0.25);
+      // Lerp yaw (handle wraparound)
+      let dy = this.targetYaw - this.group.rotation.y;
+      if (dy > Math.PI) dy -= Math.PI * 2;
+      if (dy < -Math.PI) dy += Math.PI * 2;
+      this.group.rotation.y += dy * 0.25;
+    }
     // Head pitch (look up/down)
     this.head.rotation.x = Math.max(-0.6, Math.min(0.6, pitch));
 
-    // Walk animation: swing arms and legs opposite
-    if (isMoving) {
+    // Walk animation: detect movement by comparing position delta
+    const moveDelta = this.targetPos.distanceTo(this.prevPos);
+    this.prevPos.copy(this.targetPos);
+    const actuallyMoving = isMoving && moveDelta > 0.001;
+
+    if (actuallyMoving) {
       const swing = Math.sin(walkAnimTime) * 0.5;
       this.leftArm.rotation.x = swing;
       this.rightArm.rotation.x = -swing;
