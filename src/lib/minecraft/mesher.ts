@@ -174,7 +174,8 @@ export function buildChunkGeometry(
   opaqueMaterial: THREE.Material,
   cutoutMaterial: THREE.Material,
   transparentMaterial: THREE.Material,
-  glassMaterial: THREE.Material
+  glassMaterial: THREE.Material,
+  openDoors?: Set<string>
 ): ChunkMeshes {
   const chunk = world.getChunk(cx, cz);
   if (!chunk) return { opaque: null, cutout: null, transparent: null, glass: null };
@@ -200,26 +201,35 @@ export function buildChunkGeometry(
         if (isAir(block)) continue;
         const def = BLOCKS[block];
 
-        // === Bed: render as a flat bed shape (headboard + mattress) ===
+        // === Bed: render as a flat bed shape with colored blanket ===
         // A bed occupies a 1×1×2 area (head + foot). We render it as a low
-        // platform with a headboard at the back.
+        // platform with a headboard, mattress, pillow, and colored blanket.
         if (block === BlockType.Bed) {
-          const tile = atlas.tiles["bed_top"] || atlas.tiles["planks"];
-          if (tile) {
+          const bedTile = atlas.tiles["bed_top"] || atlas.tiles["planks"];
+          const woolTile = atlas.tiles["brick"] || atlas.tiles["planks"]; // red-ish blanket
+          const whiteTile = atlas.tiles["bed_top"] || atlas.tiles["planks"]; // pillow
+          if (bedTile) {
             const target = cutout;
-            // Mattress: low box (0.9 wide, 0.3 tall, 0.9 deep) centered in the block
-            const mw = 0.9, mh = 0.3, md = 0.9;
-            const mx = wx + (1 - mw) / 2, my = y, mz = wz + (1 - md) / 2;
-            pushBox(target, mx, my, mz, mw, mh, md, tile, 1.0);
-            // Headboard: thin tall box at the back
-            const hw = 0.9, hh = 0.5, hd = 0.1;
-            const hx = wx + (1 - hw) / 2, hy = y + 0.3, hz = wz;
-            pushBox(target, hx, hy, hz, hw, hh, hd, tile, 0.8);
-            // Pillow: small white box at the head
-            const pw = 0.3, ph = 0.1, pd = 0.3;
-            const px = wx + (1 - pw) / 2, py = y + 0.3, pz = wz + 0.1;
-            const pillowTile = atlas.tiles["bed_top"] || atlas.tiles["planks"];
-            if (pillowTile) pushBox(target, px, py, pz, pw, ph, pd, pillowTile, 1.0);
+            // Bed frame (wood): low box
+            const fw = 0.9, fh = 0.15, fd = 0.9;
+            const fx = wx + (1 - fw) / 2, fy = y, fz = wz + (1 - fd) / 2;
+            pushBox(target, fx, fy, fz, fw, fh, fd, bedTile, 0.7);
+            // Mattress (white): on top of frame
+            const mw = 0.85, mh = 0.12, md = 0.85;
+            const mx = wx + (1 - mw) / 2, my = y + 0.15, mz = wz + (1 - md) / 2;
+            pushBox(target, mx, my, mz, mw, mh, md, whiteTile, 0.9);
+            // Blanket (red): covers most of the mattress
+            const bw = 0.85, bh = 0.08, bd = 0.6;
+            const bx = wx + (1 - bw) / 2, by = y + 0.27, bz = wz + 0.15;
+            pushBox(target, bx, by, bz, bw, bh, bd, woolTile, 1.0);
+            // Pillow (white): at the head
+            const pw = 0.3, ph = 0.08, pd = 0.3;
+            const px = wx + (1 - pw) / 2, py = y + 0.27, pz = wz + 0.05;
+            pushBox(target, px, py, pz, pw, ph, pd, whiteTile, 1.0);
+            // Headboard: tall thin box at the back
+            const hw = 0.9, hh = 0.5, hd = 0.08;
+            const hx = wx + (1 - hw) / 2, hy = y, hz = wz;
+            pushBox(target, hx, hy, hz, hw, hh, hd, bedTile, 0.8);
           }
           continue;
         }
@@ -260,15 +270,25 @@ export function buildChunkGeometry(
           continue;
         }
 
-        // === Wooden Door: render as a tall thin door panel ===
+        // === Wooden Door: render as a tall thin door panel, rotated if open ===
         if (block === BlockType.WoodenDoor) {
           const tile = atlas.tiles[def.textures.side] || atlas.tiles["planks"];
           if (tile) {
             const target = cutout;
             // Door panel: 0.9 wide, 1.0 tall, 0.08 thick
             const dw = 0.9, dh = 1.0, dd = 0.08;
-            const dx = wx + (1 - dw) / 2, dy = y, dz = wz + (1 - dd) / 2;
-            pushBox(target, dx, dy, dz, dw, dh, dd, tile, 1.0);
+            const isOpen = openDoors?.has(`${wx},${y},${wz}`);
+            if (isOpen) {
+              // Door rotated 90° around the hinge (left edge at wx+0.05)
+              // We simulate rotation by placing the panel along Z instead of X
+              const dx = wx + 0.05, dy = y, dz = wz + (1 - dh) / 2;
+              // Panel extends along +Z from the hinge
+              pushBox(target, dx, dy, dz, dd, dh, dw, tile, 1.0);
+            } else {
+              // Door closed — panel along X axis
+              const dx = wx + (1 - dw) / 2, dy = y, dz = wz + (1 - dd) / 2;
+              pushBox(target, dx, dy, dz, dw, dh, dd, tile, 1.0);
+            }
           }
           continue;
         }

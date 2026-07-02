@@ -281,6 +281,8 @@ export default function MinecraftGame() {
   const ctrlBindingsRef = useRef(ctrlBindings);
   ctrlBindingsRef.current = ctrlBindings;
   const [rebindingCtrl, setRebindingCtrl] = useState<keyof ControllerBindings | null>(null);
+  const rebindingCtrlRef = useRef<keyof ControllerBindings | null>(null);
+  useEffect(() => { rebindingCtrlRef.current = rebindingCtrl; }, [rebindingCtrl]);
   useEffect(() => { setCtrlBindings(loadControllerBindings()); }, []);
   // Pause menu visibility — unified state that works for both keyboard (pointer
   // lock loss) and controller (Start button). The menu shows when this is true.
@@ -1090,7 +1092,7 @@ export default function MinecraftGame() {
         chunkGroup.remove(old.glass);
         old.glass.geometry.dispose();
       }
-      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, cutoutMaterial, transparentMaterial, glassMaterial);
+      const meshes = buildChunkGeometry(world, cx, cz, atlas, opaqueMaterial, cutoutMaterial, transparentMaterial, glassMaterial, openDoorsRef.current);
       // If the water shader is currently active, swap the material on this fresh chunk too
       if (waterShaderActive && waterShaderMat && meshes.transparent) {
         meshes.transparent.material = waterShaderMat;
@@ -1698,19 +1700,21 @@ export default function MinecraftGame() {
     // === Controller rebinding — polls gamepad for the next button press ===
     let ctrlRebindRaf = 0;
     const ctrlRebindTick = () => {
-      if (rebindingCtrl) {
+      const rb = rebindingCtrlRef.current;
+      if (rb) {
         const pad = readGamepad(0);
         if (pad) {
-          // Check all 12 standard buttons (0-11). Triggers (6,7) use value>0.4.
+          // Check all 16 buttons. Triggers (6,7) use value>0.4.
           const buttons = [pad.a, pad.b, pad.x, pad.y, pad.lb, pad.rb, pad.lt, pad.rt, pad.back, pad.start, pad.ls, pad.rs,
                            pad.dpadUp, pad.dpadDown, pad.dpadLeft, pad.dpadRight];
           for (let i = 0; i < buttons.length; i++) {
             if (buttons[i]) {
-              const newBindings = { ...ctrlBindingsRef.current, [rebindingCtrl]: i };
+              const newBindings = { ...ctrlBindingsRef.current, [rb]: i };
               setCtrlBindings(newBindings);
               ctrlBindingsRef.current = newBindings;
               saveControllerBindings(newBindings);
               setRebindingCtrl(null);
+              rebindingCtrlRef.current = null;
               break;
             }
           }
@@ -1843,6 +1847,7 @@ export default function MinecraftGame() {
           const key = `${hit.block.x},${hit.block.y},${hit.block.z}`;
           if (openDoorsRef.current.has(key)) openDoorsRef.current.delete(key); else openDoorsRef.current.add(key);
           sound.blockSound(BlockType.Wood, "place");
+          rebuildChunkAt(hit.block.x, hit.block.z);
           return;
         }
         // Sign: open editing UI
@@ -3630,20 +3635,21 @@ export default function MinecraftGame() {
               >← Back</MCMenuButton>
             </div>
           ) : (
-            /* ===== CONTROLS PANEL (existing) ===== */
+            /* ===== CONTROLS PANEL (scrollable) ===== */
             <div className="max-w-md w-full mx-4" style={{ imageRendering: "pixelated" }}>
               <h2 className="text-center text-2xl font-black mb-4 text-white" style={{
                 fontFamily: "monospace",
                 textShadow: "2px 2px 0 #0a0a1a, 4px 4px 0 rgba(0,0,0,0.5)",
                 letterSpacing: "0.05em",
               }}>Controls</h2>
-              <div className="text-left text-sm space-y-1.5 p-4 mb-4" style={{
+              <div className="text-left text-sm space-y-1.5 p-4 mb-4 overflow-y-auto" style={{
                 backgroundColor: "rgba(0,0,0,0.7)",
                 borderTop: "3px solid rgba(110,110,120,0.9)",
                 borderLeft: "3px solid rgba(110,110,120,0.9)",
                 borderBottom: "3px solid rgba(0,0,0,0.95)",
                 borderRight: "3px solid rgba(0,0,0,0.95)",
                 boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.1)",
+                maxHeight: "70vh",
               }}>
                 <ControlRow keys="WASD" desc="Move" />
                 <ControlRow keys="Mouse" desc="Look around" />
