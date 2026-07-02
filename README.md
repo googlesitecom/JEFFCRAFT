@@ -134,7 +134,7 @@ src/
 
 ## 📝 Licencia
 
-MIT License — libre de usar y modificar.
+2026- Axion Studios
 
 ## 🙏 Agradecimientos
 
