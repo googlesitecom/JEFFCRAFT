@@ -34,6 +34,7 @@ import { InputMode, readGamepad, isGamepadConnected, resetGamepadState, wasButto
 import { useControllerNav } from "@/lib/minecraft/use-controller-nav";
 import { MCSlider, MCToggle, MCSelect, MCAction, useFocusGrid } from "@/lib/minecraft/mc-controls";
 import { useVirtualMouse, VirtualMouseCursor } from "@/lib/minecraft/virtual-mouse";
+import { KeyBindings, DEFAULT_KEYBINDINGS, loadKeyBindings, saveKeyBindings, resetKeyBindings, keyToLabel, BINDING_LABELS } from "@/lib/minecraft/keybindings";
 
 const RENDER_RADIUS = 5;
 const MAX_CHUNK_BUILDS_PER_FRAME = 2;
@@ -268,6 +269,13 @@ export default function MinecraftGame() {
   const [mpConnected, setMpConnected] = useState(false);
   const [mpError, setMpError] = useState<string>("");
   const [showHostPanel, setShowHostPanel] = useState(false);
+  // Customizable keybindings
+  const [keybindings, setKeybindings] = useState<KeyBindings>(DEFAULT_KEYBINDINGS);
+  const keybindingsRef = useRef(keybindings);
+  keybindingsRef.current = keybindings;
+  const [rebindingKey, setRebindingKey] = useState<keyof KeyBindings | null>(null);
+  // Load saved bindings on mount
+  useEffect(() => { setKeybindings(loadKeyBindings()); }, []);
   // Pause menu visibility — unified state that works for both keyboard (pointer
   // lock loss) and controller (Start button). The menu shows when this is true.
   const [pauseMenuVisible, setPauseMenuVisible] = useState(false);
@@ -1553,12 +1561,13 @@ export default function MinecraftGame() {
     const bullets: Bullet[] = [];
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Chat (T key)
-      if (e.code === "KeyT" && document.pointerLockElement) {
+      const kb = keybindingsRef.current;
+      // Chat
+      if (e.code === kb.chat && document.pointerLockElement) {
         document.exitPointerLock(); setChatOpen(true); chatOpenRef.current = true; return;
       }
       if (chatOpenRef.current) return;
-      if (e.code === "KeyE" && document.pointerLockElement) {
+      if (e.code === kb.inventory && document.pointerLockElement) {
         document.exitPointerLock(); setShowInventory(true); return;
       }
       if (!document.pointerLockElement) return;
@@ -1574,19 +1583,19 @@ export default function MinecraftGame() {
         }
       }
 
-      if (e.code === "KeyF") player.toggleFly();
-      // M: same as right-click (eat / open crafting table / open furnace / place block)
-      if (e.code === "KeyM") {
+      if (e.code === kb.toggleFly) player.toggleFly();
+      // Use/Place/Interact (same as right-click)
+      if (e.code === kb.craft) {
         performRightClickAction();
       }
-      // B: toggle dragon stay/follow mode (only when not mounted)
-      if (e.code === "KeyB") {
+      // Dragon stay/follow
+      if (e.code === kb.dragonStay) {
         const dragon = dragonManager.getActiveDragon();
         if (!dragon) {
           setDragonNotification("You don't have a dragon. Reach XP level 10 to receive an egg.");
           setTimeout(() => setDragonNotification(""), 3500);
         } else if (dragon.isMounted) {
-          setDragonNotification("Cannot use B while mounted");
+          setDragonNotification("Cannot use this while mounted");
           setTimeout(() => setDragonNotification(""), 2000);
         } else {
           dragon.isStaying = !dragon.isStaying;
@@ -1596,24 +1605,21 @@ export default function MinecraftGame() {
           setTimeout(() => setDragonNotification(""), 1800);
         }
       }
-      if (e.code === "KeyN") {
-        // N: mount/dismount dragon pet (if one exists)
+      if (e.code === kb.dragonMount) {
+        // Mount/dismount dragon pet (if one exists)
         const dragon = dragonManager.getActiveDragon();
         if (!dragon) {
           setDragonNotification("You don't have a dragon. Reach XP level 10 to receive an egg.");
           setTimeout(() => setDragonNotification(""), 3500);
           return;
         }
-        // If currently mounted, dismount; otherwise mount
         if (dragon.isMounted) {
-          const nowMounted = dragon.toggleMount(player.position);
-          // dismount: drop player next to dragon
+          dragon.toggleMount(player.position);
           player.position.set(dragon.position.x + 1, dragon.position.y, dragon.position.z);
           player.velocity.set(0, 0, 0);
           setDragonNotification("You dismounted");
           setTimeout(() => setDragonNotification(""), 1500);
         } else {
-          // Only mount if dragon is close enough
           const dx = dragon.position.x - player.position.x;
           const dy = dragon.position.y - player.position.y;
           const dz = dragon.position.z - player.position.z;
@@ -1624,11 +1630,11 @@ export default function MinecraftGame() {
             return;
           }
           dragon.toggleMount(player.position);
-          setDragonNotification("Mounted! WASD to fly, Space up, Ctrl/Shift down");
+          setDragonNotification("Mounted! WASD to fly, Space up, RS/Ctrl/Shift down");
           setTimeout(() => setDragonNotification(""), 3500);
         }
       }
-      if (e.code === "Escape") {
+      if (e.code === kb.pause) {
         // If config, controls, or host panel is open, close it instead of exiting pointer lock
         if (showConfigRef.current || showControlsRef.current || showGraphicsRef.current) {
           setShowConfig(false);
@@ -1657,6 +1663,20 @@ export default function MinecraftGame() {
     const handleKeyUp = (e: KeyboardEvent) => {
       player.setKey(e.code, false);
     };
+
+    // === Rebinding key capture — listens at window level, before the game handler ===
+    const handleRebindKey = (e: KeyboardEvent) => {
+      if (rebindingKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const newBindings = { ...keybindingsRef.current, [rebindingKey]: e.code };
+        setKeybindings(newBindings);
+        keybindingsRef.current = newBindings;
+        saveKeyBindings(newBindings);
+        setRebindingKey(null);
+      }
+    };
+    window.addEventListener("keydown", handleRebindKey, true); // capture phase = before game handler
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
@@ -2025,8 +2045,8 @@ export default function MinecraftGame() {
         player.setKey("Space", gp.a);
         // Sprint: LS click
         player.setKey("ShiftLeft", gp.ls);
-        // Fly down in creative: LT (left trigger, hold)
-        player.setKey("ControlLeft", gp.lt);
+        // Fly down in creative: RS click (right stick click, hold)
+        player.setKey("ControlLeft", gp.rs);
         // Look: right stick — uses live controller sensitivity
         const lookSensX = controllerSensXRef.current * 200;
         const lookSensY = controllerSensYRef.current * 200;
@@ -2073,10 +2093,10 @@ export default function MinecraftGame() {
           miningBlock = null;
         }
 
-        // Place/Interact: A (edge) — also acts as jump when held, but edge = place
-        // Wait — A is jump (held). Let's use X for place instead.
-        // X = Place/Interact (edge)
-        if (wasButtonPressed(gp, 2)) {
+        // Place/Interact: LT (left trigger, edge) — opens crafting table,
+        // furnace, chest; eats food; uses bucket; places blocks.
+        // We use edge detection via the labelled API so it fires once per press.
+        if (wasButtonPressedLabelled("gp-interact", gp, 6)) {
           performRightClickAction();
         }
 
@@ -2778,6 +2798,7 @@ export default function MinecraftGame() {
       cancelAnimationFrame(rafId);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("keydown", handleRebindKey, true);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
       window.removeEventListener("resize", handleResize);
@@ -3589,18 +3610,71 @@ export default function MinecraftGame() {
               }}>
                 <ControlRow keys="WASD" desc="Move" />
                 <ControlRow keys="Mouse" desc="Look around" />
-                <ControlRow keys="Space" desc="Jump / Swim up" />
-                <ControlRow keys="Shift" desc="Run" />
+                <ControlRow keys={keyToLabel(keybindings.jump)} desc="Jump / Swim up" />
+                <ControlRow keys={keyToLabel(keybindings.sprint)} desc="Run" />
                 <ControlRow keys="Left click" desc={mode === "survival" ? "Mine block / Attack" : "Break block"} />
-                <ControlRow keys="Right click / M" desc="Eat / Open table-furnace / Place" />
+                <ControlRow keys={`${keyToLabel(keybindings.craft)} / Right click`} desc="Eat / Open table-furnace / Place" />
                 <ControlRow keys="1-9 / Wheel" desc="Select slot" />
-                {mode === "survival" && <ControlRow keys="E" desc="Open inventory" />}
-                {mode === "survival" && <ControlRow keys="Right click on table" desc="Craft" />}
-                {mode === "survival" && <ControlRow keys="Right click on furnace" desc="Cook food" />}
-                {mode === "survival" && <ControlRow keys="N" desc="Mount/dismount dragon 🐉" />}
-                {mode === "survival" && <ControlRow keys="B" desc="Dragon waits/follows you" />}
-                {mode === "creative" && <ControlRow keys="F" desc="Fly" />}
-                <ControlRow keys="Esc" desc="Pause" />
+                {mode === "survival" && <ControlRow keys={keyToLabel(keybindings.inventory)} desc="Open inventory" />}
+                {mode === "survival" && <ControlRow keys={`${keyToLabel(keybindings.craft)} on table`} desc="Craft" />}
+                {mode === "survival" && <ControlRow keys={`${keyToLabel(keybindings.craft)} on furnace`} desc="Cook food" />}
+                {mode === "survival" && <ControlRow keys={keyToLabel(keybindings.dragonMount)} desc="Mount/dismount dragon 🐉" />}
+                {mode === "survival" && <ControlRow keys={keyToLabel(keybindings.dragonStay)} desc="Dragon waits/follows you" />}
+                {mode === "creative" && <ControlRow keys={keyToLabel(keybindings.toggleFly)} desc="Fly" />}
+                <ControlRow keys={keyToLabel(keybindings.pause)} desc="Pause" />
+                <ControlRow keys={keyToLabel(keybindings.chat)} desc="Chat" />
+
+                {/* === Customizable Keybindings === */}
+                <div className="mt-4 mb-2 text-yellow-300 font-bold text-xs" style={{ textShadow: "1px 1px 0 #000" }}>
+                  ── Keybindings (click to rebind) ──
+                </div>
+                <div className="space-y-1">
+                  {(Object.keys(BINDING_LABELS) as (keyof KeyBindings)[]).map((action) => (
+                    <div key={action} className="flex items-center justify-between gap-2">
+                      <span className="text-white text-xs font-mono">{BINDING_LABELS[action]}</span>
+                      <button
+                        onClick={() => {
+                          setRebindingKey(action);
+                        }}
+                        onTouchEnd={(e) => { e.preventDefault(); setRebindingKey(action); }}
+                        className="px-3 py-1 text-white text-xs font-mono font-bold min-w-[80px] text-center"
+                        style={{
+                          backgroundColor: rebindingKey === action ? "#5a8a3a" : "#3a3a3a",
+                          borderTop: "2px solid " + (rebindingKey === action ? "#7aaa5a" : "#555"),
+                          borderLeft: "2px solid " + (rebindingKey === action ? "#7aaa5a" : "#555"),
+                          borderBottom: "2px solid " + (rebindingKey === action ? "#2a4a1a" : "#222"),
+                          borderRight: "2px solid " + (rebindingKey === action ? "#2a4a1a" : "#222"),
+                          imageRendering: "pixelated",
+                          cursor: "pointer",
+                          textShadow: "1px 1px 0 #000",
+                        }}
+                      >
+                        {rebindingKey === action ? "Press a key..." : keyToLabel(keybindings[action])}
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const reset = resetKeyBindings();
+                      setKeybindings(reset);
+                      saveKeyBindings(reset);
+                    }}
+                    onTouchEnd={(e) => { e.preventDefault(); const reset = resetKeyBindings(); setKeybindings(reset); saveKeyBindings(reset); }}
+                    className="mt-2 px-3 py-1 text-white text-xs font-mono font-bold"
+                    style={{
+                      backgroundColor: "#8a3a3a",
+                      borderTop: "2px solid #aa5a5a",
+                      borderLeft: "2px solid #aa5a5a",
+                      borderBottom: "2px solid #4a1a1a",
+                      borderRight: "2px solid #4a1a1a",
+                      imageRendering: "pixelated",
+                      cursor: "pointer",
+                      textShadow: "1px 1px 0 #000",
+                    }}
+                  >
+                    Reset to Defaults
+                  </button>
+                </div>
                 {/* Xbox controller mapping */}
                 {inputMode === "controller" && (
                   <>
@@ -3611,10 +3685,10 @@ export default function MinecraftGame() {
                     <ControlRow keys="Right Stick" desc="Look" />
                     <ControlRow keys="A" desc="Jump" />
                     <ControlRow keys="B" desc="Mount/dismount dragon" />
-                    <ControlRow keys="X" desc="Place / Interact" />
+                    <ControlRow keys="LT" desc="Place / Interact / Eat / Use item" />
                     <ControlRow keys="Y" desc="Inventory" />
                     <ControlRow keys="RT" desc="Mine / Attack (hold)" />
-                    <ControlRow keys="LT" desc="Descend (creative)" />
+                    <ControlRow keys="RS (click)" desc="Descend (creative)" />
                     <ControlRow keys="LB / RB" desc="Previous / next slot" />
                     <ControlRow keys="D-Pad" desc="Slots 1-4 (without LB) / 5-8 (with LB)" />
                     <ControlRow keys="LB + RB" desc="Slot 9" />
